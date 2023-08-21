@@ -32,7 +32,7 @@ namespace MHServerEmu.Networking
 
         private static readonly Logger Logger = LogManager.CreateLogger();
 
-        private const string ServerHost = "localhost";
+        private const string ServerHost = "192.168.1.9";
 
         private FrontendService _frontendService;
         private HttpListener _listener;
