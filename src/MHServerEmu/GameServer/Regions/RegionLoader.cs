@@ -7,7 +7,7 @@ using MHServerEmu.GameServer.Entities;
 using MHServerEmu.GameServer.Entities.Avatars;
 using MHServerEmu.GameServer.Powers;
 using MHServerEmu.GameServer.GameData;
-using MHServerEmu.GameServer.Common;
+using MHServerEmu.GameServer.Properties;
 
 namespace MHServerEmu.GameServer.Regions
 {
@@ -163,7 +163,7 @@ namespace MHServerEmu.GameServer.Regions
                             {
                                 try
                                 {
-                                    property.Value = GameDatabase.PrototypeEnumManager.GetEnumValue(ConfigManager.PlayerData.CostumeOverride, PrototypeEnumType.Property);
+                                    property.Value.Set(ConfigManager.PlayerData.CostumeOverride);
                                 }
                                 catch
                                 {

@@ -1,5 +1,6 @@
 ﻿using MHServerEmu.Common;
 using MHServerEmu.GameServer.GameData.Gpak;
+using MHServerEmu.GameServer.Properties;
 
 namespace MHServerEmu.GameServer.GameData
 {
@@ -14,7 +15,7 @@ namespace MHServerEmu.GameServer.GameData
         public static CalligraphyStorage Calligraphy { get; private set; }
         public static ResourceStorage Resource { get; private set; }
 
-        public static PropertyInfo[] PropertyInfos { get; private set; }
+        public static PropertyInfo[] PropertyInfoTable { get; private set; }
 
         public static PrototypeEnumManager PrototypeEnumManager { get; private set; }
 
@@ -28,7 +29,7 @@ namespace MHServerEmu.GameServer.GameData
 
             // Load other data
             _prototypeHashMap = LoadHashMap($"{AssetDirectory}\\PrototypeHashMap.tsv");
-            PropertyInfos = LoadPropertyInfos($"{AssetDirectory}\\PropertyInfoTable.tsv");
+            PropertyInfoTable = LoadPropertyInfoTable($"{AssetDirectory}\\PropertyInfoTable.tsv");
             PrototypeEnumManager = new($"{AssetDirectory}\\PrototypeEnumTables");
 
             // Verify and finish game database initialization
@@ -100,7 +101,7 @@ namespace MHServerEmu.GameServer.GameData
             return hashMap;
         }
 
-        private static PropertyInfo[] LoadPropertyInfos(string path)
+        private static PropertyInfo[] LoadPropertyInfoTable(string path)
         {
             List<PropertyInfo> propertyInfoList = new();
 
@@ -135,7 +136,7 @@ namespace MHServerEmu.GameServer.GameData
             return _prototypeHashMap.Count > 0
                 && Calligraphy.Verify()
                 && Resource.Verify()
-                && PropertyInfos.Length > 0
+                && PropertyInfoTable.Length > 0
                 && PrototypeEnumManager.Verify();
         }
     }
