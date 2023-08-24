@@ -5,6 +5,7 @@ using MHServerEmu.Common.Config;
 using MHServerEmu.GameServer;
 using MHServerEmu.GameServer.Entities;
 using MHServerEmu.GameServer.Frontend.Accounts;
+using MHServerEmu.GameServer.Games;
 using MHServerEmu.GameServer.Regions;
 
 namespace MHServerEmu.Networking
@@ -21,8 +22,10 @@ namespace MHServerEmu.Networking
         public bool FinishedPlayerMgrServerFrontendHandshake { get; set; } = false;
         public bool FinishedGroupingManagerFrontendHandshake { get; set; } = false;
         public bool IsLoading { get; set; } = false;
+        public ulong GameId { get; set; }
 
         // TODO: move player data to account
+        public Game CurrentGame { get => _gameServerManager.GameManager.GetGameById(GameId); }
         public Account Account { get; set; }
         public RegionPrototype CurrentRegion { get; set; } = ConfigManager.PlayerData.StartingRegion;
         public HardcodedAvatarEntity CurrentAvatar { get; set; } = ConfigManager.PlayerData.StartingAvatar;

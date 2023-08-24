@@ -1,7 +1,7 @@
 ﻿using MHServerEmu.Common;
 using MHServerEmu.Networking;
 using MHServerEmu.GameServer.Frontend;
-using MHServerEmu.GameServer.GameInstances;
+using MHServerEmu.GameServer.Games;
 
 namespace MHServerEmu.GameServer
 {
@@ -9,17 +9,21 @@ namespace MHServerEmu.GameServer
     {
         private static readonly Logger Logger = LogManager.CreateLogger();
 
+        public GameManager GameManager { get; }
+
         public FrontendService FrontendService { get; }
         public GroupingManagerService GroupingManagerService { get; }
-        public GameInstanceService GameInstanceService { get; }
+        public PlayerManagerService PlayerManagerService { get; }
 
         public long StartTime { get; }      // Used for calculating game time 
 
         public GameServerManager()
         {
+            GameManager = new();
+
             FrontendService = new(this);
             GroupingManagerService = new(this);
-            GameInstanceService = new(this);
+            PlayerManagerService = new(this);
 
             StartTime = GetDateTime();
         }
@@ -30,28 +34,17 @@ namespace MHServerEmu.GameServer
             {
                 case 1:
                     if (client.FinishedPlayerMgrServerFrontendHandshake)
-                    {
-                        //Logger.Trace($"Routing {messages.Length} message(s) on muxId {muxId} to GameInstanceService");
-                        GameInstanceService.Handle(client, muxId, message);
-                    }
+                        PlayerManagerService.Handle(client, muxId, message);
                     else
-                    {
-                        //Logger.Trace($"Routing {messages.Length} message(s) on muxId {muxId} to FrontendService");
                         FrontendService.Handle(client, muxId, message);
-                    }
 
                     break;
 
                 case 2:
                     if (client.FinishedGroupingManagerFrontendHandshake)
-                    {
                         GroupingManagerService.Handle(client, muxId, message);
-                    }
                     else
-                    {
-                        //Logger.Trace($"Routing {messages.Length} message(s) on muxId {muxId} to FrontendService");
                         FrontendService.Handle(client, muxId, message);
-                    }
 
                     break;
 
@@ -67,28 +60,17 @@ namespace MHServerEmu.GameServer
             {
                 case 1:
                     if (client.FinishedPlayerMgrServerFrontendHandshake)
-                    {
-                        //Logger.Trace($"Routing {messages.Length} message(s) on muxId {muxId} to GameInstanceService");
-                        GameInstanceService.Handle(client, muxId, messages);
-                    }
+                        PlayerManagerService.Handle(client, muxId, messages);
                     else
-                    {
-                        //Logger.Trace($"Routing {messages.Length} message(s) on muxId {muxId} to FrontendService");
                         FrontendService.Handle(client, muxId, messages);
-                    }
 
                     break;
 
                 case 2:
                     if (client.FinishedGroupingManagerFrontendHandshake)
-                    {
                         GroupingManagerService.Handle(client, muxId, messages);
-                    }
                     else
-                    {
-                        //Logger.Trace($"Routing {messages.Length} messages on muxId {muxId} to FrontendService");
                         FrontendService.Handle(client, muxId, messages);
-                    }
 
                     break;
 

@@ -1,21 +1,137 @@
-﻿using Google.ProtocolBuffers;
+﻿using System.Collections.Concurrent;
+using System.Diagnostics;
 using Gazillion;
-using MHServerEmu.Networking;
+using Google.ProtocolBuffers;
 using MHServerEmu.Common;
 using MHServerEmu.Common.Config;
 using MHServerEmu.GameServer.Entities;
 using MHServerEmu.GameServer.Entities.Avatars;
-using MHServerEmu.GameServer.Powers;
 using MHServerEmu.GameServer.GameData;
+using MHServerEmu.GameServer.Powers;
 using MHServerEmu.GameServer.Properties;
+using MHServerEmu.GameServer.Regions;
+using MHServerEmu.Networking;
 
-namespace MHServerEmu.GameServer.Regions
+namespace MHServerEmu.GameServer.Games
 {
-    public static class RegionLoader
+    public class Game : IGameMessageHandler
     {
         private static readonly Logger Logger = LogManager.CreateLogger();
 
-        public static GameMessage[] GetBeginLoadingMessages(RegionPrototype regionPrototype, HardcodedAvatarEntity avatar, bool loadEntities = true)
+        public const int TickRate = 20;                 // Ticks per second based on client behavior
+        public const long TickTime = 1000 / TickRate;   // ms per tick
+
+        private readonly Stopwatch _tickWatch;
+        private int _tickCount;
+
+        public ulong Id { get; }
+        public RegionManager RegionManager { get; }
+        public ConcurrentDictionary<FrontendClient, Player> PlayerDict { get; }
+
+        public Game(ulong id)
+        {
+            _tickWatch = new();
+
+            Id = id;
+            RegionManager = new();
+            PlayerDict = new();
+
+            new Thread(() => Update()).Start();     // Start main game loop
+        }
+
+        public void Update()
+        {
+            while (true)
+            {
+                _tickWatch.Restart();
+                Interlocked.Increment(ref _tickCount);
+
+                lock (this)     // lock to prevent state from being modified mid-update
+                {
+                    // update here
+                }
+
+                _tickWatch.Stop();
+
+                if (_tickWatch.ElapsedMilliseconds > TickTime)
+                    Logger.Warn($"Game update took longer ({_tickWatch.ElapsedMilliseconds} ms) than target tick time ({TickTime} ms)");
+                else
+                    Thread.Sleep((int)(TickTime - _tickWatch.ElapsedMilliseconds));
+            }
+        }
+
+        public void Handle(FrontendClient client, ushort muxId, GameMessage message)
+        {
+            IMessage response;
+            switch ((ClientToGameServerMessage)message.Id)
+            {
+                case ClientToGameServerMessage.NetMessageCellLoaded:
+                    Logger.Info($"Received NetMessageCellLoaded");
+                    if (client.IsLoading)
+                    {
+                        client.SendMultipleMessages(1, GetFinishLoadingMessages(client.CurrentRegion, client.CurrentAvatar));
+                        client.IsLoading = false;
+                    }
+
+                    break;
+
+                case ClientToGameServerMessage.NetMessageUseWaypoint:
+                    Logger.Info($"Received NetMessageUseWaypoint message");
+                    var useWaypointMessage = NetMessageUseWaypoint.ParseFrom(message.Content);
+
+                    Logger.Trace(useWaypointMessage.ToString());
+
+                    RegionPrototype destinationRegion = (RegionPrototype)useWaypointMessage.RegionProtoId;
+
+                    if (RegionManager.IsRegionAvailable(destinationRegion))
+                        MovePlayerToRegion(client, destinationRegion);
+                    else
+                        Logger.Warn($"Region {destinationRegion} is not available");
+
+                    break;
+
+                default:
+                    Logger.Warn($"Received unhandled message {(ClientToGameServerMessage)message.Id} (id {message.Id})");
+                    break;
+            }
+        }
+
+        public void Handle(FrontendClient client, ushort muxId, GameMessage[] messages)
+        {
+            foreach (GameMessage message in messages) Handle(client, muxId, message);
+        }
+
+        public void AddPlayer(FrontendClient client)
+        {
+            client.GameId = Id;
+
+            client.SendMessage(1, new(NetMessageQueueLoadingScreen.CreateBuilder().SetRegionPrototypeId(0).Build()));
+
+            client.SendMultipleMessages(1, PacketHelper.LoadMessagesFromPacketFile("NetMessageAchievementDatabaseDump.bin"));
+
+            var chatBroadcastMessage = ChatBroadcastMessage.CreateBuilder()         // Send MOTD
+                .SetRoomType(ChatRoomTypes.CHAT_ROOM_TYPE_BROADCAST_ALL_SERVERS)
+                .SetFromPlayerName(ConfigManager.GroupingManager.MotdPlayerName)
+                .SetTheMessage(ChatMessage.CreateBuilder().SetBody(ConfigManager.GroupingManager.MotdText))
+                .SetPrestigeLevel(ConfigManager.GroupingManager.MotdPrestigeLevel)
+                .Build();
+
+            client.SendMessage(2, new(chatBroadcastMessage));
+
+            client.SendMultipleMessages(1, GetBeginLoadingMessages(client.CurrentRegion, client.CurrentAvatar));
+            client.IsLoading = true;
+        }
+
+        public void MovePlayerToRegion(FrontendClient client, RegionPrototype region)
+        {
+            client.CurrentRegion = region;
+            client.SendMultipleMessages(1, GetBeginLoadingMessages(client.CurrentRegion, client.CurrentAvatar, false));
+            client.IsLoading = true;
+        }
+
+        #region Region Loading
+
+        private GameMessage[] GetBeginLoadingMessages(RegionPrototype regionPrototype, HardcodedAvatarEntity avatar, bool loadEntities = true)
         {
             List<GameMessage> messageList = new();
 
@@ -36,7 +152,7 @@ namespace MHServerEmu.GameServer.Regions
             messageList.Add(new(NetMessageReadyAndLoadedOnGameServer.DefaultInstance));
 
             // Load region data
-            messageList.AddRange(RegionManager.GetRegion(regionPrototype).GetLoadingMessages(1150669705055451881));
+            messageList.AddRange(RegionManager.GetRegion(regionPrototype).GetLoadingMessages(Id));
 
             // Create waypoint entity
             messageList.Add(new(NetMessageEntityCreate.CreateBuilder()
@@ -44,18 +160,10 @@ namespace MHServerEmu.GameServer.Regions
                 .SetArchiveData(ByteString.CopyFrom(Convert.FromHexString("20F4C10206000000CD80018880FCFF99BF968110CCC00202CC800302CD40D58280DE868098044DA1A1A4FE0399C00183B8030000000000")))
                 .Build()));
 
-            /*
-            if (regionPrototype == RegionPrototype.NPEAvengersTowerHUBRegion)
-            {
-                messageList.Add(new(EntityHelper.GenerateEntityCreateMessage(0x17, 17149607139718797253, new(588f, 1194f, 369f), new(-1.5625f, 0f, 0f),
-                    0xA0F4, 608, 1, 608, 0x100259F99FFF0008, 1, 11135337283876558073, true)));
-            }
-            */
-
             return messageList.ToArray();
         }
 
-        public static GameMessage[] GetFinishLoadingMessages(RegionPrototype regionPrototype, HardcodedAvatarEntity avatar)
+        private GameMessage[] GetFinishLoadingMessages(RegionPrototype regionPrototype, HardcodedAvatarEntity avatar)
         {
             List<GameMessage> messageList = new();
 
@@ -72,7 +180,7 @@ namespace MHServerEmu.GameServer.Regions
                 int cellid = 1;
                 int areaid = 1;
                 ulong repId = 50000;
-                ulong entityId = 1000; 
+                ulong entityId = 1000;
 
                 messageList.Add(new(EntityHelper.GenerateEntityCreateMessage(entityId++,
                     GameDatabase.GetPrototypeId("Entity/Characters/NPCs/HubNPCs/SHIELDAgentStanLee.prototype"),
@@ -89,17 +197,17 @@ namespace MHServerEmu.GameServer.Regions
                     new(924.5f, 996f, 369f), new(-2.9375f, 0f, 0f),
                     repId++, 608, areaid, 608, region.Id, cellid, area, false)));
 
-                messageList.Add(new(EntityHelper.GenerateEntityCreateMessage(entityId++, 
+                messageList.Add(new(EntityHelper.GenerateEntityCreateMessage(entityId++,
                     GameDatabase.GetPrototypeId("Entity/Characters/NPCs/Objects/AvengersStash.prototype"),
                     new(1661.25f, -930.745f, 320f + 60f), new(-0.78541f, 0f, 0f),
                     repId++, 608, areaid, 608, region.Id, cellid, area, false)));
 
-                messageList.Add(new(EntityHelper.GenerateEntityCreateMessage(entityId++, 
+                messageList.Add(new(EntityHelper.GenerateEntityCreateMessage(entityId++,
                     GameDatabase.GetPrototypeId("Entity/Characters/NPCs/Objects/AvengersStash.prototype"),
                     new(-208.444f, 1980.73f, 128f + 60f), new(-0.78541f, 0f, 0f),
                     repId++, 608, areaid, 608, region.Id, cellid, area, false)));
 
-                messageList.Add(new(EntityHelper.GenerateEntityCreateMessage(entityId++, 
+                messageList.Add(new(EntityHelper.GenerateEntityCreateMessage(entityId++,
                     GameDatabase.GetPrototypeId("Entity/Characters/NPCs/Objects/AvengersStash.prototype"),
                     new(-292.686f, 1896.49f, 128f + 60f), new(-0.78541f, 0f, 0f),
                     repId++, 608, areaid, 608, region.Id, cellid, area, false)));
@@ -150,7 +258,7 @@ namespace MHServerEmu.GameServer.Regions
                     GameDatabase.GetPrototypeId("Entity/Characters/Vendors/Prototypes/VendorEternitySplinterAdamWarlock.prototype"),
                     new(463.362f, -828.147f, 180.331f), new(2.35623f, 0f, 0f),
                     repId++, 608, areaid, 608, region.Id, cellid, area, false)));
-               
+
                 messageList.Add(new(EntityHelper.GenerateEntityCreateMessage(entityId++, // Clea
                     GameDatabase.GetPrototypeId("Entity/Characters/Vendors/Prototypes/HUB01AvengersTower/ATVendorHardcore.prototype"),
                     new(2288f, -2720f, 560f), new(-0.687234f, 0f, 0f),
@@ -171,7 +279,7 @@ namespace MHServerEmu.GameServer.Regions
                     new(-55.3334f, 240.429f, 136.234f), new(4.01065f, 0f, 0f),
                     repId++, 608, areaid, 608, region.Id, cellid, area, false)));
 
-                messageList.Add(new(EntityHelper.GenerateEntityCreateMessage(entityId++, 
+                messageList.Add(new(EntityHelper.GenerateEntityCreateMessage(entityId++,
                     GameDatabase.GetPrototypeId("Entity/Characters/Vendors/Prototypes/HUB01AvengersTower/BIFBuxGiver.prototype"),
                     new(-120f, 304f, 136), new(4.01027f, 0f, 0f),
                     repId++, 608, areaid, 608, region.Id, cellid, area, false)));
@@ -193,7 +301,7 @@ namespace MHServerEmu.GameServer.Regions
             return messageList.ToArray();
         }
 
-        private static GameMessage[] LoadLocalPlayerDataMessages(HardcodedAvatarEntity avatarEntityId)
+        private GameMessage[] LoadLocalPlayerDataMessages(HardcodedAvatarEntity avatarEntityId)
         {
             List<GameMessage> messageList = new();
 
@@ -288,7 +396,7 @@ namespace MHServerEmu.GameServer.Regions
                                 catch
                                 {
                                     Logger.Warn($"Failed to get costume prototype enum for id {ConfigManager.PlayerData.CostumeOverride}");
-                                }   
+                                }
                             }
                         }
                     }
@@ -304,5 +412,7 @@ namespace MHServerEmu.GameServer.Regions
 
             return messageList.ToArray();
         }
+
+        #endregion
     }
 }
