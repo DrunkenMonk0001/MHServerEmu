@@ -32,16 +32,13 @@ namespace MHServerEmu.GameServer.GameData.Gpak
 
     public class BlueprintConverter : JsonConverter<Blueprint>
     {
-        Dictionary<ulong, string> _prototypeDict = new();
-        Dictionary<ulong, string> _curveDict = new();
+        Dictionary<ulong, string> _prototypeDict;
+        Dictionary<ulong, string> _curveDict;
 
-        public BlueprintConverter(Dictionary<string, DataDirectory> dataDirectoryDict)
+        public BlueprintConverter(Dictionary<ulong, string> prototypeDict, Dictionary<ulong, string> curveDict)
         {
-            foreach (IDataDirectoryEntry entry in dataDirectoryDict["Calligraphy/Prototype.directory"].Entries)
-                _prototypeDict.Add(entry.Id1, entry.Name);
-
-            foreach (IDataDirectoryEntry entry in dataDirectoryDict["Calligraphy/Curve.directory"].Entries)
-                _curveDict.Add(entry.Id1, entry.Name);
+            _prototypeDict = prototypeDict;
+            _curveDict = curveDict;
         }
 
         public override Blueprint Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
@@ -59,6 +56,39 @@ namespace MHServerEmu.GameServer.GameData.Gpak
 
                 default:
                     JsonSerializer.Serialize(writer, new BlueprintJson(value, _prototypeDict, _curveDict), options);
+                    break;
+            }
+        }
+    }
+
+    public class PrototypeConverter : JsonConverter<Prototype>
+    {
+        Dictionary<ulong, string> _prototypeDict;
+        Dictionary<ulong, string> _curveDict;
+        Dictionary<ulong, string> _assetDict;
+
+        public PrototypeConverter(Dictionary<ulong, string> prototypeDict, Dictionary<ulong, string> curveDict, Dictionary<ulong, string> assetDict)
+        {
+            _prototypeDict = prototypeDict;
+            _curveDict = curveDict;
+            _assetDict = assetDict;
+        }
+
+        public override Prototype Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            throw new NotImplementedException();
+        }
+
+        public override void Write(Utf8JsonWriter writer, Prototype value, JsonSerializerOptions options)
+        {
+            switch (value)
+            {
+                case null:
+                    JsonSerializer.Serialize(writer, (Prototype)null, options);
+                    break;
+
+                default:
+                    JsonSerializer.Serialize(writer, new PrototypeJson(value, _prototypeDict, _curveDict, _assetDict), options);
                     break;
             }
         }

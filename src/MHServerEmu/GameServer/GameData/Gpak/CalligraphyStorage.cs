@@ -14,6 +14,8 @@ namespace MHServerEmu.GameServer.GameData.Gpak
         public Dictionary<string, Prototype> DefaultsDict { get; } = new();     // defaults are parent prototypes
         public Dictionary<string, Prototype> PrototypeDict { get; } = new();
 
+        public Dictionary<ulong, string> AssetDict { get; } = new();
+
         public CalligraphyStorage(GpakFile gpakFile)
         {
             // Sort GpakEntries by type
@@ -79,6 +81,19 @@ namespace MHServerEmu.GameServer.GameData.Gpak
                 PrototypeDict.Add(entry.FilePath, new(entry.Data));
 
             Logger.Info($"Parsed {PrototypeDict.Count} prototypes");
+
+            // Asset dictionary
+            AssetDict.Add(0, "0");  // add 0 manually
+
+            foreach (var kvp in GTypeDict)
+            {
+                foreach (GTypeEntry entry in kvp.Value.Entries)
+                {
+                    AssetDict.Add(entry.Id, entry.Name);
+                }
+            }
+
+            Logger.Info($"Loaded {AssetDict.Count} asset references");
         }
 
         public override bool Verify()
@@ -93,14 +108,26 @@ namespace MHServerEmu.GameServer.GameData.Gpak
 
         public override void Export()
         {
+            // Prepare dictionaries
+            Dictionary<ulong, string> prototypeDict = new() { { 0, "0" } }; // add 0 manually
+            foreach (IDataDirectoryEntry entry in DataDirectoryDict["Calligraphy/Prototype.directory"].Entries)
+                prototypeDict.Add(entry.Id1, entry.Name);
+
+            Dictionary<ulong, string> curveDict = new();
+            foreach (IDataDirectoryEntry entry in DataDirectoryDict["Calligraphy/Curve.directory"].Entries)
+                curveDict.Add(entry.Id1, entry.Name);
+
+            // Set up json serializer
             _jsonSerializerOptions.Converters.Add(new DataDirectoryEntryConverter());
-            _jsonSerializerOptions.Converters.Add(new BlueprintConverter(DataDirectoryDict));
+            _jsonSerializerOptions.Converters.Add(new BlueprintConverter(prototypeDict, curveDict));
+            _jsonSerializerOptions.Converters.Add(new PrototypeConverter(prototypeDict, curveDict, AssetDict));
             _jsonSerializerOptions.MaxDepth = 128;  // 64 is not enough for prototypes
 
+            // Serialize and save
             SerializeDictAsJson(DataDirectoryDict);
             SerializeDictAsJson(GTypeDict);
 
-            foreach (var kvp in CurveDict)
+            foreach (var kvp in CurveDict)  // use TSV for curves
             {
                 string path = $"{Directory.GetCurrentDirectory()}\\Assets\\GPAK\\Export\\{kvp.Key}.tsv";
                 string dir = Path.GetDirectoryName(path);

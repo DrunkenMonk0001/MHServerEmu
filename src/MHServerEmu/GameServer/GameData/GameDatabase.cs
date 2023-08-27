@@ -12,6 +12,7 @@ namespace MHServerEmu.GameServer.GameData
         private static HashMap _prototypeHashMap;
 
         public static bool IsInitialized { get; private set; }
+
         public static CalligraphyStorage Calligraphy { get; private set; }
         public static ResourceStorage Resource { get; private set; }
 
