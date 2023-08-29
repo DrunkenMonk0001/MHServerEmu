@@ -2,7 +2,7 @@
 using Gazillion;
 using Google.ProtocolBuffers;
 using MHServerEmu.Common.Extensions;
-using MHServerEmu.GameServer.GameData;
+using MHServerEmu.GameServer.GameData.Prototypes;
 
 namespace MHServerEmu.GameServer.Properties
 {
@@ -10,7 +10,8 @@ namespace MHServerEmu.GameServer.Properties
     {
         public ulong Id { get; set; }   // The first 11 bits is the actual id, the rest are parameters defined by PropertyInfo
         public PropertyValue Value { get; set; }
-        public PropertyInfo Info { get => GameDatabase.PropertyInfoTable[Id >> 53]; }
+        public PropertyEnum Enum { get => (PropertyEnum)(Id >> 53); }
+        public PropertyInfoPrototype Info { get => PropertyInfoTable.GetPropertyInfo(Enum); }
 
         public Property(CodedInputStream stream)
         {
@@ -47,7 +48,7 @@ namespace MHServerEmu.GameServer.Properties
             {
                 streamWriter.WriteLine($"Id: 0x{Id.ToString("X")}");
                 streamWriter.WriteLine($"Value: {Value}");
-                streamWriter.WriteLine($"PropertyInfo: {Info}");
+                streamWriter.WriteLine($"PropertyType: {Info.Type}");
 
                 streamWriter.Flush();
                 return Encoding.UTF8.GetString(memoryStream.ToArray());
@@ -56,27 +57,27 @@ namespace MHServerEmu.GameServer.Properties
 
         private void CreateValueContainer(ulong rawValue)
         {
-            switch (Info.ValueType)
+            switch (Info.Type)
             {
-                case PropertyValueType.Boolean:
+                case PropertyType.Boolean:
                     Value = new PropertyValueBoolean(rawValue);
                     break;
 
-                case PropertyValueType.Float:
-                    Value = new PropertyValueFloat(rawValue);
+                case PropertyType.Real:
+                    Value = new PropertyValueReal(rawValue);
                     break;
 
-                case PropertyValueType.Integer:
-                case PropertyValueType.Time:
+                case PropertyType.Integer:
+                case PropertyType.Time:
                     Value = new PropertyValueInteger(rawValue);
                     break;
 
-                case PropertyValueType.Prototype:
+                case PropertyType.Prototype:
                     Value = new PropertyValuePrototype(rawValue);
                     break;
 
-                case PropertyValueType.Vector3:
-                    Value = new PropertyValueVector3(rawValue);
+                case PropertyType.Int21Vector3:
+                    Value = new PropertyValueInt21Vector3(rawValue);
                     break;
 
                 default:

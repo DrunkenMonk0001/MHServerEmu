@@ -15,6 +15,8 @@ namespace MHServerEmu.GameServer.GameData.Gpak
         public Dictionary<string, Prototype> PrototypeDict { get; } = new();
 
         public Dictionary<ulong, string> AssetDict { get; } = new();
+        public Dictionary<ulong, string> AssetTypeDict { get; } = new();
+        public Dictionary<ulong, string> PrototypeFieldDict { get; } = new();
 
         public CalligraphyStorage(GpakFile gpakFile)
         {
@@ -84,16 +86,23 @@ namespace MHServerEmu.GameServer.GameData.Gpak
 
             // Asset dictionary
             AssetDict.Add(0, "0");  // add 0 manually
+            AssetTypeDict.Add(0, "0");
 
             foreach (var kvp in GTypeDict)
             {
                 foreach (GTypeEntry entry in kvp.Value.Entries)
                 {
                     AssetDict.Add(entry.Id, entry.Name);
+                    AssetTypeDict.Add(entry.Id, Path.GetFileNameWithoutExtension(kvp.Key));
                 }
             }
 
             Logger.Info($"Loaded {AssetDict.Count} asset references");
+
+            // Prototype fields
+            foreach (var kvp in BlueprintDict)
+                foreach (BlueprintField entry in kvp.Value.Fields)
+                    PrototypeFieldDict.Add(entry.Id, entry.Name);
         }
 
         public override bool Verify()
@@ -117,10 +126,14 @@ namespace MHServerEmu.GameServer.GameData.Gpak
             foreach (IDataDirectoryEntry entry in DataDirectoryDict["Calligraphy/Curve.directory"].Entries)
                 curveDict.Add(entry.Id1, entry.Name);
 
+            Dictionary<ulong, string> typeDict = new();
+            foreach (IDataDirectoryEntry entry in DataDirectoryDict["Calligraphy/Type.directory"].Entries)
+                typeDict.Add(entry.Id1, entry.Name);
+
             // Set up json serializer
             _jsonSerializerOptions.Converters.Add(new DataDirectoryEntryConverter());
-            _jsonSerializerOptions.Converters.Add(new BlueprintConverter(prototypeDict, curveDict));
-            _jsonSerializerOptions.Converters.Add(new PrototypeConverter(prototypeDict, curveDict, AssetDict));
+            _jsonSerializerOptions.Converters.Add(new BlueprintConverter(prototypeDict, curveDict, typeDict));
+            _jsonSerializerOptions.Converters.Add(new PrototypeConverter(prototypeDict, PrototypeFieldDict, curveDict, AssetDict, AssetTypeDict, typeDict));
             _jsonSerializerOptions.MaxDepth = 128;  // 64 is not enough for prototypes
 
             // Serialize and save
