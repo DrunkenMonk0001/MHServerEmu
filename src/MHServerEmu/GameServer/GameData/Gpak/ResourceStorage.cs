@@ -7,18 +7,22 @@ namespace MHServerEmu.GameServer.GameData.Gpak
     {
         private static readonly Logger Logger = LogManager.CreateLogger();
 
-        //public Dictionary<string, Cell> CellDict { get; } = new();
+        public Dictionary<ulong, string> DirectoryDict { get; } = new();
+
+        public Dictionary<string, Cell> CellDict { get; } = new();
         public Dictionary<string, District> DistrictDict { get; } = new();
 
         public ResourceStorage(GpakFile gpakFile)
         {
             foreach (GpakEntry entry in gpakFile.Entries)
             {
+                DirectoryDict.Add(HashHelper.HashPath($"&{entry.FilePath.ToLower()}"), entry.FilePath);
+
                 switch (Path.GetExtension(entry.FilePath))
                 {
-                    //case ".cell":
-                    //    CellDict.Add(entry.FilePath, new(entry.Data));
-                    //    break;                        
+                    case ".cell":
+                        CellDict.Add(entry.FilePath, new(entry.Data));
+                        break;                        
 
                     case ".district":
                         DistrictDict.Add(entry.FilePath, new(entry.Data));
@@ -26,17 +30,19 @@ namespace MHServerEmu.GameServer.GameData.Gpak
                 }
             }
 
+            Logger.Info($"Parsed {CellDict.Count} cells");
             Logger.Info($"Parsed {DistrictDict.Count} districts");
         }
 
         public override bool Verify()
         {
-            return DistrictDict.Count > 0;
+            return CellDict.Count > 0
+                && DistrictDict.Count > 0;
         }
 
         public override void Export()
         {
-            //SerializeDictAsJson(CellDict);
+            SerializeDictAsJson(CellDict);
             SerializeDictAsJson(DistrictDict);
         }
     }
