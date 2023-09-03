@@ -29,10 +29,8 @@ namespace MHServerEmu.GameServer.GameData
 
             // Initialize derivative GPAK data
             _prototypeHashMap = InitializePrototypeHashMap(Calligraphy, Resource);
+            PrototypeEnumManager = new($"{AssetDirectory}\\PrototypeEnumTables");       // this needs to be initialized before PropertyInfoTable
             PropertyInfoTable = new(Calligraphy);
-
-            // Load other data
-            PrototypeEnumManager = new($"{AssetDirectory}\\PrototypeEnumTables");
 
             // Verify and finish game database initialization
             if (VerifyData())
@@ -75,17 +73,22 @@ namespace MHServerEmu.GameServer.GameData
 
         private static HashMap InitializePrototypeHashMap(CalligraphyStorage calligraphy, ResourceStorage resource)
         {
-            HashMap hashMap = new();
+            HashMap hashMap;
 
             if (calligraphy.PrototypeDirectory != null && resource.DirectoryDict.Count > 0)
             {
+                hashMap = new(calligraphy.PrototypeDirectory.Entries.Length + resource.DirectoryDict.Count);
                 hashMap.Add(0, "");
 
                 foreach (DataDirectoryPrototypeEntry entry in calligraphy.PrototypeDirectory.Entries)
-                    hashMap.Add(entry.Id1, entry.Name.Replace('\\', '/'));
+                    hashMap.Add(entry.Id1, entry.FilePath);
 
                 foreach (var kvp in resource.DirectoryDict)
                     hashMap.Add(kvp.Key, kvp.Value);
+            }
+            else
+            {
+                hashMap = new();
             }
 
             return hashMap;

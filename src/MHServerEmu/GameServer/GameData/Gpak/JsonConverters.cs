@@ -2,6 +2,7 @@
 using System.Text.Json.Serialization;
 using MHServerEmu.GameServer.GameData.Gpak.FileFormats;
 using MHServerEmu.GameServer.GameData.Gpak.JsonOutput;
+using MHServerEmu.GameServer.GameData.Prototypes.Markers;
 
 namespace MHServerEmu.GameServer.GameData.Gpak
 {
@@ -9,15 +10,15 @@ namespace MHServerEmu.GameServer.GameData.Gpak
 
     public class BlueprintConverter : JsonConverter<Blueprint>
     {
-        Dictionary<ulong, string> _prototypeDict;
-        Dictionary<ulong, string> _curveDict;
-        Dictionary<ulong, string> _typeDict;
+        private DataDirectory _prototypeDir;
+        private DataDirectory _curveDir;
+        private DataDirectory _typeDir;
 
-        public BlueprintConverter(Dictionary<ulong, string> prototypeDict, Dictionary<ulong, string> curveDict, Dictionary<ulong, string> typeDict)
+        public BlueprintConverter(DataDirectory prototypeDir, DataDirectory curveDir, DataDirectory typeDir)
         {
-            _prototypeDict = prototypeDict;
-            _curveDict = curveDict;
-            _typeDict = typeDict;
+            _prototypeDir = prototypeDir;
+            _curveDir = curveDir;
+            _typeDir = typeDir;
         }
 
         public override Blueprint Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
@@ -34,7 +35,7 @@ namespace MHServerEmu.GameServer.GameData.Gpak
                     break;
 
                 default:
-                    JsonSerializer.Serialize(writer, new BlueprintJson(value, _prototypeDict, _curveDict, _typeDict), options);
+                    JsonSerializer.Serialize(writer, new BlueprintJson(value, _prototypeDir, _curveDir, _typeDir), options);
                     break;
             }
         }
@@ -42,22 +43,23 @@ namespace MHServerEmu.GameServer.GameData.Gpak
 
     public class PrototypeConverter : JsonConverter<Prototype>
     {
-        Dictionary<ulong, string> _prototypeDict;
-        Dictionary<ulong, string> _prototypeFieldDict;
-        Dictionary<ulong, string> _curveDict;
-        Dictionary<ulong, string> _assetDict;
-        Dictionary<ulong, string> _assetTypeDict;
-        Dictionary<ulong, string> _typeDict;
+        private DataDirectory _prototypeDir;
+        private DataDirectory _curveDir;
+        private DataDirectory _typeDir;
+        private Dictionary<ulong, string> _prototypeFieldDict;
+        private Dictionary<ulong, string> _assetDict;
+        private Dictionary<ulong, string> _assetTypeDict;
 
-        public PrototypeConverter(Dictionary<ulong, string> prototypeDict, Dictionary<ulong, string> prototypeFieldDict,
-            Dictionary<ulong, string> curveDict, Dictionary<ulong, string> assetDict, Dictionary<ulong, string> assetTypeDict, Dictionary<ulong, string> typeDict)
+
+        public PrototypeConverter(DataDirectory prototypeDir, DataDirectory curveDir, DataDirectory typeDir,
+            Dictionary<ulong, string> prototypeFieldDict, Dictionary<ulong, string> assetDict, Dictionary<ulong, string> assetTypeDict)
         {
-            _prototypeDict = prototypeDict;
+            _prototypeDir = prototypeDir;
+            _curveDir = curveDir;
+            _typeDir = typeDir;
             _prototypeFieldDict = prototypeFieldDict;
-            _curveDict = curveDict;
             _assetDict = assetDict;
             _assetTypeDict = assetTypeDict;
-            _typeDict = typeDict;
         }
 
         public override Prototype Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
@@ -74,26 +76,25 @@ namespace MHServerEmu.GameServer.GameData.Gpak
                     break;
 
                 default:
-                    JsonSerializer.Serialize(writer, new PrototypeJson(value, _prototypeDict, _prototypeFieldDict, _curveDict, _assetDict, _assetTypeDict, _typeDict), options);
+                    JsonSerializer.Serialize(writer, new PrototypeJson(value, _prototypeDir, _curveDir, _typeDir, _prototypeFieldDict, _assetDict, _assetTypeDict), options);
                     break;
             }
         }
     }
 
-    /* Example of a converter for serializing interface implementing classes
-    public class DataDirectoryEntryConverter : JsonConverter<IDataDirectoryEntry>
+    public class MarkerPrototypeConverter : JsonConverter<MarkerPrototype>
     {
-        public override IDataDirectoryEntry Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        public override MarkerPrototype Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
         {
             throw new NotImplementedException();
         }
 
-        public override void Write(Utf8JsonWriter writer, IDataDirectoryEntry value, JsonSerializerOptions options)
+        public override void Write(Utf8JsonWriter writer, MarkerPrototype value, JsonSerializerOptions options)
         {
             switch (value)
             {
                 case null:
-                    JsonSerializer.Serialize(writer, (IDataDirectoryEntry)null, options);
+                    JsonSerializer.Serialize(writer, (MarkerPrototype)null, options);
                     break;
 
                 default:
@@ -103,5 +104,27 @@ namespace MHServerEmu.GameServer.GameData.Gpak
             }
         }
     }
-    */
+
+    public class UIPanelPrototypeConverter : JsonConverter<UIPanelPrototype>
+    {
+        public override UIPanelPrototype Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            throw new NotImplementedException();
+        }
+
+        public override void Write(Utf8JsonWriter writer, UIPanelPrototype value, JsonSerializerOptions options)
+        {
+            switch (value)
+            {
+                case null:
+                    JsonSerializer.Serialize(writer, (UIPanelPrototype)null, options);
+                    break;
+
+                default:
+                    var type = value.GetType();
+                    JsonSerializer.Serialize(writer, value, type, options);
+                    break;
+            }
+        }
+    }
 }

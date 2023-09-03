@@ -1,20 +1,19 @@
 ﻿using System.Text.Json.Serialization;
 using MHServerEmu.Common.Extensions;
-using MHServerEmu.GameServer.Common;
 using MHServerEmu.GameServer.GameData.Gpak;
 
 namespace MHServerEmu.GameServer.GameData.Prototypes.Markers
 {
-    public class RoadConnectionMarkerPrototype : MarkerPrototype
+    public class ResourceMarkerPrototype : MarkerPrototype
     {
         [JsonPropertyOrder(2)]
-        public Vector3 Extents { get; }
+        public string Resource { get; }
 
-        public RoadConnectionMarkerPrototype(BinaryReader reader)
+        public ResourceMarkerPrototype(BinaryReader reader)
         {
-            ProtoNameHash = ResourcePrototypeHash.RoadConnectionMarkerPrototype;
+            ProtoNameHash = ResourcePrototypeHash.ResourceMarkerPrototype;
 
-            Extents = reader.ReadVector3();
+            Resource = reader.ReadFixedString32();
 
             Position = reader.ReadVector3();
             Rotation = reader.ReadVector3();
