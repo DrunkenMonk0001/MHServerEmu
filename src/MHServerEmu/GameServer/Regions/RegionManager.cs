@@ -127,6 +127,7 @@ namespace MHServerEmu.GameServer.Regions
 
                     area = new(1, AreaPrototype.NPEAvengersTowerHubArea, new(), true);
                     area.AddCell(new(1, GameDatabase.GetPrototypeId("Resource/Cells/DistrictCells/Avengers_Tower/AvengersTowerNPE_HUB.cell"), new()));
+                    area.CellList[0].AddEncounter(605211710028059265, 5, true);
 
                     region.AddArea(area);
 
@@ -180,6 +181,11 @@ namespace MHServerEmu.GameServer.Regions
                     district = GameDatabase.Resource.DistrictDict["Resource/Districts/XaviersMansion.district"];
                     for (int i = 0; i < district.CellMarkerSet.Length; i++)
                         area.AddCell(new((uint)i + 1, GameDatabase.GetPrototypeId(district.CellMarkerSet[i].Resource), new()));
+
+                    area.CellList[17].AddEncounter(15374827165380448803, 4, true);
+                    area.CellList[15].AddEncounter(8642336607468261979, 7, true);
+                    area.CellList[23].AddEncounter(4065272706848002543, 3, true);
+                    area.CellList[10].AddEncounter(12198525011368022752, 1, true);
 
                     region.AddArea(area);
 
