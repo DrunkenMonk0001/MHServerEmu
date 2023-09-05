@@ -1,60 +1,45 @@
-﻿using System.Net;
-using System.Net.Sockets;
-using MHServerEmu.Common;
+﻿using MHServerEmu.Common;
 using MHServerEmu.Common.Config;
 using MHServerEmu.GameServer;
 using MHServerEmu.GameServer.Frontend;
+using MHServerEmu.Networking.Base;
 
 namespace MHServerEmu.Networking
 {
-    public class FrontendServer
+    public class FrontendServer : Server
     {
-        private static readonly Logger Logger = LogManager.CreateLogger();
+        private new static readonly Logger Logger = LogManager.CreateLogger();  // Hide the Server.Logger so that this logger can show the actual server as log source.
 
-        private GameServerManager _gameServerManager = new();
-
-        private Socket _socket;
-        private List<FrontendClient> _clientList = new();
+        private GameServerManager _gameServerManager;
 
         public FrontendService FrontendService { get => _gameServerManager.FrontendService; }
 
         public FrontendServer()
         {
-            // Set up our sockets
-            _socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            _socket.SetSocketOption(SocketOptionLevel.Tcp, SocketOptionName.NoDelay, true);         // Disable packet coalescing to improve responsiveness
-            _socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.DontLinger, true);   // Don't keep disconnected sockets around
+            _gameServerManager = new();
 
-            _socket.Bind(new IPEndPoint(IPAddress.Parse(ConfigManager.Frontend.BindIP), int.Parse(ConfigManager.Frontend.Port)));
-            _socket.Listen(10);
+            OnConnect += FrontendServer_OnConnect;
+            OnDisconnect += FrontendService.OnClientDisconnect;
+            DataReceived += FrontendServer_DataReceived;
+            DataSent += (sender, e) => { };
+        }
 
+        public override void Run()
+        {
+            if (Listen(ConfigManager.Frontend.BindIP, int.Parse(ConfigManager.Frontend.Port)) == false) return;
             Logger.Info($"FrontendServer is listening on {ConfigManager.Frontend.BindIP}:{ConfigManager.Frontend.Port}...");
-
-            BeginAccept();
         }
 
-        private void BeginAccept()
+        private void FrontendServer_OnConnect(object sender, ConnectionEventArgs e)
         {
-            Logger.Info("Waiting for connections...");
-            _socket.BeginAccept(new AsyncCallback(AcceptCallback), null);
+            Logger.Info($"Client connected from {e.Connection}");
+            e.Connection.Client = new FrontendClient(e.Connection, _gameServerManager);
         }
 
-        private void AcceptCallback(IAsyncResult result)
+        private void FrontendServer_DataReceived(object sender, ConnectionDataEventArgs e)
         {
-            Logger.Info("Client connected");
-            Socket clientSocket = _socket.EndAccept(result);
-            FrontendClient client = new(clientSocket, _gameServerManager);
-            _clientList.Add(client);
-            new Thread(() => client.Run()).Start();
-            BeginAccept();
-        }
-
-        public void Shutdown()
-        {
-            foreach (FrontendClient client in _clientList)
-            {
-                client.Disconnect();
-            }
+            Connection connection = e.Connection as Connection;
+            ((FrontendClient)connection.Client).Parse(e);
         }
     }
 }

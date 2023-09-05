@@ -1,4 +1,5 @@
-﻿using MHServerEmu.Common.Commands;
+﻿using MHServerEmu.Auth;
+using MHServerEmu.Common.Commands;
 using MHServerEmu.Networking;
 
 namespace MHServerEmu.GameServer.Frontend.Accounts
@@ -28,7 +29,7 @@ namespace MHServerEmu.GameServer.Frontend.Accounts
             if (@params == null) return Fallback();
             if (@params.Length < 2) return "Invalid arguments. Type 'help account verify' to get help.";
 
-            Account account = AccountManager.GetAccountByEmail(@params[0].ToLower(), @params[1], out AuthServer.ErrorCode? errorCode);
+            Account account = AccountManager.GetAccountByEmail(@params[0].ToLower(), @params[1], out AuthErrorCode? errorCode);
 
             if (account != null)
                 return "Account credentials are valid.";
@@ -57,10 +58,10 @@ namespace MHServerEmu.GameServer.Frontend.Accounts
         {
             if (client == null) return "You can only invoke this command from the game.";
 
-            return $"Account Info:\nEmail: {client.Account.Email}\n" +
-                $"IsBanned: {client.Account.IsArchived}\n" +
-                $"IsArchived: {client.Account.IsArchived}\n" +
-                $"IsPasswordExpired: {client.Account.IsPasswordExpired}";
+            return $"Account Info:\nEmail: {client.Session.Account.Email}\n" +
+                $"IsBanned: {client.Session.Account.IsArchived}\n" +
+                $"IsArchived: {client.Session.Account.IsArchived}\n" +
+                $"IsPasswordExpired: {client.Session.Account.IsPasswordExpired}";
         }
     }
 }

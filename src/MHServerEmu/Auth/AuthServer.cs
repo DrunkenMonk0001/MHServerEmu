@@ -4,95 +4,98 @@ using Gazillion;
 using MHServerEmu.Common;
 using MHServerEmu.GameServer.Frontend;
 using MHServerEmu.Common.Config;
+using MHServerEmu.Networking;
 
-namespace MHServerEmu.Networking
+namespace MHServerEmu.Auth
 {
     public class AuthServer
     {
-        public enum ErrorCode
-        {
-            IncorrectUsernameOrPassword1 = 401,
-            AccountBanned = 402,
-            IncorrectUsernameOrPassword2 = 403,
-            CouldNotReachAuthServer = 404,
-            EmailNotVerified = 405,
-            UnableToConnect1 = 406,
-            NeedToAcceptLegal = 407,
-            PatchRequired = 409,
-            AccountArchived = 411,
-            PasswordExpired = 412,
-            UnableToConnect2 = 413,
-            UnableToConnect3 = 414,
-            UnableToConenct4 = 415,
-            UnableToConnect5 = 416,
-            AgeRestricted = 417,
-            UnableToConnect6 = 418,
-            TemporarilyUnavailable = 503
-        }
-
         private static readonly Logger Logger = LogManager.CreateLogger();
 
-        private const string ServerHost = "192.168.1.9";
+        private readonly string _url;
+        private readonly FrontendService _frontendService;
+        private readonly CancellationTokenSource _cancellationTokenSource;
 
-        private FrontendService _frontendService;
         private HttpListener _listener;
 
         public AuthServer(int port, FrontendService frontendService)
         {
+            _url = $"http://localhost:{port}/";
             _frontendService = frontendService;
-
-            string url = $"http://{ServerHost}:{port}/";
-
-            // Create an http server and start listening for incoming connections
-            _listener = new HttpListener();
-            _listener.Prefixes.Add(url);
-            _listener.Start();
-
-            new Thread(() => HandleIncomingConnections()).Start();
-
-            Logger.Info($"AuthServer is listening on {url}...");
+            _cancellationTokenSource = new();
         }
 
-        private async void HandleIncomingConnections()
+        public async void Run()
         {
+            // Create an http server and start listening for incoming connections
+            _listener = new HttpListener();
+            _listener.Prefixes.Add(_url);
+            _listener.Start();
+
+            Logger.Info($"AuthServer is listening on {_url}...");
+
             while (true)
             {
-                // Wait for a connection and get request and response from it
-                HttpListenerContext context = await _listener.GetContextAsync();
-                HttpListenerRequest request = context.Request;
-                HttpListenerResponse response = context.Response;
-
-                if (request.UserAgent == "Secret Identity Studios Http Client")     // Ignore requests from other user agents
+                try
                 {
-                    if (request.HttpMethod == "POST")
-                        HandleMessage(request.InputStream, response);
+                    // Wait for a connection and get request and response from it
+                    HttpListenerContext context = await _listener.GetContextAsync().WaitAsync(_cancellationTokenSource.Token);
+                    HttpListenerRequest request = context.Request;
+                    HttpListenerResponse response = context.Response;
+
+                    if (request.UserAgent == "Secret Identity Studios Http Client")     // Ignore requests from other user agents
+                    {
+                        if (request.HttpMethod == "POST" && request.Url.LocalPath == "/Login/IndexPB")
+                            HandleMessage(request, response);
+                        else
+                            Logger.Warn($"Received {request.HttpMethod} to {request.Url.LocalPath} from a game client on {request.RemoteEndPoint}");
+                    }
                     else
-                        Logger.Warn($"Received {request.HttpMethod} from the game client");
-                }
-                else
-                {
-                    Logger.Warn($"Received {request.HttpMethod} from an unknown UserAgent: {request.UserAgent}");
-                }
+                    {
+                        Logger.Warn($"Received {request.HttpMethod} to {request.Url.LocalPath} from an unknown UserAgent on {request.RemoteEndPoint}. UserAgent information: {request.UserAgent}");
+                    }
 
-                response.Close();
+                    response.Close();
+                }
+                catch (TaskCanceledException e)
+                {
+                    return;     // Stop handling connections
+                }
+                catch (Exception e)
+                {
+                    Logger.Error($"Unhandled exception: {e}");
+                }
             }
         }
 
-        private async void HandleMessage(Stream inputStream, HttpListenerResponse response)
+        public void Shutdown()
+        {
+            if (_listener.IsListening == false) return;
+
+            if (_listener != null)
+            {
+                // Cancel listening for context and close the listener
+                _cancellationTokenSource.Cancel();
+                _listener.Close();
+                _listener = null;
+            }
+        }
+
+        private async void HandleMessage(HttpListenerRequest request, HttpListenerResponse response)
         {
             // Parse message from POST
-            CodedInputStream stream = CodedInputStream.CreateInstance(inputStream);
+            CodedInputStream stream = CodedInputStream.CreateInstance(request.InputStream);
             GameMessage message = new((byte)stream.ReadRawVarint64(), stream.ReadRawBytes((int)stream.ReadRawVarint64()));
 
             switch ((FrontendProtocolMessage)message.Id)
             {
                 case FrontendProtocolMessage.LoginDataPB:
                     var loginDataPB = LoginDataPB.ParseFrom(message.Content);
-                    ClientSession session = _frontendService.CreateSessionFromLoginDataPB(loginDataPB, out ErrorCode? errorCode);
+                    ClientSession session = _frontendService.CreateSessionFromLoginDataPB(loginDataPB, out AuthErrorCode? errorCode);
 
                     if (session != null)  // Send an AuthTicket if we were able to create a session
                     {
-                        Logger.Info($"Sending AuthTicket for sessionId {session.Id}");
+                        Logger.Info($"Sending AuthTicket for sessionId {session.Id} to the game client on {request.RemoteEndPoint}");
 
                         byte[] authTicket = AuthTicket.CreateBuilder()
                             .SetSessionKey(ByteString.CopyFrom(session.Key))
@@ -119,12 +122,11 @@ namespace MHServerEmu.Networking
                         response.KeepAlive = false;
                         response.ContentType = "application/octet-stream";
                         response.ContentLength64 = buffer.Length;
-
-                        await response.OutputStream.WriteAsync(buffer, 0, buffer.Length);
+                        await response.OutputStream.WriteAsync(buffer);
                     }
                     else
                     {
-                        Logger.Info($"Authentication failed ({errorCode})");
+                        Logger.Info($"Authentication for the game client on {request.RemoteEndPoint} failed ({errorCode})");
                         response.StatusCode = (int)errorCode;
                     }
 
