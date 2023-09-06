@@ -7,6 +7,7 @@ namespace MHServerEmu.Common.Config.Sections
         private const string Section = "Frontend";
 
         public string BindIP { get; }
+        public string PublicIP { get; }
         public string Port { get; }
         public bool BypassAuth { get; }
         public bool SimulateQueue { get; }
