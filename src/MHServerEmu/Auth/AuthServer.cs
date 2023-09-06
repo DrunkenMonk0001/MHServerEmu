@@ -102,7 +102,7 @@ namespace MHServerEmu.Auth
                             .SetSessionKey(ByteString.CopyFrom(session.Key))
                             .SetSessionToken(ByteString.CopyFrom(session.Token))
                             .SetSessionId(session.Id)
-                            .SetFrontendServer(ConfigManager.Frontend.BindIP)
+                            .SetFrontendServer("193.237.201.24")
                             .SetFrontendPort(ConfigManager.Frontend.Port)
                             .SetSuccess(true)
                             .Build().ToByteArray();
