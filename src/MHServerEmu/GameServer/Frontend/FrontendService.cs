@@ -176,7 +176,18 @@ namespace MHServerEmu.GameServer.Frontend
                     _clientDict.Remove(client.Session.Id);
                 }
 
+                if (ConfigManager.Frontend.BypassAuth == false) AccountManager.SavePlayerData();
+
                 Logger.Info($"Client disconnected (sessionId {client.Session.Id})");
+            }
+        }
+
+        public void BroadcastMessage(ushort muxId, GameMessage message)
+        {
+            lock (_sessionLock)
+            {
+                foreach (var kvp in _clientDict)
+                    kvp.Value.SendMessage(muxId, message);
             }
         }
     }

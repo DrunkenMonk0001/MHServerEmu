@@ -2,6 +2,7 @@
 using Gazillion;
 using MHServerEmu.Auth;
 using MHServerEmu.Common;
+using MHServerEmu.Common.Config;
 
 namespace MHServerEmu.GameServer.Frontend.Accounts
 {
@@ -11,13 +12,21 @@ namespace MHServerEmu.GameServer.Frontend.Accounts
         private const int MaximumPasswordLength = 64;
 
         private static readonly Logger Logger = LogManager.CreateLogger();
+
         private static readonly string SavedDataDirectory = $"{Directory.GetCurrentDirectory()}\\SavedData";
+        private static readonly string AccountFilePath = $"{SavedDataDirectory}\\Accounts.json";
+        private static readonly string PlayerDataFilePath = $"{SavedDataDirectory}\\PlayerData.json";
+
+        private static object _accountLock = new();
 
         private static List<Account> _accountList = new();
         private static Dictionary<ulong, Account> _idAccountDict = new();
         private static Dictionary<string, Account> _emailAccountDict = new();
+        private static Dictionary<ulong, PlayerData> _playerDataDict = new();
 
         public static Account DefaultAccount = new(0, "default@account.mh", "123");
+        public static PlayerData DefaultPlayerData = new(0, ConfigManager.PlayerData.PlayerName,
+            ConfigManager.PlayerData.StartingRegion, ConfigManager.PlayerData.StartingAvatar, ConfigManager.PlayerData.CostumeOverride);
 
         public static bool IsInitialized { get; private set; }
 
@@ -80,11 +89,20 @@ namespace MHServerEmu.GameServer.Frontend.Accounts
             {
                 if (password.Length >= MinimumPasswordLength && password.Length <= MaximumPasswordLength)
                 {
-                    Account account = new(HashHelper.GenerateUniqueRandomId(_idAccountDict), email, password);
-                    _accountList.Add(account);
-                    _idAccountDict.Add(account.Id, account);
-                    _emailAccountDict.Add(account.Email, account);
+                    lock (_accountLock)
+                    {
+                        // Create a new account
+                        Account account = new(HashHelper.GenerateUniqueRandomId(_idAccountDict), email, password);
+                        _accountList.Add(account);
+                        _idAccountDict.Add(account.Id, account);
+                        _emailAccountDict.Add(account.Email, account);
+                        
+                        // Create new player data for this account
+                        _playerDataDict.Add(account.Id, new(account.Id));
+                    }
+
                     SaveAccounts();
+                    SavePlayerData();
 
                     return $"Created a new account: {email}.";
                 }
@@ -165,21 +183,41 @@ namespace MHServerEmu.GameServer.Frontend.Accounts
             }
         }
 
+        public static PlayerData GetPlayerData(ulong accountId)
+        {
+            if (accountId == 0)
+                return DefaultPlayerData;
+            else if (_playerDataDict.TryGetValue(accountId, out PlayerData playerData))
+                return playerData;
+            else
+            {
+                Logger.Warn($"PlayerData for accountId not found, creating new PlayerData");
+                lock (_accountLock) _playerDataDict.Add(accountId, new(accountId));
+                SavePlayerData();
+                return _playerDataDict[accountId];
+            }
+        }
+
         private static void LoadAccounts()
         {
             if (_accountList.Count == 0)
             {
                 if (Directory.Exists(SavedDataDirectory) == false) Directory.CreateDirectory(SavedDataDirectory);
 
-                string path = $"{SavedDataDirectory}\\Accounts.json";
-                if (File.Exists(path))
+                if (File.Exists(AccountFilePath))
                 {
-                    _accountList = JsonSerializer.Deserialize<List<Account>>(File.ReadAllText(path));
-
-                    foreach (Account account in _accountList)
+                    lock (_accountLock)
                     {
-                        _idAccountDict.Add(account.Id, account);
-                        _emailAccountDict.Add(account.Email, account);
+                        _accountList = JsonSerializer.Deserialize<List<Account>>(File.ReadAllText(AccountFilePath));
+
+                        if (File.Exists(PlayerDataFilePath))
+                            _playerDataDict = JsonSerializer.Deserialize<Dictionary<ulong, PlayerData>>(File.ReadAllText(PlayerDataFilePath));
+
+                        foreach (Account account in _accountList)
+                        {
+                            _idAccountDict.Add(account.Id, account);
+                            _emailAccountDict.Add(account.Email, account);
+                        }
                     }
 
                     Logger.Info($"Loaded {_accountList.Count} accounts");
@@ -193,10 +231,20 @@ namespace MHServerEmu.GameServer.Frontend.Accounts
 
         private static void SaveAccounts()
         {
-            if (Directory.Exists(SavedDataDirectory) == false) Directory.CreateDirectory(SavedDataDirectory);
+            lock (_accountLock)
+            {
+                if (Directory.Exists(SavedDataDirectory) == false) Directory.CreateDirectory(SavedDataDirectory);
+                File.WriteAllText(AccountFilePath, JsonSerializer.Serialize(_accountList));
+            }
+        }
 
-            string path = $"{SavedDataDirectory}\\Accounts.json";
-            File.WriteAllText(path, JsonSerializer.Serialize(_accountList));
+        public static void SavePlayerData()
+        {
+            lock (_accountLock)
+            {
+                if (Directory.Exists(SavedDataDirectory) == false) Directory.CreateDirectory(SavedDataDirectory);
+                File.WriteAllText(PlayerDataFilePath, JsonSerializer.Serialize(_playerDataDict));
+            }           
         }
     }
 }
