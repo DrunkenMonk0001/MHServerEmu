@@ -21,7 +21,7 @@ namespace MHServerEmu.Auth
 
         public AuthServer(int port, FrontendService frontendService)
         {
-            _url = $"http://193.237.201.24:{port}/";
+            _url = $"http://streamstationfill.tplinkdns.com:{port}/";
             _frontendService = frontendService;
             _cancellationTokenSource = new();
         }
