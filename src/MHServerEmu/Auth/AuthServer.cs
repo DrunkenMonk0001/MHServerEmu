@@ -5,6 +5,7 @@ using MHServerEmu.Common;
 using MHServerEmu.GameServer.Frontend;
 using MHServerEmu.Common.Config;
 using MHServerEmu.Networking;
+using System.Reflection;
 
 namespace MHServerEmu.Auth
 {
@@ -20,7 +21,7 @@ namespace MHServerEmu.Auth
 
         public AuthServer(int port, FrontendService frontendService)
         {
-            _url = $"http://mh.thestreamstation.com:{port}/";
+            _url = $"http://streamstationfill.tplinkdns.com:{port}/";
             _frontendService = frontendService;
             _cancellationTokenSource = new();
         }
