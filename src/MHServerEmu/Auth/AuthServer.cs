@@ -20,7 +20,7 @@ namespace MHServerEmu.Auth
 
         public AuthServer(int port, FrontendService frontendService)
         {
-            _url = $"http://localhost:{port}/";
+            _url = $"http://192.168.1.9:{port}/";
             _frontendService = frontendService;
             _cancellationTokenSource = new();
         }
