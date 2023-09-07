@@ -17,6 +17,7 @@ namespace MHServerEmu.Common.Config.Sections
         public FrontendConfig(IniFile configFile)
         {
             BindIP = configFile.ReadString(Section, "BindIP");
+            PublicIP = configFile.ReadString(Section, "PublicIP");
             Port = configFile.ReadString(Section, "Port");
             BypassAuth = configFile.ReadBool(Section, "BypassAuth");
             SimulateQueue = configFile.ReadBool(Section, "SimulateQueue");
