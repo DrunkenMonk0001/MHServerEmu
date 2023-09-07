@@ -9,6 +9,7 @@ namespace MHServerEmu.Common.Config.Sections
         public string BindIP { get; }
         public string PublicIP { get; }
         public string Port { get; }
+        public string PublicAddress { get; }
         public bool BypassAuth { get; }
         public bool SimulateQueue { get; }
         public ulong QueuePlaceInLine { get; }
@@ -19,6 +20,7 @@ namespace MHServerEmu.Common.Config.Sections
             BindIP = configFile.ReadString(Section, "BindIP");
             PublicIP = configFile.ReadString(Section, "PublicIP");
             Port = configFile.ReadString(Section, "Port");
+            PublicAddress = configFile.ReadString(Section, "PublicAddress");
             BypassAuth = configFile.ReadBool(Section, "BypassAuth");
             SimulateQueue = configFile.ReadBool(Section, "SimulateQueue");
             QueuePlaceInLine = (ulong)configFile.ReadInt(Section, "QueuePlaceInLine");
