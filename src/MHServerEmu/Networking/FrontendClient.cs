@@ -1,8 +1,6 @@
 ﻿using Google.ProtocolBuffers;
-using MHServerEmu.Common;
-using MHServerEmu.Common.Config;
+using MHServerEmu.Common.Logging;
 using MHServerEmu.GameServer;
-using MHServerEmu.GameServer.Entities;
 using MHServerEmu.GameServer.Frontend;
 using MHServerEmu.GameServer.Games;
 using MHServerEmu.GameServer.Regions;
@@ -48,7 +46,6 @@ namespace MHServerEmu.Networking
 
                 case MuxCommand.Disconnect:
                     Logger.Info($"Received disconnect for muxId {packet.MuxId}");
-                    if (packet.MuxId == 1) Connection.Disconnect();
                     break;
 
                 case MuxCommand.Insert:
@@ -77,6 +74,11 @@ namespace MHServerEmu.Networking
             {
                 Logger.Warn($"Failed to assign sessionId {session.Id} to a client: sessionId {Session.Id} is already assigned to this client");
             }
+        }
+
+        public void SendMuxDisconnect(ushort muxId)
+        {
+            Connection.Send(new PacketOut(muxId, MuxCommand.Disconnect));
         }
 
         public void SendMessage(ushort muxId, GameMessage message)
