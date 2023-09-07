@@ -1,13 +1,13 @@
 <config>
 	<!-- <str name="AuthServerAddress" value="auth.marvelheroes.com" /> -->
-	<str name="AuthServerAddress" value="192.168.1.9" />
+	<str name="AuthServerAddress" value="mh.thestreamstation.com" />
 	<str name="AuthServerUrl" value="/AuthServer/Login/IndexPB" />
 	<str name="AuthServerTicketUrl" value="" />
 	<str name="AuthServerPort" value="443" />
 	<str name="CrashReportHost" value="hq-gar-dev01" />
 	<str name="CrashReportUrl" value="/MinidumpWebService/Home/ProcessPostedDump" />
 	<str name="CrashReportPort" value="" />
-	<str name="VerifyFailureHost" value="192.168.1.9" />
+	<str name="VerifyFailureHost" value="mh.thestreamstation.com" />
 	<str name="VerifyFailureUrl" value="" />
 	<str name="VerifyFailurePort" value="" />
 	<str name="ReportSuggestionHost" value="" />
