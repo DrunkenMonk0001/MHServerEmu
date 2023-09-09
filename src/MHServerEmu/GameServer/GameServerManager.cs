@@ -1,4 +1,7 @@
-﻿using MHServerEmu.Common.Logging;
+﻿using Gazillion;
+using ICSharpCode.SharpZipLib.Zip.Compression.Streams;
+using MHServerEmu.Common.Logging;
+using MHServerEmu.GameServer.Achievements;
 using MHServerEmu.GameServer.Billing;
 using MHServerEmu.GameServer.Frontend;
 using MHServerEmu.GameServer.Games;
@@ -9,6 +12,8 @@ namespace MHServerEmu.GameServer
     public class GameServerManager : IGameMessageHandler
     {
         private static readonly Logger Logger = LogManager.CreateLogger();
+
+        public AchievementDatabase AchievementDatabase { get; }
 
         public GameManager GameManager { get; }
 
@@ -21,8 +26,13 @@ namespace MHServerEmu.GameServer
 
         public GameServerManager()
         {
-            GameManager = new();
+            // Initialize achievement database
+            AchievementDatabase = new(File.ReadAllBytes(Path.Combine(Directory.GetCurrentDirectory(), "Assets", "CompressedAchievementDatabaseDump.bin")));
 
+            // Initialize game manager
+            GameManager = new(this);
+
+            // Initialize services
             FrontendService = new(this);
             GroupingManagerService = new(this);
             PlayerManagerService = new(this);
