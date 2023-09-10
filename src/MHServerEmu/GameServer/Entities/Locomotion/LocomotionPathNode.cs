@@ -3,7 +3,7 @@ using Google.ProtocolBuffers;
 using MHServerEmu.Common.Extensions;
 using MHServerEmu.GameServer.Common;
 
-namespace MHServerEmu.GameServer.Entities
+namespace MHServerEmu.GameServer.Entities.Locomotion
 {
     public class LocomotionPathNode
     {
@@ -38,15 +38,10 @@ namespace MHServerEmu.GameServer.Entities
 
         public override string ToString()
         {
-            using (MemoryStream memoryStream = new())
-            using (StreamWriter streamWriter = new(memoryStream))
-            {
-                streamWriter.WriteLine($"Vertex: {Vertex}");
-                streamWriter.WriteLine($"VertexSideRadius: 0x{VertexSideRadius.ToString("X")}");
-
-                streamWriter.Flush();
-                return Encoding.UTF8.GetString(memoryStream.ToArray());
-            }
+            StringBuilder sb = new();
+            sb.AppendLine($"Vertex: {Vertex}");
+            sb.AppendLine($"VertexSideRadius: 0x{VertexSideRadius:X}");
+            return sb.ToString();
         }
     }
 }

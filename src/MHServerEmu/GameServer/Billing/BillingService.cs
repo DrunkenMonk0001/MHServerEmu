@@ -1,4 +1,5 @@
 ﻿using Gazillion;
+using MHServerEmu.Common.Config;
 using MHServerEmu.Common.Logging;
 using MHServerEmu.GameServer.Billing.Catalogs;
 using MHServerEmu.GameServer.Entities;
@@ -22,6 +23,15 @@ namespace MHServerEmu.GameServer.Billing
         {
             _gameServerManager = gameServerManager;
             _catalog = JsonSerializer.Deserialize<Catalog>(File.ReadAllText(Path.Combine(Directory.GetCurrentDirectory(), "Assets", "Catalog.json")));
+
+            // Apply a patch to the catalog if there's one
+            string patchPath = Path.Combine(Directory.GetCurrentDirectory(), "Assets", "CatalogPatch.json");
+            if (File.Exists(patchPath))
+            {
+                CatalogEntry[] catalogPatch = JsonSerializer.Deserialize<CatalogEntry[]>(File.ReadAllText(patchPath));
+                _catalog.ApplyPatch(catalogPatch);
+            }
+
             Logger.Info($"Initialized store catalog with {_catalog.Entries.Length} entries");
         }
 
@@ -60,6 +70,9 @@ namespace MHServerEmu.GameServer.Billing
 
                             // Get replication id for the client avatar
                             ulong replicationId = (ulong)Enum.Parse(typeof(HardcodedAvatarReplicationId), Enum.GetName(typeof(HardcodedAvatarEntity), client.Session.Account.PlayerData.Avatar));
+
+                            // Update account data if needed
+                            if (ConfigManager.Frontend.BypassAuth == false) client.Session.Account.PlayerData.CostumeOverride = entry.GuidItems[0].ItemPrototypeRuntimeIdForClient;
 
                             // Send NetMessageSetProperty message
                             client.SendMessage(1, new(property.ToNetMessageSetProperty(replicationId)));

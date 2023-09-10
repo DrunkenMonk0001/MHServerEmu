@@ -3,6 +3,8 @@ using Google.ProtocolBuffers;
 using MHServerEmu.Common.Extensions;
 using MHServerEmu.Common.Logging;
 using MHServerEmu.GameServer.Common;
+using MHServerEmu.GameServer.Entities.Locomotion;
+using MHServerEmu.GameServer.GameData;
 
 namespace MHServerEmu.GameServer.Entities
 {
@@ -18,10 +20,10 @@ namespace MHServerEmu.GameServer.Entities
 
         private static readonly Logger Logger = LogManager.CreateLogger();
 
-        public ulong ReplicationPolicy { get; }
+        public uint ReplicationPolicy { get; }
         public ulong EntityId { get; set; }
         public bool[] Flags { get; set; }   // mystery flags: 2, 6
-        public ulong EnumEntityPrototype { get; set; }
+        public ulong PrototypeId { get; set; }
         public Vector3 Position { get; set; }
         public Vector3 Orientation { get; set; }
         public LocomotionState LocomotionState { get; set; }
@@ -31,13 +33,13 @@ namespace MHServerEmu.GameServer.Entities
         {
             CodedInputStream stream = CodedInputStream.CreateInstance(data);
 
-            ReplicationPolicy = stream.ReadRawVarint64();
+            ReplicationPolicy = stream.ReadRawVarint32();
             EntityId = stream.ReadRawVarint64();
 
             Flags = stream.ReadRawVarint32().ToBoolArray(FieldFlagCount);
             //LocMsgFlags = Flags >> 12;
 
-            if (Flags[11]) EnumEntityPrototype = stream.ReadRawVarint64();
+            if (Flags[11]) PrototypeId = stream.ReadPrototypeId(PrototypeEnumType.Entity);
 
             Position = new(stream, 3);
 
@@ -82,7 +84,7 @@ namespace MHServerEmu.GameServer.Entities
                 stream.WriteRawVarint64(EntityId);
                 stream.WriteRawVarint32(Flags.ToUInt32());
 
-                if (Flags[11]) stream.WriteRawVarint64(EnumEntityPrototype);
+                if (Flags[11]) stream.WritePrototypeId(PrototypeId, PrototypeEnumType.Entity);
                 stream.WriteRawBytes(Position.Encode(3));
 
                 if (Flags[0])
@@ -100,21 +102,20 @@ namespace MHServerEmu.GameServer.Entities
 
         public override string ToString()
         {
-            using (MemoryStream memoryStream = new())
-            using (StreamWriter streamWriter = new(memoryStream))
-            {
-                streamWriter.WriteLine($"ReplicationPolicy: 0x{ReplicationPolicy.ToString("X")}");
-                streamWriter.WriteLine($"EntityId: 0x{EntityId.ToString("X")}");
-                for (int i = 0; i < Flags.Length; i++) streamWriter.WriteLine($"Flag{i}: {Flags[i]}");
-                streamWriter.WriteLine($"EnumEntityPrototype: 0x{EnumEntityPrototype.ToString("X")}");
-                streamWriter.WriteLine($"Position: {Position}");
-                streamWriter.WriteLine($"Orientation: {Orientation}");
-                streamWriter.WriteLine($"LocomotionState: {LocomotionState}");
-                streamWriter.WriteLine($"UnknownSetting: 0x{UnknownSetting.ToString("X")}");
+            StringBuilder sb = new();
+            sb.AppendLine($"ReplicationPolicy: 0x{ReplicationPolicy:X}");
+            sb.AppendLine($"EntityId: 0x{EntityId:X}");
 
-                streamWriter.Flush();
-                return Encoding.UTF8.GetString(memoryStream.ToArray());
-            }
+            sb.Append("Flags: ");
+            for (int i = 0; i < Flags.Length; i++) if (Flags[i]) sb.Append($"{i} ");
+            sb.AppendLine();
+
+            sb.AppendLine($"PrototypeId: {GameDatabase.GetPrototypePath(PrototypeId)}");
+            sb.AppendLine($"Position: {Position}");
+            sb.AppendLine($"Orientation: {Orientation}");
+            sb.AppendLine($"LocomotionState: {LocomotionState}");
+            sb.AppendLine($"UnknownSetting: 0x{UnknownSetting:X}");
+            return sb.ToString();
         }
     }
 }
