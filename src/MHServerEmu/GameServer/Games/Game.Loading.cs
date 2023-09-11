@@ -324,6 +324,28 @@ namespace MHServerEmu.GameServer.Games
 
                     // edit player data here
 
+                    foreach (Property property in player.PropertyCollection.List)
+                    {
+                        switch (property.Enum)
+                        {
+                            // Unlock starter avatars
+                            case PropertyEnum.AvatarUnlock:
+                                if ((AvatarUnlockType)property.Value.Get() == AvatarUnlockType.Starter) property.Value.Set((int)AvatarUnlockType.Type3);
+                                break;
+
+                            // Configure avatar library
+                            case PropertyEnum.AvatarLibraryLevel:
+                                property.Value.Set(60);     // Set all avatar levels to 60
+                                break;
+                            case PropertyEnum.AvatarLibraryCostume:
+                                property.Value.Set(0ul);    // Reset the costume to default
+                                break;
+                            case PropertyEnum.AvatarLibraryTeamUp:
+                                property.Value.Set(0ul);    // Clean up team ups
+                                break;
+                        }
+                    }
+
                     var customEntityCreateMessage = NetMessageEntityCreate.CreateBuilder()
                         .SetBaseData(ByteString.CopyFrom(baseData.Encode()))
                         .SetArchiveData(ByteString.CopyFrom(player.Encode()))
@@ -360,20 +382,41 @@ namespace MHServerEmu.GameServer.Games
 
                         avatar.PlayerName.Text = playerData.PlayerName;
 
-                        foreach (Property property in avatar.Properties)
+                        bool hasCostumeCurrent = false;
+                        bool hasCharacterLevel = false;
+                        bool hasCombatLevel = false;
+
+                        foreach (Property property in avatar.PropertyCollection.List)
                         {
-                            if (property.Enum == PropertyEnum.CostumeCurrent && playerData.CostumeOverride != 0)
+                            switch (property.Enum)
                             {
-                                try
-                                {
-                                    property.Value.Set(playerData.CostumeOverride);
-                                }
-                                catch
-                                {
-                                    Logger.Warn($"Failed to get costume prototype enum for id {ConfigManager.PlayerData.CostumeOverride}");
-                                }
+                                case PropertyEnum.CostumeCurrent:
+                                    try
+                                    {
+                                        property.Value.Set(playerData.CostumeOverride);
+                                    }
+                                    catch
+                                    {
+                                        Logger.Warn($"Failed to get costume prototype enum for id {ConfigManager.PlayerData.CostumeOverride}");
+                                        property.Value.Set(0ul);
+                                    }
+                                    hasCostumeCurrent = true;
+                                    break;
+                                case PropertyEnum.CharacterLevel:
+                                    property.Value.Set(60);
+                                    hasCharacterLevel = true;
+                                    break;
+                                case PropertyEnum.CombatLevel:
+                                    property.Value.Set(60);
+                                    hasCombatLevel = true;
+                                    break;
                             }
                         }
+
+                        // Create properties if not found
+                        if (hasCostumeCurrent == false) avatar.PropertyCollection.List.Add(new(PropertyEnum.CostumeCurrent, playerData.CostumeOverride));
+                        if (hasCharacterLevel == false) avatar.PropertyCollection.List.Add(new(PropertyEnum.CharacterLevel, 60));
+                        if (hasCombatLevel == false) avatar.PropertyCollection.List.Add(new(PropertyEnum.CombatLevel, 60));
                     }
 
                     var customEntityCreateMessage = NetMessageEntityCreate.CreateBuilder()

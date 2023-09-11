@@ -104,6 +104,7 @@ namespace MHServerEmu.Auth
                             .SetSessionId(session.Id)
                             .SetFrontendServer(ConfigManager.Frontend.PublicAddress)
                             .SetFrontendPort(ConfigManager.Frontend.Port)
+                            .SetPlatformTicket("")
                             .SetSuccess(true)
                             .Build().ToByteArray();
 
