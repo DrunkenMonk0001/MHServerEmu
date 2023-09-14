@@ -1,4 +1,5 @@
 ﻿using System.Text;
+using Gazillion;
 using Google.ProtocolBuffers;
 using MHServerEmu.Common.Extensions;
 using MHServerEmu.GameServer.Common;
@@ -12,7 +13,7 @@ namespace MHServerEmu.GameServer.Powers
 
         public uint ReplicationPolicy { get; set; }
         public bool[] Flags { get; set; }
-        public ulong PowerPrototype { get; set; }
+        public ulong PowerPrototypeId { get; set; }
         public ulong TargetId { get; set; }
         public ulong PowerOwnerId { get; set; }
         public ulong UltimateOwnerId { get; set; }
@@ -31,7 +32,7 @@ namespace MHServerEmu.GameServer.Powers
 
             ReplicationPolicy = stream.ReadRawVarint32();
             Flags = stream.ReadRawVarint32().ToBoolArray(FlagCount);
-            PowerPrototype = stream.ReadPrototypeId(PrototypeEnumType.Power);
+            PowerPrototypeId = stream.ReadPrototypeId(PrototypeEnumType.Power);
             TargetId = stream.ReadRawVarint64();
 
             if (Flags[1])
@@ -54,6 +55,51 @@ namespace MHServerEmu.GameServer.Powers
             if (Flags[11]) TransferToId = stream.ReadRawVarint64();
         }
 
+        public PowerResultArchive(NetMessageTryActivatePower tryActivatePower)
+        {
+            // damage test
+            ReplicationPolicy = 0x1;
+            Flags = 0u.ToBoolArray(FlagCount);
+            PowerPrototypeId = tryActivatePower.PowerPrototypeId;
+            TargetId = tryActivatePower.IdTargetEntity;
+            PowerOwnerId = tryActivatePower.IdUserEntity;
+            Flags[3] = true;    // UltimateOwnerId same as PowerOwnerId
+            
+            if (tryActivatePower.IdTargetEntity != 0)
+            {
+                //ResultFlags = 0x85;   // brutal strike
+                //Flags[4] = true;
+
+                Position = new(tryActivatePower.TargetPosition);
+                Flags[5] = true;
+
+                Damage0 = 100;
+                Flags[6] = true;
+            }
+        }
+
+        public PowerResultArchive(NetMessageContinuousPowerUpdateToServer continuousPowerUpdate)
+        {
+            // damage test
+            ReplicationPolicy = 0x1;
+            Flags = 0u.ToBoolArray(FlagCount);
+            PowerPrototypeId = continuousPowerUpdate.PowerPrototypeId;
+            TargetId = continuousPowerUpdate.IdTargetEntity;
+            Flags[3] = true;    // UltimateOwnerId same as PowerOwnerId
+
+            if (continuousPowerUpdate.IdTargetEntity != 0)
+            {
+                //ResultFlags = 0x85;   // brutal strike
+                //Flags[4] = true;
+
+                Position = new(continuousPowerUpdate.TargetPosition);
+                Flags[5] = true;
+
+                Damage0 = 100;
+                Flags[6] = true;
+            }
+        }
+
         public PowerResultArchive() { }
 
         public byte[] Encode()
@@ -64,7 +110,7 @@ namespace MHServerEmu.GameServer.Powers
 
                 cos.WriteRawVarint32(ReplicationPolicy);
                 cos.WriteRawVarint32(Flags.ToUInt32());
-                cos.WritePrototypeId(PowerPrototype, PrototypeEnumType.Power);
+                cos.WritePrototypeId(PowerPrototypeId, PrototypeEnumType.Power);
                 cos.WriteRawVarint64(TargetId);
                 if (Flags[1] == false && Flags[0] == false) cos.WriteRawVarint64(PowerOwnerId);
                 if (Flags[3] == false && Flags[2] == false) cos.WriteRawVarint64(UltimateOwnerId);
@@ -91,18 +137,18 @@ namespace MHServerEmu.GameServer.Powers
             for (int i = 0; i < Flags.Length; i++) if (Flags[i]) sb.Append($"{i} ");
             sb.AppendLine();
 
-            sb.AppendLine($"PowerPrototype: {GameDatabase.GetPrototypePath(PowerPrototype)}");
-            sb.AppendLine($"TargetId: 0x{TargetId:X}");
-            sb.AppendLine($"PowerOwnerId: 0x{PowerOwnerId:X}");
-            sb.AppendLine($"UltimateOwnerId: 0x{UltimateOwnerId:X}");
+            sb.AppendLine($"PowerPrototype: {GameDatabase.GetPrototypePath(PowerPrototypeId)}");
+            sb.AppendLine($"TargetId: {TargetId}");
+            sb.AppendLine($"PowerOwnerId: {PowerOwnerId}");
+            sb.AppendLine($"UltimateOwnerId: {UltimateOwnerId}");
             sb.AppendLine($"ResultFlags: 0x{ResultFlags:X}");
-            sb.AppendLine($"Damage0: 0x{Damage0:X}");
-            sb.AppendLine($"Damage1: 0x{Damage1:X}");
-            sb.AppendLine($"Damage2: 0x{Damage2:X}");
-            sb.AppendLine($"Healing: 0x{Healing:X}");
-            sb.AppendLine($"AssetGuid: 0x{AssetGuid:X}");
+            sb.AppendLine($"Damage0: {Damage0}");
+            sb.AppendLine($"Damage1: {Damage1}");
+            sb.AppendLine($"Damage2: {Damage2}");
+            sb.AppendLine($"Healing: {Healing}");
+            sb.AppendLine($"AssetGuid: {AssetGuid}");
             sb.AppendLine($"Position: {Position}");
-            sb.AppendLine($"TransferToId: 0x{TransferToId:X}");
+            sb.AppendLine($"TransferToId: {TransferToId}");
 
             return sb.ToString();
         }
