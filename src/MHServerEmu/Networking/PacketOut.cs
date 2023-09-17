@@ -8,16 +8,16 @@ namespace MHServerEmu.Networking
     {
         private static readonly Logger Logger = LogManager.CreateLogger();
 
-        private ushort _muxId;
-        private MuxCommand _muxCommand;
-        private List<GameMessage> _messageList = new();
+        private readonly ushort _muxId;
+        private readonly MuxCommand _muxCommand;
+        private readonly List<GameMessage> _messageList = new();
 
         public byte[] Data
         {
             get
             {
                 byte[] bodyBuffer = Array.Empty<byte>();
-                if (_muxCommand == MuxCommand.Message)
+                if (_muxCommand == MuxCommand.Data)
                 {
                     if (_messageList.Count > 0)
                     {
@@ -28,8 +28,8 @@ namespace MHServerEmu.Networking
                             foreach (GameMessage message in _messageList)
                             {
                                 cos.WriteRawVarint64(message.Id);
-                                cos.WriteRawVarint64((ulong)message.Content.Length);
-                                cos.WriteRawBytes(message.Content);
+                                cos.WriteRawVarint64((ulong)message.Payload.Length);
+                                cos.WriteRawBytes(message.Payload);
                             }
 
                             cos.Flush();
@@ -38,7 +38,7 @@ namespace MHServerEmu.Networking
                     }
                     else
                     {
-                        Logger.Warn("Message packet contains no messages!");
+                        Logger.Warn("Data packet contains no messages!");
                     }
                 }
 
@@ -60,9 +60,7 @@ namespace MHServerEmu.Networking
             _muxCommand = command;
         }
 
-        public void AddMessage(GameMessage message)
-        {
-            _messageList.Add(message);
-        }
+        public void AddMessage(GameMessage message) => _messageList.Add(message);
+        public void AddMessages(IEnumerable<GameMessage> messages) => _messageList.AddRange(messages);
     }
 }

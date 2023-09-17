@@ -7,10 +7,10 @@ namespace MHServerEmu.Networking
     public enum MuxCommand
     {
         Connect = 0x01,
-        Accept = 0x02,
+        ConnectAck = 0x02,
         Disconnect = 0x03,
-        Insert = 0x04,
-        Message = 0x05
+        ConnectWithData = 0x04,
+        Data = 0x05
     }
 
     public class PacketIn
@@ -29,7 +29,7 @@ namespace MHServerEmu.Networking
             Command = (MuxCommand)stream.ReadRawByte();
 
             // Read messages
-            if (Command == MuxCommand.Message)
+            if (Command == MuxCommand.Data)
             {
                 if (bodyLength > 0)
                 {
@@ -49,7 +49,7 @@ namespace MHServerEmu.Networking
                 }
                 else
                 {
-                    Logger.Warn($"Received empty message packet on {MuxId}");
+                    Logger.Warn($"Received empty data packet on {MuxId}");
                 }
             }
         }
@@ -57,7 +57,7 @@ namespace MHServerEmu.Networking
         public PacketOut ToPacketOut()
         {
             PacketOut packetOut = new(MuxId, Command);
-            foreach (GameMessage message in Messages) packetOut.AddMessage(message);
+            packetOut.AddMessages(Messages);
             return packetOut;
         }
     }
