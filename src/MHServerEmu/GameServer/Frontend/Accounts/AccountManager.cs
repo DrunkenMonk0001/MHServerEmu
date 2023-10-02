@@ -2,7 +2,6 @@
 using MHServerEmu.Auth;
 using MHServerEmu.Common;
 using MHServerEmu.Common.Config;
-using MHServerEmu.Common.Logging;
 using MHServerEmu.GameServer.Frontend.Accounts.DBModels;
 
 namespace MHServerEmu.GameServer.Frontend.Accounts
@@ -19,61 +18,52 @@ namespace MHServerEmu.GameServer.Frontend.Accounts
         private const int MinimumPasswordLength = 3;
         private const int MaximumPasswordLength = 64;
 
-        private static readonly Logger Logger = LogManager.CreateLogger();
-
         public static readonly DBAccount DefaultAccount = new(ConfigManager.PlayerData.PlayerName, ConfigManager.PlayerData.StartingRegion, ConfigManager.PlayerData.StartingAvatar);
 
-        public static bool IsInitialized { get; private set; }
+        public static bool IsInitialized { get; }
 
         static AccountManager()
         {
-            IsInitialized = true;
+            IsInitialized = DBManager.IsInitialized;
         }
 
-        public static DBAccount GetAccountByEmail(string email, string password, out AuthErrorCode? errorCode)
+        public static AuthStatusCode TryGetAccountByLoginDataPB(LoginDataPB loginDataPB, out DBAccount account)
         {
-            errorCode = null;
+            string email = loginDataPB.EmailAddress.ToLower();
 
-            if (DBManager.TryQueryAccountByEmail(email, out DBAccount account) == false)
-            {
-                errorCode = AuthErrorCode.IncorrectUsernameOrPassword1;
-                return null;
-            }
+            if (DBManager.TryQueryAccountByEmail(email, out account) == false)
+                return AuthStatusCode.IncorrectUsernameOrPassword1;
 
-            if (Cryptography.VerifyPassword(password, account.PasswordHash, account.Salt))
+            if (Cryptography.VerifyPassword(loginDataPB.Password, account.PasswordHash, account.Salt))
             {
                 if (account.IsBanned)
                 {
-                    errorCode = AuthErrorCode.AccountBanned;
-                    return null;
+                    account = null;
+                    return AuthStatusCode.AccountBanned;
                 }
                 else if (account.IsArchived)
                 {
-                    errorCode = AuthErrorCode.AccountArchived;
-                    return null;
+                    account = null;
+                    return AuthStatusCode.AccountArchived;
                 }
                 else if (account.IsPasswordExpired)
                 {
-                    errorCode = AuthErrorCode.PasswordExpired;
-                    return null;
+                    account = null;
+                    return AuthStatusCode.PasswordExpired;
                 }
                 else
                 {
-                    return account;
+                    return AuthStatusCode.Success;
                 }
             }
             else
             {
-                errorCode = AuthErrorCode.IncorrectUsernameOrPassword1;
-                return null;
+                account = null;
+                return AuthStatusCode.IncorrectUsernameOrPassword1;
             }
         }
 
-        public static DBAccount GetAccountByLoginDataPB(LoginDataPB loginDataPB, out AuthErrorCode? errorCode)
-        {
-            string email = loginDataPB.EmailAddress.ToLower();
-            return GetAccountByEmail(email, loginDataPB.Password, out errorCode);
-        }
+        public static bool TryGetAccountByEmail(string email, out DBAccount account) => DBManager.TryQueryAccountByEmail(email, out account);
 
         public static string CreateAccount(string email, string playerName, string password)
         {
@@ -81,10 +71,10 @@ namespace MHServerEmu.GameServer.Frontend.Accounts
             {
                 if (password.Length >= MinimumPasswordLength && password.Length <= MaximumPasswordLength)
                 {
-                    // Create a new account and save it to the database
+                    // Create a new account and insert it into the database
                     DBAccount account = new(email, playerName, password);
 
-                    if (DBManager.SaveAccount(account))
+                    if (DBManager.InsertAccount(account))
                         return $"Created a new account: {email} ({playerName}).";
                     else
                         return "Failed to create account due to a database error.";
@@ -100,6 +90,27 @@ namespace MHServerEmu.GameServer.Frontend.Accounts
             }
         }
 
+        public static string ChangeAccountPlayerName(string email, string playerName)
+        {
+            if (DBManager.TryQueryAccountByEmail(email, out DBAccount account))
+            {
+                if (DBManager.QueryIsPlayerNameTaken(playerName) == false)
+                {
+                    account.PlayerName = playerName;
+                    DBManager.UpdateAccount(account);
+                    return $"Successfully changed player name for account {email} to {playerName}.";
+                }
+                else
+                {
+                    return $"Failed to change player name: the name {playerName} is already taken.";
+                }
+            }
+            else
+            {
+                return $"Failed to change player name: account {email} not found.";
+            }
+        }
+
         public static string ChangeAccountPassword(string email, string newPassword)
         {
             if (DBManager.TryQueryAccountByEmail(email, out DBAccount account))
@@ -109,7 +120,7 @@ namespace MHServerEmu.GameServer.Frontend.Accounts
                     account.PasswordHash = Cryptography.HashPassword(newPassword, out byte[] salt);
                     account.Salt = salt;
                     account.IsPasswordExpired = false;
-                    DBManager.SaveAccount(account);
+                    DBManager.UpdateAccount(account);
                     return $"Successfully changed password for account {email}.";
                 }
                 else
@@ -128,7 +139,7 @@ namespace MHServerEmu.GameServer.Frontend.Accounts
             if (DBManager.TryQueryAccountByEmail(email, out DBAccount account))
             {
                 account.UserLevel = userLevel;
-                DBManager.SaveAccount(account);
+                DBManager.UpdateAccount(account);
                 return $"Successfully set user level for account {email} to {userLevel}.";
             }
             else
@@ -144,7 +155,7 @@ namespace MHServerEmu.GameServer.Frontend.Accounts
                 if (account.IsBanned == false)
                 {
                     account.IsBanned = true;
-                    DBManager.SaveAccount(account);
+                    DBManager.UpdateAccount(account);
                     return $"Successfully banned account {email}.";
                 }
                 else
@@ -165,7 +176,7 @@ namespace MHServerEmu.GameServer.Frontend.Accounts
                 if (account.IsBanned)
                 {
                     account.IsBanned = false;
-                    DBManager.SaveAccount(account);
+                    DBManager.UpdateAccount(account);
                     return $"Successfully unbanned account {email}.";
                 }
                 else

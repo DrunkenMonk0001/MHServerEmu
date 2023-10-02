@@ -1,4 +1,5 @@
 ﻿using System.Text;
+using Gazillion;
 using MHServerEmu.Auth;
 using MHServerEmu.Common.Commands;
 using MHServerEmu.GameServer.Frontend.Accounts.DBModels;
@@ -15,6 +16,20 @@ namespace MHServerEmu.GameServer.Frontend.Accounts
             if (@params == null) return Fallback();
             if (@params.Length < 3) return "Invalid arguments. Type 'help account create' to get help.";
             return AccountManager.CreateAccount(@params[0].ToLower(), @params[1], @params[2]);
+        }
+
+        [Command("playername", "Changes player name for the specified account.\nUsage: account playername [email] [playername]", AccountUserLevel.User)]
+        public string PlayerName(string[] @params, FrontendClient client)
+        {
+            if (@params == null) return Fallback();
+            if (@params.Length < 2) return "Invalid arguments. Type 'help account playername' to get help.";
+
+            string email = @params[0].ToLower();
+
+            if (client.Session.Account.UserLevel < AccountUserLevel.Moderator && email != client.Session.Account.Email)
+                return "You are allowed to change player name only for your own account.";
+            else
+                return AccountManager.ChangeAccountPlayerName(email, @params[1]);
         }
 
         [Command("password", "Changes password for the specified account.\nUsage: account password [email] [password]", AccountUserLevel.User)]
@@ -54,12 +69,13 @@ namespace MHServerEmu.GameServer.Frontend.Accounts
             if (@params == null) return Fallback();
             if (@params.Length < 2) return "Invalid arguments. Type 'help account verify' to get help.";
 
-            DBAccount account = AccountManager.GetAccountByEmail(@params[0].ToLower(), @params[1], out AuthErrorCode? errorCode);
+            var loginDataPB = LoginDataPB.CreateBuilder().SetEmailAddress(@params[0].ToLower()).SetPassword(@params[1]).Build();
+            AuthStatusCode statusCode = AccountManager.TryGetAccountByLoginDataPB(loginDataPB, out _);
 
-            if (account != null)
+            if (statusCode == AuthStatusCode.Success)
                 return "Account credentials are valid.";
             else
-                return $"Account credentials are NOT valid: {errorCode}!";
+                return $"Account credentials are NOT valid: {statusCode}!";
         }
 
         [Command("ban", "Bans the specified account.\nUsage: account ban [email]", AccountUserLevel.Moderator)]
