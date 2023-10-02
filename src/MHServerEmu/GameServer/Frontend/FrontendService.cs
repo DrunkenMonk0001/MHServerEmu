@@ -120,15 +120,16 @@ namespace MHServerEmu.GameServer.Frontend
                         // Send achievement database
                         client.SendMessage(1, new(_gameServerManager.AchievementDatabase.ToNetMessageAchievementDatabaseDump()));
                         // NetMessageQueryIsRegionAvailable regionPrototype: 9833127629697912670 should go in the same packet as AchievementDatabaseDump
-
-                        // Add player to a game
-                        _gameServerManager.GameManager.GetAvailableGame().AddPlayer(client);
                     }
                     else if (initialClientHandshake.ServerType == PubSubServerTypes.GROUPING_MANAGER_FRONTEND && client.FinishedGroupingManagerFrontendHandshake == false)
                     {
                         client.FinishedGroupingManagerFrontendHandshake = true;
                         _gameServerManager.GroupingManagerService.SendMotd(client);
                     }
+
+                    // Add player to a game when both handshakes are finished
+                    if (client.FinishedPlayerMgrServerFrontendHandshake && client.FinishedGroupingManagerFrontendHandshake)
+                        _gameServerManager.GameManager.GetAvailableGame().AddPlayer(client);
 
                     break;
 
