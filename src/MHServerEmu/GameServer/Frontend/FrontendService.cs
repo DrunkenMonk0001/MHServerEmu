@@ -109,9 +109,9 @@ namespace MHServerEmu.GameServer.Frontend
                     Logger.Info($"Received InitialClientHandshake for {initialClientHandshake.ServerType} on muxId {muxId}");
 
                     // These handshakes should probably be handled by PlayerManagerService and GroupingManagerService. They should probably also track clients on their own.
-                    if (initialClientHandshake.ServerType == PubSubServerTypes.PLAYERMGR_SERVER_FRONTEND && client.FinishedPlayerMgrServerFrontendHandshake == false)
+                    if (initialClientHandshake.ServerType == PubSubServerTypes.PLAYERMGR_SERVER_FRONTEND && client.FinishedPlayerManagerHandshake == false)
                     {
-                        client.FinishedPlayerMgrServerFrontendHandshake = true;
+                        client.FinishedPlayerManagerHandshake = true;
                         
                         // Queue loading
                         client.IsLoading = true;
@@ -121,16 +121,19 @@ namespace MHServerEmu.GameServer.Frontend
                         client.SendMessage(1, new(_gameServerManager.AchievementDatabase.ToNetMessageAchievementDatabaseDump()));
                         // NetMessageQueryIsRegionAvailable regionPrototype: 9833127629697912670 should go in the same packet as AchievementDatabaseDump
                     }
-                    else if (initialClientHandshake.ServerType == PubSubServerTypes.GROUPING_MANAGER_FRONTEND && client.FinishedGroupingManagerFrontendHandshake == false)
+                    else if (initialClientHandshake.ServerType == PubSubServerTypes.GROUPING_MANAGER_FRONTEND && client.FinishedGroupingManagerHandshake == false)
                     {
-                        client.FinishedGroupingManagerFrontendHandshake = true;
-                        _gameServerManager.GroupingManagerService.SendMotd(client);
+                        client.FinishedGroupingManagerHandshake = true;
                     }
 
-                    // Add player to a game when both handshakes are finished
-                    if (client.FinishedPlayerMgrServerFrontendHandshake && client.FinishedGroupingManagerFrontendHandshake)
+                    // Add the player to a game when both handshakes are finished
+                    // Adding the player early can cause GroupingManager handshake to not finish properly, which leads to the chat not working
+                    if (client.FinishedPlayerManagerHandshake && client.FinishedGroupingManagerHandshake)
+                    {
+                        _gameServerManager.GroupingManagerService.SendMotd(client);
                         _gameServerManager.GameManager.GetAvailableGame().AddPlayer(client);
-
+                    }
+                        
                     break;
 
                 default:
