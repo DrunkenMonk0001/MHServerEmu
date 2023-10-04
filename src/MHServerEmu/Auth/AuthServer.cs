@@ -1,6 +1,9 @@
-﻿using System.Net;
+﻿using System.Collections.Specialized;
+using System.Net;
+using System.Web;
 using Google.ProtocolBuffers;
 using Gazillion;
+using MHServerEmu.Auth.WebApi;
 using MHServerEmu.Common.Config;
 using MHServerEmu.Common.Logging;
 using MHServerEmu.GameServer.Frontend;
@@ -16,6 +19,7 @@ namespace MHServerEmu.Auth
         private readonly string _url;
         private readonly FrontendService _frontendService;
         private readonly CancellationTokenSource _cancellationTokenSource;
+        private readonly WebApiHandler _webApiHandler;
 
         private HttpListener _listener;
 
@@ -24,6 +28,7 @@ namespace MHServerEmu.Auth
             _url = $"http://192.168.1.9:{port}/";
             _frontendService = frontendService;
             _cancellationTokenSource = new();
+            _webApiHandler = new();
         }
 
         public async void Run()
@@ -39,24 +44,10 @@ namespace MHServerEmu.Auth
             {
                 try
                 {
-                    // Wait for a connection and get request and response from it
+                    // Wait for a connection, and handle the request
                     HttpListenerContext context = await _listener.GetContextAsync().WaitAsync(_cancellationTokenSource.Token);
-                    HttpListenerRequest request = context.Request;
-                    HttpListenerResponse response = context.Response;
-
-                    if (request.UserAgent == "Secret Identity Studios Http Client")     // Ignore requests from other user agents
-                    {
-                        if (request.HttpMethod == "POST" && request.Url.LocalPath == "/Login/IndexPB")
-                            HandleMessage(request, response);
-                        else
-                            Logger.Warn($"Received {request.HttpMethod} to {request.Url.LocalPath} from a game client on {request.RemoteEndPoint}");
-                    }
-                    else
-                    {
-                        Logger.Warn($"Received {request.HttpMethod} to {request.Url.LocalPath} from an unknown UserAgent on {request.RemoteEndPoint}. UserAgent information: {request.UserAgent}");
-                    }
-
-                    response.Close();
+                    HandleRequest(context.Request, context.Response);
+                    context.Response.Close();
                 }
                 catch (TaskCanceledException)
                 {
@@ -69,6 +60,9 @@ namespace MHServerEmu.Auth
             }
         }
 
+        /// <summary>
+        /// Stops listening and shuts down the auth server.
+        /// </summary>
         public void Shutdown()
         {
             if (_listener.IsListening == false) return;
@@ -82,57 +76,106 @@ namespace MHServerEmu.Auth
             }
         }
 
+        /// <summary>
+        /// Handles HTTP request.
+        /// </summary>
+        /// <param name="request">HTTP listener request.</param>
+        /// <param name="response">HTTP listener response.</param>
+        private void HandleRequest(HttpListenerRequest request, HttpListenerResponse response)
+        {
+            bool requestIsFromGameClient = (request.UserAgent == "Secret Identity Studios Http Client");
+
+            // We should be getting only GET and POST
+            switch (request.HttpMethod)
+            {
+                case "GET":
+                    if (request.Url.LocalPath == "/favicon.ico") return;     // Ignore favicon requests
+
+                    // Web API get requests
+                    if (requestIsFromGameClient == false && ConfigManager.WebApi.EnableWebApi)
+                    {
+                        HandleWebApiRequest(request, response);
+                        return;
+                    }
+
+                    break;
+
+                case "POST":
+                    // Client auth messages
+                    if (requestIsFromGameClient && request.Url.LocalPath == "/Login/IndexPB")
+                    {
+                        HandleMessage(request, response);
+                        return;
+                    }
+                    
+                    // Web API post requests
+                    if (requestIsFromGameClient == false && ConfigManager.WebApi.EnableWebApi)
+                    {
+                        HandleWebApiRequest(request, response);
+                        return;
+                    }
+
+                    break;
+            }
+
+            // Display a warning for unhandled requests
+            string source = requestIsFromGameClient ? "a game client" : $"an unknown UserAgent ({request.UserAgent})";
+            Logger.Warn($"Received unhandled {request.HttpMethod} to {request.Url.LocalPath} from {source} on {request.RemoteEndPoint}");
+        }
+
+        /// <summary>
+        /// Handles protobuf message received over HTTP.
+        /// </summary>
+        /// <param name="request">HTTP listener request.</param>
+        /// <param name="response">HTTP listener response.</param>
         private async void HandleMessage(HttpListenerRequest request, HttpListenerResponse response)
         {
             // Parse message from POST
-            CodedInputStream stream = CodedInputStream.CreateInstance(request.InputStream);
-            GameMessage message = new((byte)stream.ReadRawVarint64(), stream.ReadRawBytes((int)stream.ReadRawVarint64()));
+            GameMessage message = new(CodedInputStream.CreateInstance(request.InputStream));
 
             switch ((FrontendProtocolMessage)message.Id)
             {
                 case FrontendProtocolMessage.LoginDataPB:
                     var loginDataPB = LoginDataPB.ParseFrom(message.Payload);
+
+                    // Send a TOS popup when the client uses tos@test.com as email
+                    if (loginDataPB.EmailAddress.ToLower() == "tos@test.com")
+                    {
+                        SendTosPopup(response);
+                        return;
+                    }
+
+                    // Try to create a new session from the data we received
                     AuthStatusCode statusCode = _frontendService.TryCreateSessionFromLoginDataPB(loginDataPB, out ClientSession session);
 
-                    if (statusCode == AuthStatusCode.Success)  // Send an AuthTicket if we were able to create a session
-                    {
-                        Logger.Info($"Sending AuthTicket for sessionId {session.Id} to the game client on {request.RemoteEndPoint}");
-
-                        byte[] authTicket = AuthTicket.CreateBuilder()
-                            .SetSessionKey(ByteString.CopyFrom(session.Key))
-                            .SetSessionToken(ByteString.CopyFrom(session.Token))
-                            .SetSessionId(session.Id)
-                            .SetFrontendServer(ConfigManager.Frontend.PublicAddress)
-                            .SetFrontendPort(ConfigManager.Frontend.Port)
-                            .SetPlatformTicket("")
-                            .SetHasnews(ConfigManager.Frontend.ShowNewsOnLogin)
-                            .SetNewsurl(ConfigManager.Frontend.NewsUrl)
-                            .SetSuccess(true)
-                            .Build().ToByteArray();
-
-                        // Write data to a buffer and send the response
-                        byte[] buffer;
-                        using (MemoryStream memoryStream = new())
-                        {
-                            // The structure is like a mux packet, but without the 6 byte header
-                            CodedOutputStream outputStream = CodedOutputStream.CreateInstance(memoryStream);
-                            outputStream.WriteRawVarint64((byte)AuthMessage.AuthTicket);
-                            outputStream.WriteRawVarint64((ulong)authTicket.Length);
-                            outputStream.WriteRawBytes(authTicket);
-                            outputStream.Flush();
-                            buffer = memoryStream.ToArray();
-                        }
-
-                        response.KeepAlive = false;
-                        response.ContentType = "application/octet-stream";
-                        response.ContentLength64 = buffer.Length;
-                        await response.OutputStream.WriteAsync(buffer);
-                    }
-                    else
+                    // Respond with an error if session creation didn't succeed
+                    if (statusCode != AuthStatusCode.Success)
                     {
                         Logger.Info($"Authentication for the game client on {request.RemoteEndPoint} failed ({statusCode})");
                         response.StatusCode = (int)statusCode;
+                        return;
                     }
+
+                    // Send an AuthTicket if we were able to create a session
+                    Logger.Info($"Sending AuthTicket for sessionId {session.Id} to the game client on {request.RemoteEndPoint}");
+
+                    // Create a new AuthTicket, write it to a buffer, and send the response
+                    byte[] buffer = new GameMessage(AuthTicket.CreateBuilder()
+                        .SetSessionKey(ByteString.CopyFrom(session.Key))
+                        .SetSessionToken(ByteString.CopyFrom(session.Token))
+                        .SetSessionId(session.Id)
+                        .SetFrontendServer(ConfigManager.Frontend.PublicAddress)
+                        .SetFrontendPort(ConfigManager.Frontend.Port)
+                        .SetPlatformTicket("")
+                        .SetHasnews(ConfigManager.Frontend.ShowNewsOnLogin)
+                        .SetNewsurl(ConfigManager.Frontend.NewsUrl)
+                        .SetSuccess(true)
+                        .Build()).Encode();
+
+                    response.KeepAlive = false;
+                    response.ContentType = "application/octet-stream";
+                    response.ContentLength64 = buffer.Length;
+                    await response.OutputStream.WriteAsync(buffer);
 
                     break;
 
@@ -145,6 +188,48 @@ namespace MHServerEmu.Auth
                     Logger.Warn($"Received unknown messageId {message.Id}");
                     break;
             }
+        }
+
+        private async void SendTosPopup(HttpListenerResponse response)
+        {
+            byte[] buffer = new GameMessage(AuthTicket.CreateBuilder()
+                .SetSessionId(0)
+                .SetTosurl("http://localhost/tos")  // The client adds &locale=en_us to this url (or another locale code)
+                .Build()).Encode();
+
+            response.StatusCode = (int)AuthStatusCode.NeedToAcceptLegal;
+            response.KeepAlive = false;
+            response.ContentType = "application/octet-stream";
+            response.ContentLength64 = buffer.Length;
+            await response.OutputStream.WriteAsync(buffer);
+        }
+
+        private async void HandleWebApiRequest(HttpListenerRequest request, HttpListenerResponse response)
+        {
+            byte[] buffer;
+            NameValueCollection queryString = null;
+
+            // Parse query string from POST requests
+            if (request.HttpMethod == "POST")
+                using (StreamReader reader = new(request.InputStream))
+                    queryString = HttpUtility.ParseQueryString(reader.ReadToEnd());
+
+            switch (request.Url.LocalPath)
+            {
+                default:
+                    Logger.Warn($"Received unknown web API request:\nRequest: {request.Url.LocalPath}\nRemoteEndPoint: {request.RemoteEndPoint}\nUserAgent: {request.UserAgent}");
+                    return;
+
+                case "/AccountManagement/Create":
+                    buffer = _webApiHandler.HandleRequest(WebApiRequest.AccountCreate, queryString);
+                    break;
+
+                case "/ServerStatus":
+                    buffer = _webApiHandler.HandleRequest(WebApiRequest.ServerStatus, queryString);
+                    break;
+            }
+
+            await response.OutputStream.WriteAsync(buffer);
         }
     }
 }
