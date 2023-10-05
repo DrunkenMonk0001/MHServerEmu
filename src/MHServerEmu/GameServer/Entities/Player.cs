@@ -38,12 +38,12 @@ namespace MHServerEmu.GameServer.Entities
         public AchievementState[] AchievementStates { get; set; }
         public StashTabOption[] StashTabOptions { get; set; }
 
-        public Player(byte[] archiveData)
+        public Player(EntityBaseData baseData, byte[] archiveData) : base(baseData)
         {
             CodedInputStream stream = CodedInputStream.CreateInstance(archiveData);
             BoolDecoder boolDecoder = new();
 
-            ReadEntityFields(stream);
+            DecodeEntityFields(stream);
 
             MissionManager = new(stream, boolDecoder);
             AvatarPropertyCollection = new(stream);
@@ -94,12 +94,12 @@ namespace MHServerEmu.GameServer.Entities
         }
 
         // note: this is ugly
-        public Player(uint replicationPolicy, ReplicatedPropertyCollection propertyCollection,
+        public Player(EntityBaseData baseData, uint replicationPolicy, ReplicatedPropertyCollection propertyCollection,
             MissionManager missionManager, ReplicatedPropertyCollection avatarProperties,
             ulong shardId, ReplicatedString playerName, ReplicatedString unkName,
             ulong matchQueueStatus, bool emailVerified, ulong accountCreationTimestamp,
             Community community, bool unkBool, ulong[] stashInventories, uint[] availableBadges,
-            GameplayOptions gameplayOptions, AchievementState[] achievementStates, StashTabOption[] stashTabOptions)
+            GameplayOptions gameplayOptions, AchievementState[] achievementStates, StashTabOption[] stashTabOptions) : base(baseData)
         {
             ReplicationPolicy = replicationPolicy;
             PropertyCollection = propertyCollection;
@@ -145,7 +145,7 @@ namespace MHServerEmu.GameServer.Entities
                 boolEncoder.Cook();
 
                 // Encode
-                WriteEntityFields(cos);
+                EncodeEntityFields(cos);
 
                 cos.WriteRawBytes(MissionManager.Encode(boolEncoder));
                 cos.WriteRawBytes(AvatarPropertyCollection.Encode());

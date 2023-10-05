@@ -17,13 +17,13 @@ namespace MHServerEmu.GameServer.Entities.Avatars
         public GuildMemberReplicationRuntimeInfo GuildInfo { get; set; }
         public AbilityKeyMapping[] AbilityKeyMappings { get; set; }
 
-        public Avatar(byte[] archiveData)
+        public Avatar(EntityBaseData baseData, byte[] archiveData) : base(baseData)
         {
             CodedInputStream stream = CodedInputStream.CreateInstance(archiveData);
             BoolDecoder boolDecoder = new();
 
-            ReadEntityFields(stream);
-            ReadWorldEntityFields(stream);
+            DecodeEntityFields(stream);
+            DecodeWorldEntityFields(stream);
 
             PlayerName = new(stream);
             OwnerPlayerDbId = stream.ReadRawVarint64();
@@ -41,8 +41,9 @@ namespace MHServerEmu.GameServer.Entities.Avatars
                 AbilityKeyMappings[i] = new(stream, boolDecoder);
         }
 
-        public Avatar(EntityTrackingContextMap[] trackingContextMap, Condition[] conditionCollection, PowerCollectionRecord[] powerCollection, int unkEvent,
+        public Avatar(EntityBaseData baseData, EntityTrackingContextMap[] trackingContextMap, Condition[] conditionCollection, PowerCollectionRecord[] powerCollection, int unkEvent,
             ReplicatedString playerName, ulong ownerPlayerDbId, string guildName, bool hasGuildInfo, GuildMemberReplicationRuntimeInfo guildInfo, AbilityKeyMapping[] abilityKeyMappings)
+            : base(baseData)
         {
             TrackingContextMap = trackingContextMap;
             ConditionCollection = conditionCollection;
@@ -72,8 +73,8 @@ namespace MHServerEmu.GameServer.Entities.Avatars
                 boolEncoder.Cook();
 
                 // Encode
-                WriteEntityFields(cos);
-                WriteWorldEntityFields(cos);
+                EncodeEntityFields(cos);
+                EncodeWorldEntityFields(cos);
 
                 cos.WriteRawBytes(PlayerName.Encode());
                 cos.WriteRawVarint64(OwnerPlayerDbId);

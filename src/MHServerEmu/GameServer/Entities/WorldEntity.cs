@@ -14,18 +14,18 @@ namespace MHServerEmu.GameServer.Entities
         public PowerCollectionRecord[] PowerCollection { get; set; }
         public int UnkEvent { get; set; }
 
-        public WorldEntity(byte[] archiveData)
+        public WorldEntity(EntityBaseData baseData, byte[] archiveData) : base(baseData)
         {
             CodedInputStream stream = CodedInputStream.CreateInstance(archiveData);
 
-            ReadEntityFields(stream);
-            ReadWorldEntityFields(stream);
-            ReadUnknownFields(stream);
+            DecodeEntityFields(stream);
+            DecodeWorldEntityFields(stream);
+            DecodeUnknownFields(stream);
         }
 
-        public WorldEntity() { }
+        public WorldEntity(EntityBaseData baseData) : base(baseData) { }
 
-        public WorldEntity(uint replicationPolicy, ulong replicationId)
+        public WorldEntity(EntityBaseData baseData, uint replicationPolicy, ulong replicationId) : base(baseData)
         {
             ReplicationPolicy = replicationPolicy;
             PropertyCollection = new(replicationId);
@@ -35,8 +35,8 @@ namespace MHServerEmu.GameServer.Entities
             UnkEvent = 0;
         }
 
-        public WorldEntity(ulong replicationId, Vector3 mapPosition, int health, int mapAreaId,
-            int healthMaxOther, ulong mapRegionId, int mapCellId, ulong contextAreaRef)
+        public WorldEntity(EntityBaseData baseData, ulong replicationId, Vector3 mapPosition, int health, int mapAreaId,
+            int healthMaxOther, ulong mapRegionId, int mapCellId, ulong contextAreaRef) : base(baseData)
         {
             ReplicationPolicy = 0x20;
 
@@ -63,9 +63,9 @@ namespace MHServerEmu.GameServer.Entities
             {
                 CodedOutputStream cos = CodedOutputStream.CreateInstance(ms);
 
-                WriteEntityFields(cos);
-                WriteWorldEntityFields(cos);
-                WriteUnknownFields(cos);
+                EncodeEntityFields(cos);
+                EncodeWorldEntityFields(cos);
+                EncodeUnknownFields(cos);
 
                 cos.Flush();
                 return ms.ToArray();
@@ -81,7 +81,7 @@ namespace MHServerEmu.GameServer.Entities
             return sb.ToString();
         }
 
-        protected void ReadWorldEntityFields(CodedInputStream stream)
+        protected void DecodeWorldEntityFields(CodedInputStream stream)
         {
             TrackingContextMap = new EntityTrackingContextMap[stream.ReadRawVarint64()];
             for (int i = 0; i < TrackingContextMap.Length; i++)
@@ -111,7 +111,7 @@ namespace MHServerEmu.GameServer.Entities
             UnkEvent = stream.ReadRawInt32();
         }
 
-        protected void WriteWorldEntityFields(CodedOutputStream stream)
+        protected void EncodeWorldEntityFields(CodedOutputStream stream)
         {
             stream.WriteRawVarint64((ulong)TrackingContextMap.Length);
             foreach (EntityTrackingContextMap entry in TrackingContextMap)

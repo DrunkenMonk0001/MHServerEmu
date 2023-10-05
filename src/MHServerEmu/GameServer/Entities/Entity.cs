@@ -1,27 +1,34 @@
 ﻿using System.Text;
 using Google.ProtocolBuffers;
+using Gazillion;
 using MHServerEmu.GameServer.Properties;
 
 namespace MHServerEmu.GameServer.Entities
 {
     public class Entity
     {
+        public EntityBaseData BaseData { get; set; }
+        public ulong RegionId { get; set; } = 0;
+
         public uint ReplicationPolicy { get; set; }
         public ReplicatedPropertyCollection PropertyCollection { get; set; }
         public ulong[] UnknownFields { get; set; } = Array.Empty<ulong>();
 
-        public Entity(byte[] archiveData)
+        public Entity(EntityBaseData baseData, byte[] archiveData)
         {
+            BaseData = baseData;
             CodedInputStream stream = CodedInputStream.CreateInstance(archiveData);
 
-            ReadEntityFields(stream);
-            ReadUnknownFields(stream);
+            DecodeEntityFields(stream);
+            DecodeUnknownFields(stream);
         }
 
-        public Entity() { }
+        // Base data is required for all entities, so there's no parameterless constructor
+        public Entity(EntityBaseData baseData) { BaseData = baseData; }
 
-        public Entity(uint replicationPolicy, ReplicatedPropertyCollection propertyCollection, ulong[] unknownFields)
+        public Entity(EntityBaseData baseData, uint replicationPolicy, ReplicatedPropertyCollection propertyCollection, ulong[] unknownFields)
         {
+            BaseData = baseData;
             ReplicationPolicy = replicationPolicy;
             PropertyCollection = propertyCollection;
             UnknownFields = unknownFields;
@@ -33,12 +40,20 @@ namespace MHServerEmu.GameServer.Entities
             {
                 CodedOutputStream cos = CodedOutputStream.CreateInstance(ms);
 
-                WriteEntityFields(cos);
-                WriteUnknownFields(cos);
+                EncodeEntityFields(cos);
+                EncodeUnknownFields(cos);
 
                 cos.Flush();
                 return ms.ToArray();
             }
+        }
+
+        public NetMessageEntityCreate ToNetMessageEntityCreate()
+        {
+            return NetMessageEntityCreate.CreateBuilder()
+                .SetBaseData(ByteString.CopyFrom(BaseData.Encode()))
+                .SetArchiveData(ByteString.CopyFrom(Encode()))
+                .Build();
         }
 
         public override string ToString()
@@ -49,26 +64,26 @@ namespace MHServerEmu.GameServer.Entities
             return sb.ToString();
         }
 
-        protected void ReadEntityFields(CodedInputStream stream)
+        protected void DecodeEntityFields(CodedInputStream stream)
         {
             ReplicationPolicy = stream.ReadRawVarint32();
             PropertyCollection = new(stream);
         }
 
-        protected void ReadUnknownFields(CodedInputStream stream)
+        protected void DecodeUnknownFields(CodedInputStream stream)
         {
             List<ulong> fieldList = new();
             while (!stream.IsAtEnd) fieldList.Add(stream.ReadRawVarint64());
             UnknownFields = fieldList.ToArray();
         }
 
-        protected void WriteEntityFields(CodedOutputStream stream)
+        protected void EncodeEntityFields(CodedOutputStream stream)
         {
             stream.WriteRawVarint32(ReplicationPolicy);
             stream.WriteRawBytes(PropertyCollection.Encode());
         }
 
-        protected void WriteUnknownFields(CodedOutputStream stream)
+        protected void EncodeUnknownFields(CodedOutputStream stream)
         {
             foreach (ulong field in UnknownFields) stream.WriteRawVarint64(field);
         }

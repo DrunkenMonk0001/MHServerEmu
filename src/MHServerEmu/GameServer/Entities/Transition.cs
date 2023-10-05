@@ -12,11 +12,11 @@ namespace MHServerEmu.GameServer.Entities
         public string TransitionName { get; set; }
         public Destination[] Destinations { get; set; }
 
-        public Transition(byte[] archiveData)
+        public Transition(EntityBaseData baseData, byte[] archiveData) : base(baseData)
         {
             CodedInputStream stream = CodedInputStream.CreateInstance(archiveData);
-            ReadEntityFields(stream);
-            ReadWorldEntityFields(stream);
+            DecodeEntityFields(stream);
+            DecodeWorldEntityFields(stream);
 
             TransitionName = stream.ReadRawString();
 
@@ -25,9 +25,9 @@ namespace MHServerEmu.GameServer.Entities
                 Destinations[i] = new(stream);
         }
 
-        public Transition(EntityTrackingContextMap[] trackingContextMap, Condition[] conditionCollection,
+        public Transition(EntityBaseData baseData, EntityTrackingContextMap[] trackingContextMap, Condition[] conditionCollection,
             PowerCollectionRecord[] powerCollection, int unkEvent, 
-            string transitionName, Destination[] destinations)
+            string transitionName, Destination[] destinations) : base(baseData)
         {
             TrackingContextMap = trackingContextMap;
             ConditionCollection = conditionCollection;
@@ -44,8 +44,8 @@ namespace MHServerEmu.GameServer.Entities
                 CodedOutputStream cos = CodedOutputStream.CreateInstance(ms);
 
                 // Encode
-                WriteEntityFields(cos);
-                WriteWorldEntityFields(cos);
+                EncodeEntityFields(cos);
+                EncodeWorldEntityFields(cos);
 
                 cos.WriteRawString(TransitionName);
                 cos.WriteRawVarint64((ulong)Destinations.Length);
