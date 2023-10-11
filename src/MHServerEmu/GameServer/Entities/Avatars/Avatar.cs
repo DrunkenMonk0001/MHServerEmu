@@ -31,9 +31,7 @@ namespace MHServerEmu.GameServer.Entities.Avatars
             GuildName = stream.ReadRawString();
 
             //Gazillion::GuildMember::SerializeReplicationRuntimeInfo
-            if (boolDecoder.IsEmpty) boolDecoder.SetBits(stream.ReadRawByte());
-            HasGuildInfo = boolDecoder.ReadBool();
-
+            HasGuildInfo = boolDecoder.ReadBool(stream);
             if (HasGuildInfo) GuildInfo = new(stream);
 
             AbilityKeyMappings = new AbilityKeyMapping[stream.ReadRawVarint64()];
@@ -65,10 +63,9 @@ namespace MHServerEmu.GameServer.Entities.Avatars
 
                 // Prepare bool encoder
                 BoolEncoder boolEncoder = new();
-                byte bitBuffer;
 
-                boolEncoder.WriteBool(HasGuildInfo);
-                foreach (AbilityKeyMapping keyMap in AbilityKeyMappings) boolEncoder.WriteBool(keyMap.ShouldPersist);
+                boolEncoder.EncodeBool(HasGuildInfo);
+                foreach (AbilityKeyMapping keyMap in AbilityKeyMappings) keyMap.EncodeBools(boolEncoder);
 
                 boolEncoder.Cook();
 
@@ -80,9 +77,7 @@ namespace MHServerEmu.GameServer.Entities.Avatars
                 cos.WriteRawVarint64(OwnerPlayerDbId);
                 cos.WriteRawString(GuildName);
 
-                bitBuffer = boolEncoder.GetBitBuffer();             // HasGuildInfo
-                if (bitBuffer != 0) cos.WriteRawByte(bitBuffer);
-
+                boolEncoder.WriteBuffer(cos);   // HasGuildInfo  
                 if (HasGuildInfo) cos.WriteRawBytes(GuildInfo.Encode());
 
                 cos.WriteRawVarint64((ulong)AbilityKeyMappings.Length);

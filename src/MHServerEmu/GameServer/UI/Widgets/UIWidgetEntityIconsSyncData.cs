@@ -33,10 +33,10 @@ namespace MHServerEmu.GameServer.UI.Widgets
             }
         }
 
-        public override void WriteBools(BoolEncoder boolEncoder)
+        public override void EncodeBools(BoolEncoder boolEncoder)
         {
             foreach (FilterEntry entry in FilterEntries)
-                entry.WriteBools(boolEncoder);
+                entry.EncodeBools(boolEncoder);
         }
 
         public override string ToString()
@@ -79,10 +79,10 @@ namespace MHServerEmu.GameServer.UI.Widgets
             }
         }
 
-        public void WriteBools(BoolEncoder boolEncoder)
+        public void EncodeBools(BoolEncoder boolEncoder)
         {
             foreach (KnownEntityEntry entry in KnownEntityEntries)
-                entry.WriteBools(boolEncoder);
+                entry.EncodeBools(boolEncoder);
         }
 
         public override string ToString()
@@ -111,15 +111,9 @@ namespace MHServerEmu.GameServer.UI.Widgets
             State = stream.ReadRawInt32();
             HealthPercent = stream.ReadRawInt32();
             IconIndexForHealthPercentEval = stream.ReadRawInt32();
-
-            if (boolDecoder.IsEmpty) boolDecoder.SetBits(stream.ReadRawByte());
-            ForceRefreshEntityHealthPercent = boolDecoder.ReadBool();
-
+            ForceRefreshEntityHealthPercent = boolDecoder.ReadBool(stream);
             EnrageStartTime = stream.ReadRawVarint64();
-
-            if (boolDecoder.IsEmpty) boolDecoder.SetBits(stream.ReadRawByte());
-            HasPropertyEntryEval = boolDecoder.ReadBool();
-
+            HasPropertyEntryEval = boolDecoder.ReadBool(stream);
             PropertyEntryIndex = stream.ReadRawInt32();
         }
 
@@ -133,15 +127,9 @@ namespace MHServerEmu.GameServer.UI.Widgets
                 cos.WriteRawInt32(State);
                 cos.WriteRawInt32(HealthPercent);
                 cos.WriteRawInt32(IconIndexForHealthPercentEval);
-
-                byte bitBuffer = boolEncoder.GetBitBuffer();    // ForceRefreshEntityHealthPercent
-                if (bitBuffer != 0) cos.WriteRawByte(bitBuffer);
-
+                boolEncoder.WriteBuffer(cos);   // ForceRefreshEntityHealthPercent
                 cos.WriteRawVarint64(EnrageStartTime);
-
-                bitBuffer = boolEncoder.GetBitBuffer();         // HasPropertyEntryEval
-                if (bitBuffer != 0) cos.WriteRawByte(bitBuffer);
-
+                boolEncoder.WriteBuffer(cos);   // HasPropertyEntryEval
                 cos.WriteRawInt32(PropertyEntryIndex);
 
                 cos.Flush();
@@ -149,10 +137,10 @@ namespace MHServerEmu.GameServer.UI.Widgets
             }
         }
 
-        public void WriteBools(BoolEncoder boolEncoder)
+        public void EncodeBools(BoolEncoder boolEncoder)
         {
-            boolEncoder.WriteBool(ForceRefreshEntityHealthPercent);
-            boolEncoder.WriteBool(HasPropertyEntryEval);
+            boolEncoder.EncodeBool(ForceRefreshEntityHealthPercent);
+            boolEncoder.EncodeBool(HasPropertyEntryEval);
         }
 
         public override string ToString()

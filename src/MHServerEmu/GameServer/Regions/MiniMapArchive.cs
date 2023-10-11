@@ -17,9 +17,7 @@ namespace MHServerEmu.GameServer.Regions
             BoolDecoder boolDecoder = new();
 
             ReplicationPolicy = stream.ReadRawVarint32();
-
-            if (boolDecoder.IsEmpty) boolDecoder.SetBits(stream.ReadRawByte());
-            IsRevealAll = boolDecoder.ReadBool();
+            IsRevealAll = boolDecoder.ReadBool(stream);
 
             // Map buffer is only included when the map is not revealed by default
             if (IsRevealAll == false)
@@ -46,14 +44,12 @@ namespace MHServerEmu.GameServer.Regions
 
                 // Prepare bool encoder
                 BoolEncoder boolEncoder = new();
-                boolEncoder.WriteBool(IsRevealAll);
+                boolEncoder.EncodeBool(IsRevealAll);
                 boolEncoder.Cook();
 
                 // Encode
                 cos.WriteRawVarint32(ReplicationPolicy);
-
-                byte bitBuffer = boolEncoder.GetBitBuffer();        // IsRevealAll
-                if (bitBuffer != 0) cos.WriteRawByte(bitBuffer);
+                boolEncoder.WriteBuffer(cos);   // IsRevealAll
 
                 if (IsRevealAll == false)
                 {

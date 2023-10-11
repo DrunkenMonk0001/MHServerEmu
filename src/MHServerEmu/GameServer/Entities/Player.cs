@@ -54,27 +54,21 @@ namespace MHServerEmu.GameServer.Entities
             ConsoleAccountId2 = stream.ReadRawVarint64();
             UnkName = new(stream);
             MatchQueueStatus = stream.ReadRawVarint64();
-
-            if (boolDecoder.IsEmpty) boolDecoder.SetBits(stream.ReadRawByte());
-            EmailVerified = boolDecoder.ReadBool();
-
+            EmailVerified = boolDecoder.ReadBool(stream);
             AccountCreationTimestamp = stream.ReadRawVarint64();
 
             PartyRepId = stream.ReadRawVarint64();
             PartyId = stream.ReadRawVarint64();
             
-            if (boolDecoder.IsEmpty) boolDecoder.SetBits(stream.ReadRawByte());
-            HasGuildInfo = boolDecoder.ReadBool();
+            HasGuildInfo = boolDecoder.ReadBool(stream);
             if (HasGuildInfo) GuildInfo = new(stream);      // GuildMember::SerializeReplicationRuntimeInfo
 
             UnknownString = stream.ReadRawString();
 
-            if (boolDecoder.IsEmpty) boolDecoder.SetBits(stream.ReadRawByte());
-            HasCommunity = boolDecoder.ReadBool();
+            HasCommunity = boolDecoder.ReadBool(stream);
             if (HasCommunity) Community = new(stream);
 
-            if (boolDecoder.IsEmpty) boolDecoder.SetBits(stream.ReadRawByte());
-            UnkBool = boolDecoder.ReadBool();
+            UnkBool = boolDecoder.ReadBool(stream);
 
             StashInventories = new ulong[stream.ReadRawVarint64()];
             for (int i = 0; i < StashInventories.Length; i++)
@@ -131,16 +125,15 @@ namespace MHServerEmu.GameServer.Entities
 
                 // Prepare bool encoder
                 BoolEncoder boolEncoder = new();
-                byte bitBuffer;
 
-                MissionManager.WriteBools(boolEncoder);
+                MissionManager.EncodeBools(boolEncoder);
 
-                boolEncoder.WriteBool(EmailVerified);
-                boolEncoder.WriteBool(HasGuildInfo);
-                boolEncoder.WriteBool(HasCommunity);
-                boolEncoder.WriteBool(UnkBool);
+                boolEncoder.EncodeBool(EmailVerified);
+                boolEncoder.EncodeBool(HasGuildInfo);
+                boolEncoder.EncodeBool(HasCommunity);
+                boolEncoder.EncodeBool(UnkBool);
 
-                GameplayOptions.WriteBools(boolEncoder);
+                GameplayOptions.EncodeBools(boolEncoder);
 
                 boolEncoder.Cook();
 
@@ -156,29 +149,21 @@ namespace MHServerEmu.GameServer.Entities
                 cos.WriteRawVarint64(ConsoleAccountId2);
                 cos.WriteRawBytes(UnkName.Encode());
                 cos.WriteRawVarint64(MatchQueueStatus);
-
-                bitBuffer = boolEncoder.GetBitBuffer();             // EmailVerified
-                if (bitBuffer != 0) cos.WriteRawByte(bitBuffer);
-
+                boolEncoder.WriteBuffer(cos);   // EmailVerified
                 cos.WriteRawVarint64(AccountCreationTimestamp);
 
                 cos.WriteRawVarint64(PartyRepId);
                 cos.WriteRawVarint64(PartyId);
 
-                bitBuffer = boolEncoder.GetBitBuffer();             // HasGuildInfo
-                if (bitBuffer != 0) cos.WriteRawByte(bitBuffer);
-
+                boolEncoder.WriteBuffer(cos);   // HasGuildInfo
                 if (HasGuildInfo) cos.WriteRawBytes(GuildInfo.Encode());
 
                 cos.WriteRawString(UnknownString);
 
-                bitBuffer = boolEncoder.GetBitBuffer();             // HasCommunity
-                if (bitBuffer != 0) cos.WriteRawByte(bitBuffer);
-
+                boolEncoder.WriteBuffer(cos);   // HasCommunity
                 if (HasCommunity) cos.WriteRawBytes(Community.Encode());
 
-                bitBuffer = boolEncoder.GetBitBuffer();             // UnkBool
-                if (bitBuffer != 0) cos.WriteRawByte(bitBuffer);
+                boolEncoder.WriteBuffer(cos);   // UnkBool
 
                 cos.WriteRawVarint64((ulong)StashInventories.Length);
                 foreach (ulong stashInventory in StashInventories) cos.WritePrototypeId(stashInventory, PrototypeEnumType.All);

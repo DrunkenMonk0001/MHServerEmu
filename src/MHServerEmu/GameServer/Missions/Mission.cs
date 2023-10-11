@@ -33,8 +33,7 @@ namespace MHServerEmu.GameServer.Missions
             for (int i = 0; i < Participants.Length; i++)
                 Participants[i] = stream.ReadRawVarint64();
 
-            if (boolDecoder.IsEmpty) boolDecoder.SetBits(stream.ReadRawByte());
-            Suspended = boolDecoder.ReadBool();
+            Suspended = boolDecoder.ReadBool(stream);
         }
 
         public Mission(ulong prototypeGuid, ulong state, ulong timeExpireCurrentState, ulong prototypeId,
@@ -69,9 +68,7 @@ namespace MHServerEmu.GameServer.Missions
                 foreach (ulong Participant in Participants)
                     cos.WriteRawVarint64(Participant);
 
-                byte bitBuffer = boolEncoder.GetBitBuffer(); // Suspended
-                if (bitBuffer != 0)
-                    cos.WriteRawByte(bitBuffer);
+                boolEncoder.WriteBuffer(cos);   // Suspended   
 
                 cos.Flush();
                 return ms.ToArray();
