@@ -1,6 +1,6 @@
 <config>
 	<!-- <str name="AuthServerAddress" value="auth.marvelheroes.com" /> -->
-	<str name="AuthServerAddress" value="mh.thestreamstation.com" />
+	<str name="AuthServerAddress" value="auth.mhemutest.uk" />
 	<str name="AuthServerUrl" value="/AuthServer/Login/IndexPB" />
 	<str name="AuthServerTicketUrl" value="" />
 	<int name="AuthServerPort" value="443" />
