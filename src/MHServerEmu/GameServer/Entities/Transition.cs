@@ -33,18 +33,8 @@ namespace MHServerEmu.GameServer.Entities
             Destinations = new Destination[1];
             Destinations[0] = destination;
         }
-        public Transition(EntityBaseData baseData, byte[] archiveData) : base(baseData)
-        {
-            CodedInputStream stream = CodedInputStream.CreateInstance(archiveData);
-            DecodeEntityFields(stream);
-            DecodeWorldEntityFields(stream);
 
-            TransitionName = stream.ReadRawString();
-
-            Destinations = new Destination[stream.ReadRawVarint64()];
-            for (int i = 0; i < Destinations.Length; i++)
-                Destinations[i] = new(stream);
-        }
+        public Transition(EntityBaseData baseData, ByteString archiveData) : base(baseData, archiveData) { }
 
         public Transition(EntityBaseData baseData, EntityTrackingContextMap[] trackingContextMap, Condition[] conditionCollection,
             PowerCollectionRecord[] powerCollection, int unkEvent, 
@@ -58,35 +48,32 @@ namespace MHServerEmu.GameServer.Entities
             Destinations = destinations;
         }
 
-        public override byte[] Encode()
+        protected override void Decode(CodedInputStream stream)
         {
-            using (MemoryStream ms = new())
-            {
-                CodedOutputStream cos = CodedOutputStream.CreateInstance(ms);
+            base.Decode(stream);
 
-                // Encode
-                EncodeEntityFields(cos);
-                EncodeWorldEntityFields(cos);
+            TransitionName = stream.ReadRawString();
 
-                cos.WriteRawString(TransitionName);
-                cos.WriteRawVarint64((ulong)Destinations.Length);
-                foreach (Destination destination in Destinations) cos.WriteRawBytes(destination.Encode());
-
-                cos.Flush();
-                return ms.ToArray();
-            }
+            Destinations = new Destination[stream.ReadRawVarint64()];
+            for (int i = 0; i < Destinations.Length; i++)
+                Destinations[i] = new(stream);
         }
 
-        public override string ToString()
+        public override void Encode(CodedOutputStream stream)
         {
-            StringBuilder sb = new(); 
-            WriteEntityString(sb);
-            WriteWorldEntityString(sb);
+            base.Encode(stream);
+
+            stream.WriteRawString(TransitionName);
+            stream.WriteRawVarint64((ulong)Destinations.Length);
+            foreach (Destination destination in Destinations) stream.WriteRawBytes(destination.Encode());
+        }
+
+        protected override void BuildString(StringBuilder sb)
+        {
+            base.BuildString(sb);
 
             sb.AppendLine($"TransitionName: {TransitionName}");
             for (int i = 0; i < Destinations.Length; i++) sb.AppendLine($"Destination{i}: {Destinations[i]}");
-
-            return sb.ToString();
         }
     }
 
@@ -111,11 +98,11 @@ namespace MHServerEmu.GameServer.Entities
         {
             Type = stream.ReadRawInt32();
 
-            Region = stream.ReadPrototypeId(PrototypeEnumType.All);
-            Area = stream.ReadPrototypeId(PrototypeEnumType.All);
-            Cell = stream.ReadPrototypeId(PrototypeEnumType.All);
-            Entity = stream.ReadPrototypeId(PrototypeEnumType.All);
-            Target = stream.ReadPrototypeId(PrototypeEnumType.All);
+            Region = stream.ReadPrototypeEnum(PrototypeEnumType.All);
+            Area = stream.ReadPrototypeEnum(PrototypeEnumType.All);
+            Cell = stream.ReadPrototypeEnum(PrototypeEnumType.All);
+            Entity = stream.ReadPrototypeEnum(PrototypeEnumType.All);
+            Target = stream.ReadPrototypeEnum(PrototypeEnumType.All);
 
             Unk2 = stream.ReadRawInt32();
 
@@ -160,11 +147,11 @@ namespace MHServerEmu.GameServer.Entities
 
                 cos.WriteRawInt32(Type);
 
-                cos.WritePrototypeId(Region, PrototypeEnumType.All);
-                cos.WritePrototypeId(Area, PrototypeEnumType.All);
-                cos.WritePrototypeId(Cell, PrototypeEnumType.All);
-                cos.WritePrototypeId(Entity, PrototypeEnumType.All);
-                cos.WritePrototypeId(Target, PrototypeEnumType.All);
+                cos.WritePrototypeEnum(Region, PrototypeEnumType.All);
+                cos.WritePrototypeEnum(Area, PrototypeEnumType.All);
+                cos.WritePrototypeEnum(Cell, PrototypeEnumType.All);
+                cos.WritePrototypeEnum(Entity, PrototypeEnumType.All);
+                cos.WritePrototypeEnum(Target, PrototypeEnumType.All);
 
                 cos.WriteRawInt32(Unk2);
 

@@ -43,8 +43,8 @@ namespace MHServerEmu.GameServer.Powers
 
                 // Encode
                 cos.WriteRawVarint32(ReplicationPolicy);
-                cos.WriteRawBytes(PropertyCollection.Encode());
-                cos.WriteRawBytes(MissionManager.Encode(boolEncoder));
+                PropertyCollection.Encode(cos);
+                MissionManager.Encode(cos, boolEncoder);
                 cos.WriteRawBytes(UIDataProvider.Encode(boolEncoder));
                 cos.WriteRawBytes(ObjectiveGraph.Encode());
 
