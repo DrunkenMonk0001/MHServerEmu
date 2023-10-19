@@ -18,9 +18,9 @@ namespace MHServerEmu.GameServer.Entities.Locomotion
         public Vector3 Orientation { get; set; }
         public LocomotionState LocomotionState { get; set; }
 
-        public LocomotionStateUpdateArchive(byte[] data)
+        public LocomotionStateUpdateArchive(ByteString data)
         {
-            CodedInputStream stream = CodedInputStream.CreateInstance(data);
+            CodedInputStream stream = CodedInputStream.CreateInstance(data.ToByteArray());
 
             ReplicationPolicy = stream.ReadRawVarint32();
             EntityId = stream.ReadRawVarint64();
@@ -36,7 +36,7 @@ namespace MHServerEmu.GameServer.Entities.Locomotion
 
         public LocomotionStateUpdateArchive() { }
 
-        public byte[] Encode()
+        public ByteString Serialize()
         {
             using (MemoryStream ms = new())
             {
@@ -51,10 +51,10 @@ namespace MHServerEmu.GameServer.Entities.Locomotion
                     Orientation.Encode(cos, 6);
                 else
                     cos.WriteRawZigZagFloat(Orientation.X, 6);
-                cos.WriteRawBytes(LocomotionState.Encode(LocFlags));
+                LocomotionState.Encode(cos, LocFlags);
 
                 cos.Flush();
-                return ms.ToArray();
+                return ByteString.CopyFrom(ms.ToArray());
             }
         }
 

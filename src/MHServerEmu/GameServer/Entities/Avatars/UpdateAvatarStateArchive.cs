@@ -21,9 +21,9 @@ namespace MHServerEmu.GameServer.Entities.Avatars
         public Vector3 Orientation { get; set; }
         public LocomotionState LocomotionState { get; set; }
 
-        public UpdateAvatarStateArchive(byte[] data)
+        public UpdateAvatarStateArchive(ByteString data)
         {
-            CodedInputStream stream = CodedInputStream.CreateInstance(data);
+            CodedInputStream stream = CodedInputStream.CreateInstance(data.ToByteArray());
             BoolDecoder boolDecoder = new();
 
             ReplicationPolicy = stream.ReadRawVarint32();
@@ -42,7 +42,7 @@ namespace MHServerEmu.GameServer.Entities.Avatars
 
         public UpdateAvatarStateArchive() { }
 
-        public byte[] Encode()
+        public ByteString Serialize()
         {
             using (MemoryStream ms = new())
             {
@@ -65,10 +65,10 @@ namespace MHServerEmu.GameServer.Entities.Avatars
                     Orientation.Encode(cos, 6);
                 else
                     cos.WriteRawZigZagFloat(Orientation.X, 6);
-                cos.WriteRawBytes(LocomotionState.Encode(LocFlags));
+                LocomotionState.Encode(cos, LocFlags);
 
                 cos.Flush();
-                return ms.ToArray();
+                return ByteString.CopyFrom(ms.ToArray());
             }
         }
 
