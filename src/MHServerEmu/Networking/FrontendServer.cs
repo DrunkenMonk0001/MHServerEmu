@@ -1,7 +1,7 @@
 ﻿using MHServerEmu.Common.Config;
 using MHServerEmu.Common.Logging;
-using MHServerEmu.GameServer;
-using MHServerEmu.GameServer.Frontend;
+using MHServerEmu.Frontend;
+using MHServerEmu.Grouping;
 using MHServerEmu.Networking.Base;
 
 namespace MHServerEmu.Networking
@@ -10,13 +10,14 @@ namespace MHServerEmu.Networking
     {
         private new static readonly Logger Logger = LogManager.CreateLogger();  // Hide the Server.Logger so that this logger can show the actual server as log source.
 
-        private readonly GameServerManager _gameServerManager;
+        private readonly ServerManager _serverManager;
 
-        public FrontendService FrontendService { get => _gameServerManager.FrontendService; }
+        public FrontendService FrontendService { get => _serverManager.FrontendService; }
+        public GroupingManagerService GroupingManagerService { get => _serverManager.GroupingManagerService; }
 
         public FrontendServer()
         {
-            _gameServerManager = new();
+            _serverManager = new();
 
             OnConnect += FrontendServer_OnConnect;
             OnDisconnect += FrontendService.OnClientDisconnect;
@@ -33,7 +34,7 @@ namespace MHServerEmu.Networking
         private void FrontendServer_OnConnect(object sender, ConnectionEventArgs e)
         {
             Logger.Info($"Client connected from {e.Connection}");
-            e.Connection.Client = new FrontendClient(e.Connection, _gameServerManager);
+            e.Connection.Client = new FrontendClient(e.Connection, _serverManager);
         }
 
         private void FrontendServer_DataReceived(object sender, ConnectionDataEventArgs e)

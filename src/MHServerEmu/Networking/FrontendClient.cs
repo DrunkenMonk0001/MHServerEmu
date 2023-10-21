@@ -1,11 +1,10 @@
 ﻿using Google.ProtocolBuffers;
 using MHServerEmu.Common.Logging;
-using MHServerEmu.GameServer;
-using MHServerEmu.GameServer.Common;
-using MHServerEmu.GameServer.Entities;
-using MHServerEmu.GameServer.Frontend;
-using MHServerEmu.GameServer.Games;
-using MHServerEmu.GameServer.Regions;
+using MHServerEmu.Frontend;
+using MHServerEmu.Games;
+using MHServerEmu.Games.Common;
+using MHServerEmu.Games.Entities;
+using MHServerEmu.Games.Regions;
 using MHServerEmu.Networking.Base;
 
 namespace MHServerEmu.Networking
@@ -13,7 +12,7 @@ namespace MHServerEmu.Networking
     public class FrontendClient : IClient
     {
         private static readonly Logger Logger = LogManager.CreateLogger();
-        private readonly GameServerManager _gameServerManager;
+        private readonly ServerManager _serverManager;
 
         public Connection Connection { get; set; }
 
@@ -21,7 +20,7 @@ namespace MHServerEmu.Networking
         public bool FinishedPlayerManagerHandshake { get; set; } = false;
         public bool FinishedGroupingManagerHandshake { get; set; } = false;
         public ulong GameId { get; set; }
-        public Game CurrentGame { get => _gameServerManager.GameManager.GetGameById(GameId); }
+        public Game CurrentGame { get => _serverManager.PlayerManagerService.GetGameByPlayer(this) ; }
 
         // Temporarily store state here instead of Game
         public bool IsLoading { get; set; } = false;
@@ -32,10 +31,10 @@ namespace MHServerEmu.Networking
         public ulong ThrowingCancelPower { get; set; }
         public Entity ThrowingObject { get; set; }
 
-        public FrontendClient(Connection connection, GameServerManager gameServerManager)
+        public FrontendClient(Connection connection, ServerManager serverManager)
         {
             Connection = connection;
-            _gameServerManager = gameServerManager;
+            _serverManager = serverManager;
         }
 
         public void Parse(ConnectionDataEventArgs e)
@@ -46,7 +45,7 @@ namespace MHServerEmu.Networking
             switch (packet.Command)
             {
                 case MuxCommand.Connect:
-                    Logger.Info($"Accepting connection for muxId {packet.MuxId}");
+                    Logger.Trace($"Accepting connection for muxId {packet.MuxId}");
                     Connection.Send(new PacketOut(packet.MuxId, MuxCommand.ConnectAck));
                     break;
 
@@ -55,7 +54,7 @@ namespace MHServerEmu.Networking
                     break;
 
                 case MuxCommand.Disconnect:
-                    Logger.Info($"Received disconnect for muxId {packet.MuxId}");
+                    Logger.Trace($"Received disconnect for muxId {packet.MuxId}");
                     break;
 
                 case MuxCommand.ConnectWithData:
@@ -63,7 +62,7 @@ namespace MHServerEmu.Networking
                     break;
 
                 case MuxCommand.Data:
-                    _gameServerManager.Handle(this, packet.MuxId, packet.Messages);
+                    _serverManager.Handle(this, packet.MuxId, packet.Messages);
                     break;
             }
         }

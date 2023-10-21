@@ -1,8 +1,8 @@
 ﻿using Gazillion;
 using MHServerEmu.Common.Config;
-using MHServerEmu.GameServer.Frontend;
-using MHServerEmu.GameServer.Frontend.Accounts;
-using MHServerEmu.GameServer.GameData;
+using MHServerEmu.Frontend;
+using MHServerEmu.Frontend.Accounts;
+using MHServerEmu.Games.GameData;
 using MHServerEmu.Networking;
 
 namespace MHServerEmu.Common.Commands
@@ -49,28 +49,16 @@ namespace MHServerEmu.Common.Commands
             }
         }
 
-        [Command("kick", "Usage: client kick [sessionId]", AccountUserLevel.Moderator)]
+        [Command("kick", "Usage: client kick [playerName]", AccountUserLevel.Moderator)]
         public string Kick(string[] @params, FrontendClient client)
         {
             if (@params == null || @params.Length == 0) return "Invalid arguments. Type 'help client kick' to get help.";
 
-            if (ulong.TryParse(@params[0], out ulong sessionId))
-            {
-                if (Program.FrontendServer.FrontendService.TryGetClient(sessionId, out FrontendClient target))
-                {
-                    string email = target.Session.Account.Email;
-                    target.Connection.Disconnect();
-                    return $"Kicked {sessionId} ({email})";
-                }
-                else
-                {
-                    return $"SessionId {sessionId} not found";
-                }
-            }
-            else
-            {
-                return $"Failed to parse sessionId {@params[0]}";
-            }
+            if (Program.FrontendServer.GroupingManagerService.TryGetPlayerByName(@params[0], out FrontendClient target) == false)
+                return $"Player {@params[0]} not found.";
+
+            target.Connection.Disconnect();
+            return $"Kicked {target.Session.Account}.";
         }
 
         [Command("send", "Usage: client send [sessionId] [messageName] [messageContent]", AccountUserLevel.Admin)]
