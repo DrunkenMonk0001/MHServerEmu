@@ -1,5 +1,5 @@
 <config>
-	<str name="AuthServerAddress" value="localhost" />
+	<str name="AuthServerAddress" value="auth.mhemutest.uk" />
 	<str name="AuthServerUrl" value="/AuthServer/Login/IndexPB" />
 	<str name="AuthServerTicketUrl" value="" />
 	<str name="AuthServerPort" value="443" />
