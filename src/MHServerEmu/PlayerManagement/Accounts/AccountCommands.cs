@@ -2,9 +2,9 @@
 using Gazillion;
 using MHServerEmu.Auth;
 using MHServerEmu.Common.Commands;
-using MHServerEmu.Networking;
+using MHServerEmu.Frontend;
 
-namespace MHServerEmu.Frontend.Accounts
+namespace MHServerEmu.PlayerManagement.Accounts
 {
     [CommandGroup("account", "Allows you to manage accounts.", AccountUserLevel.User)]
     public class AccountCommands : CommandGroup

@@ -2,8 +2,9 @@
 using MHServerEmu.Common.Commands;
 using MHServerEmu.Common.Config;
 using MHServerEmu.Common.Logging;
-using MHServerEmu.Frontend.Accounts;
+using MHServerEmu.Frontend;
 using MHServerEmu.Networking;
+using MHServerEmu.PlayerManagement.Accounts;
 
 namespace MHServerEmu.Grouping
 {
@@ -20,6 +21,11 @@ namespace MHServerEmu.Grouping
         public GroupingManagerService(ServerManager serverManager)
         {
             _serverManager = serverManager;
+        }
+
+        public void AcceptClientHandshake(FrontendClient client)
+        {
+            client.FinishedGroupingManagerHandshake = true;
         }
 
         public void AddPlayer(FrontendClient client)
