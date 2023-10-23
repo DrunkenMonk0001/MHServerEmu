@@ -22,9 +22,9 @@ namespace MHServerEmu.Auth
 
         private HttpListener _listener;
 
-        public AuthServer(int port, PlayerManagerService playerManager)
+        public AuthServer(PlayerManagerService playerManager)
         {
-            _url = $"http://{ConfigManager.Frontend.BindIP}:{port}/";
+            _url = $"http://{ConfigManager.Auth.Address}:{ConfigManager.Auth.Port}/";
             _playerManager = playerManager;
             _cancellationTokenSource = new();
             _webApiHandler = new();
@@ -91,7 +91,7 @@ namespace MHServerEmu.Auth
                     if (request.Url.LocalPath == "/favicon.ico") return;     // Ignore favicon requests
 
                     // Web API get requests
-                    if (requestIsFromGameClient == false && ConfigManager.WebApi.EnableWebApi)
+                    if (requestIsFromGameClient == false && ConfigManager.Auth.EnableWebApi)
                     {
                         HandleWebApiRequest(request, response);
                         return;
@@ -108,7 +108,7 @@ namespace MHServerEmu.Auth
                     }
                     
                     // Web API post requests
-                    if (requestIsFromGameClient == false && ConfigManager.WebApi.EnableWebApi)
+                    if (requestIsFromGameClient == false && ConfigManager.Auth.EnableWebApi)
                     {
                         HandleWebApiRequest(request, response);
                         return;
@@ -135,7 +135,7 @@ namespace MHServerEmu.Auth
             switch ((FrontendProtocolMessage)message.Id)
             {
                 case FrontendProtocolMessage.LoginDataPB:
-                    var loginDataPB = LoginDataPB.ParseFrom(message.Payload);
+                    var loginDataPB = message.Deserialize<LoginDataPB>();
 
                     // Send a TOS popup when the client uses tos@test.com as email
                     if (loginDataPB.EmailAddress.ToLower() == "tos@test.com")
@@ -145,7 +145,7 @@ namespace MHServerEmu.Auth
                     }
 
                     // Try to create a new session from the data we received
-                    AuthStatusCode statusCode = _playerManager.HandleLoginRequest(loginDataPB, out ClientSession session);
+                    AuthStatusCode statusCode = _playerManager.OnLoginDataPB(loginDataPB, out ClientSession session);
 
                     // Respond with an error if session creation didn't succeed
                     if (statusCode != AuthStatusCode.Success)
