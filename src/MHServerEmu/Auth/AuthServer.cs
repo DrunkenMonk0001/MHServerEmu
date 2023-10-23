@@ -24,7 +24,7 @@ namespace MHServerEmu.Auth
 
         public AuthServer(int port, PlayerManagerService playerManager)
         {
-            _url = $"http://localhost:{port}/";
+            _url = $"http://{ConfigManager.Frontend.BindIP}:{port}/";
             _playerManager = playerManager;
             _cancellationTokenSource = new();
             _webApiHandler = new();
