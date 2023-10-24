@@ -37,8 +37,17 @@ namespace MHServerEmu.Networking
         /// <param name="stream">CodedInputStream to decode from.</param>
         public GameMessage(CodedInputStream stream)
         {
-            Id = (byte)stream.ReadRawVarint32();
-            Payload = stream.ReadRawBytes((int)stream.ReadRawVarint32());
+            try
+            {
+                Id = (byte)stream.ReadRawVarint32();
+                Payload = stream.ReadRawBytes((int)stream.ReadRawVarint32());
+            }
+            catch (Exception e)
+            {
+                Id = 0;
+                Payload = null;
+                Logger.ErrorException(e, "GameMessage construction failed");
+            }
         }
 
         /// <summary>
@@ -80,9 +89,20 @@ namespace MHServerEmu.Networking
             }
             catch (Exception e)
             {
-                Logger.ErrorException(e, nameof(Deserialize));
+                Logger.ErrorException(e, $"{nameof(Deserialize)}<{nameof(T)}>");
                 return default;
             }
+        }
+
+        /// <summary>
+        /// Deserializes the payload as the specified message type. The return value indicates whether the operation succeeded.
+        /// </summary>
+        /// <typeparam name="T">Protobuf message type.</typeparam>
+        /// <param name="message">Deserialized protobuf message of the specified type.</param>
+        public bool TryDeserialize<T>(out T message) where T: IMessage
+        {
+            message = Deserialize<T>();
+            return message != null;
         }
 
         /// <summary>
