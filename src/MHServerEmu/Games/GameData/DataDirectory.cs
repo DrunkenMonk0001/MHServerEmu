@@ -16,13 +16,22 @@ namespace MHServerEmu.Games.GameData
     {
         private static readonly Logger Logger = LogManager.CreateLogger();
 
-        private readonly Dictionary<ulong, Blueprint> _blueprintDict = new();
+        private static readonly string[] DataDirectoryFiles = new string[]
+        {
+            "Calligraphy/Curve.directory",
+            "Calligraphy/Type.directory",
+            "Calligraphy/Blueprint.directory",
+            "Calligraphy/Prototype.directory",
+            "Calligraphy/Replacement.directory"
+        };
 
-        private readonly Dictionary<ulong, PrototypeDataRefRecord> _prototypeRecordDict = new();
-        private readonly Dictionary<ulong, object> _prototypeDict = new();
-        private readonly Dictionary<ulong, ulong> _prototypeGuidToDataRefDict = new();
+        private readonly Dictionary<ulong, LoadedBlueprintRecord> _blueprintRecordDict = new();     // BlueprintId -> LoadedBlueprintRecord
+        private readonly Dictionary<ulong, ulong> _blueprintGuidToDataRefDict = new();              // BlueprintGuid -> BlueprintId
 
-        private readonly Dictionary<Prototype, Blueprint> _prototypeBlueprintDict = new();  // .defaults prototype -> blueprint
+        private readonly Dictionary<ulong, PrototypeDataRefRecord> _prototypeRecordDict = new();    // PrototypeId -> PrototypeDataRefRecord
+        private readonly Dictionary<ulong, ulong> _prototypeGuidToDataRefDict = new();              // PrototypeGuid -> PrototypeId
+
+        private readonly Dictionary<Prototype, Blueprint> _prototypeBlueprintDict = new();          // .defaults prototype -> blueprint
 
         // Temporary helper class for getting prototype enums until we implement prototype class hierarchy properly
         private PrototypeEnumManager _prototypeEnumManager; 
@@ -36,71 +45,48 @@ namespace MHServerEmu.Games.GameData
             // Convert GPAK file to a dictionary for easy access to all of its entries
             var gpakDict = calligraphyGpak.ToDictionary();
 
-            // Initialize asset directory
-            AssetDirectory = new();
-
-            using (MemoryStream stream = new(gpakDict["Calligraphy/Type.directory"]))
-            using (BinaryReader reader = new(stream))
-            {
-                CalligraphyHeader header = reader.ReadCalligraphyHeader();      // TDR
-                int recordCount = reader.ReadInt32();
-                for (int i = 0; i < recordCount; i++)
-                    ReadTypeDirectoryEntry(reader, gpakDict);
-            }
-
-            Logger.Info($"Parsed {AssetDirectory.AssetCount} assets of {AssetDirectory.AssetTypeCount} types");
-
-            // Initialize curve directory
+            // Create subdirectories
             CurveDirectory = new();
-
-            using (MemoryStream stream = new(gpakDict["Calligraphy/Curve.directory"]))
-            using (BinaryReader reader = new(stream))
-            {
-                CalligraphyHeader header = reader.ReadCalligraphyHeader();      // CDR
-                int recordCount = reader.ReadInt32();
-                for (int i = 0; i < recordCount; i++)
-                    ReadCurveDirectoryEntry(reader, gpakDict);
-            }
-
-            Logger.Info($"Parsed {CurveDirectory.RecordCount} curves");
-
-            // Initialize blueprint directory
-            using (MemoryStream stream = new(gpakDict["Calligraphy/Blueprint.directory"]))
-            using (BinaryReader reader = new(stream))
-            {
-                CalligraphyHeader header = reader.ReadCalligraphyHeader();      // BDR
-                int recordCount = reader.ReadInt32();
-                for (int i = 0; i < recordCount; i++)
-                    ReadBlueprintDirectoryEntry(reader, gpakDict);
-            }
-
-            Logger.Info($"Parsed {_blueprintDict.Count} blueprints");
-
-            // Initialize prototype directory
-            using (MemoryStream stream = new(gpakDict["Calligraphy/Prototype.directory"]))
-            using (BinaryReader reader = new(stream))
-            {
-                CalligraphyHeader header = reader.ReadCalligraphyHeader();      // PDR
-                int recordCount = reader.ReadInt32();
-                for (int i = 0; i < recordCount; i++)
-                    ReadPrototypeDirectoryEntry(reader, gpakDict);
-            }
-
-            // Load resource prototypes
-            CreatePrototypeDataRefsForDirectory(resourceGpak);
-
-            Logger.Info($"Parsed {_prototypeDict.Count} prototype files");
-
-            // Initialize replacement directory
+            AssetDirectory = new();
             ReplacementDirectory = new();
 
-            using (MemoryStream stream = new(gpakDict["Calligraphy/Replacement.directory"]))
-            using (BinaryReader reader = new(stream))
+            // Load all directories
+            for (int i = 0; i < DataDirectoryFiles.Length; i++)
             {
-                CalligraphyHeader header = reader.ReadCalligraphyHeader();      // RDR
-                int recordCount = reader.ReadInt32();
-                for (int i = 0; i < recordCount; i++)
-                    ReadReplacementDirectoryEntry(reader);
+                using (MemoryStream stream = new(gpakDict[DataDirectoryFiles[i]]))
+                using (BinaryReader reader = new(stream))
+                {
+                    var header = reader.ReadCalligraphyHeader();
+                    int recordCount = reader.ReadInt32();
+
+                    switch (header.Magic)
+                    {
+                        case "CDR":     // Curves
+                            for (int j = 0; j < recordCount; j++) ReadCurveDirectoryEntry(reader, gpakDict);
+                            Logger.Info($"Parsed {CurveDirectory.RecordCount} curves");
+                            break;
+
+                        case "TDR":     // Assets
+                            for (int j = 0; j < recordCount; j++) ReadTypeDirectoryEntry(reader, gpakDict);
+                            Logger.Info($"Parsed {AssetDirectory.AssetCount} assets of {AssetDirectory.AssetTypeCount} types");
+                            break;
+
+                        case "BDR":     // Blueprints
+                            for (int j = 0; j < recordCount; j++) ReadBlueprintDirectoryEntry(reader, gpakDict);
+                            Logger.Info($"Parsed {_blueprintRecordDict.Count} blueprints");
+                            break;
+
+                        case "PDR":     // Prototypes
+                            for (int j = 0; j < recordCount; j++) ReadPrototypeDirectoryEntry(reader, gpakDict);
+                            CreatePrototypeDataRefsForDirectory(resourceGpak);  // Load resource prototypes
+                            Logger.Info($"Parsed {_prototypeRecordDict.Count} prototype files");
+                            break;
+
+                        case "RDR":     // Replacement
+                            for (int j = 0; j < recordCount; j++) ReadReplacementDirectoryEntry(reader);
+                            break;
+                    }
+                }
             }
 
             // old hierarchy init
@@ -119,7 +105,6 @@ namespace MHServerEmu.Games.GameData
             GameDatabase.AssetTypeRefManager.AddDataRef(dataId, filePath);
             var record = AssetDirectory.CreateAssetTypeRecord(dataId, flags);
             record.AssetType = new(gpakDict[$"Calligraphy/{filePath}"], AssetDirectory, dataId, assetTypeGuid);
-
         }
 
         private void ReadCurveDirectoryEntry(BinaryReader reader, Dictionary<string, byte[]> gpakDict)
@@ -130,7 +115,7 @@ namespace MHServerEmu.Games.GameData
             string filePath = reader.ReadFixedString16().Replace('\\', '/');
 
             GameDatabase.CurveRefManager.AddDataRef(curveId, filePath);
-            CurveRecord record = CurveDirectory.CreateCurveRecord(curveId, flags);
+            var record = CurveDirectory.CreateCurveRecord(curveId, flags);
             record.Curve = new(gpakDict[$"Calligraphy/{filePath}"]);
         }
 
@@ -167,13 +152,18 @@ namespace MHServerEmu.Games.GameData
 
         private void LoadBlueprint(ulong id, ulong guid, byte flags, Dictionary<string, byte[]> gpakDict)
         {
-            // Blueprint deserialization is not yet properly implemented
+            // Add guid lookup
+            _blueprintGuidToDataRefDict[guid] = id;
+
+            // Deserialize (blueprint deserialization is not yet properly implemented)
             Blueprint blueprint = new(gpakDict[$"Calligraphy/{GameDatabase.GetBlueprintName(id)}"]);
-            _blueprintDict.Add(id, blueprint);
 
             // Add field name refs when loading blueprints
             foreach (BlueprintMember member in blueprint.Members)
                 GameDatabase.StringRefManager.AddDataRef(member.FieldId, member.FieldName);
+
+            // Add a new blueprint record
+            _blueprintRecordDict.Add(id, new(blueprint, flags));
         }
 
         private void AddCalligraphyPrototype(ulong prototypeId, ulong prototypeGuid, ulong blueprintId, byte flags, string filePath, Dictionary<string, byte[]> gpakDict)
@@ -183,18 +173,20 @@ namespace MHServerEmu.Games.GameData
             _prototypeGuidToDataRefDict.Add(prototypeGuid, prototypeId);
 
             // Add a new prototype record
-            _prototypeRecordDict.Add(prototypeId, new()
+            PrototypeDataRefRecord record = new()
             {
                 PrototypeId = prototypeId,
                 PrototypeGuid = prototypeGuid,
                 BlueprintId = blueprintId,
                 Flags = flags,
                 IsCalligraphyPrototype = true
-            });
+            };
+
+            _prototypeRecordDict.Add(prototypeId, record);
 
             // Load the prototype
             PrototypeFile prototypeFile = new(gpakDict[$"Calligraphy/{filePath}"]);
-            _prototypeDict.Add(prototypeId, prototypeFile.Prototype);
+            record.Prototype = prototypeFile.Prototype;
         }
 
         private void AddResource(string filePath, byte[] data)
@@ -204,31 +196,31 @@ namespace MHServerEmu.Games.GameData
             GameDatabase.PrototypeRefManager.AddDataRef(prototypeId, filePath);
 
             // Add a new prototype record
-            _prototypeRecordDict.Add(prototypeId, new()
+            PrototypeDataRefRecord record = new()
             {
                 PrototypeId = prototypeId,
                 PrototypeGuid = 0,
                 BlueprintId = 0,
                 Flags = 0,
                 IsCalligraphyPrototype = false
-            });
+            };
+
+            _prototypeRecordDict.Add(prototypeId, record);
 
             // Load the resource
-            object resource;
             string extension = Path.GetExtension(filePath);
-
-            switch (extension)
+            object resource = extension switch
             {
-                case ".cell":       resource = new CellPrototype(data);         break;
-                case ".district":   resource = new DistrictPrototype(data);     break;
-                case ".encounter":  resource = new EncounterPrototype(data);    break;
-                case ".propset":    resource = new PropSetPrototype(data);      break;
-                case ".prop":       resource = new PropPrototype(data);         break;
-                case ".ui":         resource = new UIPrototype(data);           break;
-                default:            throw new($"Unsupported resource type ({extension}).");
-            }
+                ".cell" =>      new CellPrototype(data),
+                ".district" =>  new DistrictPrototype(data),
+                ".encounter" => new EncounterPrototype(data),
+                ".propset" =>   new PropSetPrototype(data),
+                ".prop" =>      new PropPrototype(data),
+                ".ui" =>        new UIPrototype(data),
+                _ =>            throw new NotImplementedException($"Unsupported resource type ({extension})."),
+            };
 
-            _prototypeDict.Add(prototypeId, resource);
+            record.Prototype = resource;
         }
 
         private void InitializeHierarchyCache()
@@ -236,8 +228,8 @@ namespace MHServerEmu.Games.GameData
             // not yet properly implemented
 
             // .defaults prototype -> blueprint
-            foreach (var kvp in _blueprintDict)
-                _prototypeBlueprintDict.Add(GetPrototype<Prototype>(kvp.Value.DefaultPrototypeId), kvp.Value);
+            foreach (var kvp in _blueprintRecordDict)
+                _prototypeBlueprintDict.Add(GetPrototype<Prototype>(kvp.Value.Blueprint.DefaultPrototypeId), kvp.Value.Blueprint);
 
             // enums
             _prototypeEnumManager = new(this);
@@ -257,34 +249,35 @@ namespace MHServerEmu.Games.GameData
 
         public ulong GetPrototypeDataRefByGuid(ulong guid)
         {
-            if (_prototypeGuidToDataRefDict.TryGetValue(guid, out ulong id))
-                return id;
+            if (_prototypeGuidToDataRefDict.TryGetValue(guid, out ulong id) == false)
+                return 0;
 
-            return 0;
+            return id;
         }
 
         public ulong GetPrototypeGuid(ulong id)
         {
-            if (_prototypeRecordDict.TryGetValue(id, out PrototypeDataRefRecord record))
-                return record.PrototypeGuid;
+            if (_prototypeRecordDict.TryGetValue(id, out PrototypeDataRefRecord record) == false)
+                return 0;
 
-            return 0;
+            return record.PrototypeGuid;
         }
 
         public Blueprint GetBlueprint(ulong id)
         {
-            if (_blueprintDict.TryGetValue(id, out Blueprint blueprint))
-                return blueprint;
+            if (_blueprintRecordDict.TryGetValue(id, out var record) == false)
+                return null;
 
-            return null;
+            return record.Blueprint;
         }
 
         public T GetPrototype<T>(ulong id)
         {
-            if (_prototypeDict.TryGetValue(id, out object prototype))
-                return (T)prototype;
+            var record = GetPrototypeDataRefRecord(id);
+            if (record == null) return default;
+            if (record.Prototype == null) return default;
 
-            return default;
+            return (T)record.Prototype;
         }
 
         public Prototype GetBlueprintDefaultPrototype(Blueprint blueprint) => GetPrototype<Prototype>(blueprint.DefaultPrototypeId);
@@ -306,14 +299,23 @@ namespace MHServerEmu.Games.GameData
 
         public List<ulong> GetPowerPropertyIdList(string filter) => _prototypeEnumManager.GetPowerPropertyIdList(filter);   // TO BE REMOVED: temp bruteforcing of power property ids
 
-
-        // Helper methods
         public bool IsCalligraphyPrototype(ulong prototypeId)
         {
-            if (_prototypeRecordDict.TryGetValue(prototypeId, out PrototypeDataRefRecord record))
-                return record.IsCalligraphyPrototype;
+            if (_prototypeRecordDict.TryGetValue(prototypeId, out PrototypeDataRefRecord record) == false)
+                return false;
 
-            return false;
+            return record.IsCalligraphyPrototype;
+        }
+
+        private PrototypeDataRefRecord GetPrototypeDataRefRecord(ulong prototypeId)
+        {
+            if (_prototypeRecordDict.TryGetValue(prototypeId, out var record) == false)
+            {
+                Logger.Warn($"PrototypeId {prototypeId} has no data ref record in the data directory");
+                return null;
+            }
+
+            return record;
         }
 
         #endregion
@@ -324,8 +326,8 @@ namespace MHServerEmu.Games.GameData
         {
             return AssetDirectory.AssetCount > 0
                 && CurveDirectory.RecordCount > 0
-                && _blueprintDict.Count > 0
-                && _prototypeDict.Count > 0
+                && _blueprintRecordDict.Count > 0
+                && _prototypeRecordDict.Count > 0
                 && ReplacementDirectory.RecordCount > 0;
         }
 
@@ -340,14 +342,27 @@ namespace MHServerEmu.Games.GameData
         }
 
         #endregion
-    }
 
-    public class PrototypeDataRefRecord
-    {
-        public ulong PrototypeId { get; set; }
-        public ulong PrototypeGuid { get; set; }
-        public ulong BlueprintId { get; set; }
-        public byte Flags { get; set; }
-        public bool IsCalligraphyPrototype { get; set; }
+        struct LoadedBlueprintRecord
+        {
+            public Blueprint Blueprint { get; set; }
+            public byte Flags { get; set; }
+
+            public LoadedBlueprintRecord(Blueprint blueprint, byte flags)
+            {
+                Blueprint = blueprint;
+                Flags = flags;
+            }
+        }
+
+        class PrototypeDataRefRecord
+        {
+            public ulong PrototypeId { get; set; }
+            public ulong PrototypeGuid { get; set; }
+            public ulong BlueprintId { get; set; }
+            public byte Flags { get; set; }
+            public bool IsCalligraphyPrototype { get; set; }
+            public object Prototype { get; set; }
+        }
     }
 }
