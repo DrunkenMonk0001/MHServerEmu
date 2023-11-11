@@ -17,13 +17,16 @@
 
     public enum CalligraphyContainerType : byte
     {
-        L = 0x4c,   // list (A P R T only)
-        S = 0x53    // single
+        S = 0x53,   // Simple
+        L = 0x4c    // List (A P R T only)
     }
 
 
     // Enums for specific data for easy access
 
+    /// <summary>
+    /// Represents a hardcoded default prototype id.
+    /// </summary>
     public enum DefaultPrototypeId : ulong
     {
         WorldEntity = 7901305308382563236,
@@ -47,6 +50,9 @@
         DiamondFormActivatePower = 18066325974134561036,
     }
 
+    /// <summary>
+    /// Represents a hardcoded prototype field id.
+    /// </summary>
     public enum FieldId : ulong
     {
         // WorldEntity

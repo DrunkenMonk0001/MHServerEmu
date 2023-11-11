@@ -8,11 +8,11 @@ using MHServerEmu.Games.GameData.Calligraphy;
 
 namespace MHServerEmu.Games.Regions
 {
-    using ConnectionNodeDict = Dictionary<PrototypeId, Dictionary<ulong, PrototypeId>>;
+    using ConnectionNodeDict = Dictionary<PrototypeId, Dictionary<PrototypeGuid, PrototypeId>>;
 
     public struct TargetObject
     {
-        public ulong Entity { get; set; }
+        public PrototypeGuid Entity { get; set; }
         public PrototypeId Area { get; set; }
         public PrototypeId TargetId { get; set; }
     }
@@ -37,22 +37,22 @@ namespace MHServerEmu.Games.Regions
             Prototype entity = prototypeId.GetPrototype();
             if (entity.Header.ReferenceType == (PrototypeId)DefaultPrototypeId.NPCTemplateHub)
                 return 46f; // AgentUntargetableInvulnerable.WorldEntity.Bounds.CapsuleBounds.HeightFromCenter
-            PrototypeEntry TestWorldEntity = entity.GetEntry(DefaultPrototypeId.WorldEntity);
+            PrototypeFieldGroup TestWorldEntity = entity.GetFieldGroup(DefaultPrototypeId.WorldEntity);
             if (TestWorldEntity == null)
                 return GetEntityFloor(entity.Header.ReferenceType);
 
-            PrototypeEntryElement TestBounds = TestWorldEntity.GetField(FieldId.Bounds);
+            PrototypeSimpleField TestBounds = TestWorldEntity.GetField(FieldId.Bounds);
             if (TestBounds == null) 
                 return GetEntityFloor(entity.Header.ReferenceType);
 
             Prototype bounds = (Prototype)TestBounds.Value;
             float height = 0f;
             if (bounds.Header.ReferenceType == (PrototypeId)DefaultPrototypeId.BoxBounds || bounds.Header.ReferenceType == (PrototypeId)DefaultPrototypeId.ObjectSmall)
-                height = (float)(double)bounds.GetEntry(DefaultPrototypeId.BoxBounds).GetField(FieldId.Height).Value;
+                height = (float)(double)bounds.GetFieldGroup(DefaultPrototypeId.BoxBounds).GetField(FieldId.Height).Value;
             else if (bounds.Header.ReferenceType == (PrototypeId)DefaultPrototypeId.SphereBounds)
-                height = (float)(double)bounds.GetEntry(DefaultPrototypeId.SphereBounds).GetField(FieldId.Radius).Value;
+                height = (float)(double)bounds.GetFieldGroup(DefaultPrototypeId.SphereBounds).GetField(FieldId.Radius).Value;
             else if (bounds.Header.ReferenceType == (PrototypeId)DefaultPrototypeId.CapsuleBounds)
-                height = (float)(double)bounds.GetEntry(DefaultPrototypeId.CapsuleBounds).GetField(FieldId.HeightFromCenter).Value * 2f;
+                height = (float)(double)bounds.GetFieldGroup(DefaultPrototypeId.CapsuleBounds).GetField(FieldId.HeightFromCenter).Value * 2f;
             else Logger.Warn($"ReferenceType = {bounds.Header.ReferenceType}");
 
             return height / 2;
@@ -63,10 +63,10 @@ namespace MHServerEmu.Games.Regions
             if (prototypeId == (PrototypeId)DefaultPrototypeId.ThrowableProp) return true;
             if (prototypeId == (PrototypeId)DefaultPrototypeId.DestructibleProp) return true;
             Prototype entity = prototypeId.GetPrototype();
-            PrototypeEntry TestWorldEntity = entity.GetEntry(DefaultPrototypeId.WorldEntity);
+            PrototypeFieldGroup TestWorldEntity = entity.GetFieldGroup(DefaultPrototypeId.WorldEntity);
             if (TestWorldEntity == null) 
                 return GetSnapToFloorOnSpawn(entity.Header.ReferenceType);
-            PrototypeEntryElement TestSnapToFloorOnSpawn = TestWorldEntity.GetField(FieldId.SnapToFloorOnSpawn);
+            PrototypeSimpleField TestSnapToFloorOnSpawn = TestWorldEntity.GetField(FieldId.SnapToFloorOnSpawn);
             if (TestSnapToFloorOnSpawn == null) 
                 return GetSnapToFloorOnSpawn(entity.Header.ReferenceType);
             return (bool)TestSnapToFloorOnSpawn.Value;
@@ -77,7 +77,7 @@ namespace MHServerEmu.Games.Regions
             PrototypeId FindArea(PrototypeId target)
             {
                 if (target == (PrototypeId)DefaultPrototypeId.RegionConnectionTarget) return 0;
-                var area = (PrototypeId)target.GetPrototype().GetEntry(DefaultPrototypeId.RegionConnectionTarget).GetFieldDef(FieldId.Area);
+                var area = (PrototypeId)target.GetPrototype().GetFieldGroup(DefaultPrototypeId.RegionConnectionTarget).GetFieldDef(FieldId.Area);
                 if (area == PrototypeId.Invalid) return FindArea(target.GetPrototype().Header.ReferenceType);
                 return area;
             }
@@ -87,10 +87,10 @@ namespace MHServerEmu.Games.Regions
 
             foreach (PrototypeId connection in connectionNode)
             {
-                var target = (PrototypeId)connection.GetPrototype().GetEntry(DefaultPrototypeId.RegionConnectionNode).GetField(FieldId.Target).Value;
-                PrototypeEntry entryTarget = target.GetPrototype().GetEntry(DefaultPrototypeId.RegionConnectionTarget);
-                var origin = (PrototypeId)connection.GetPrototype().GetEntry(DefaultPrototypeId.RegionConnectionNode).GetField(FieldId.Origin).Value;
-                PrototypeEntry entryOrigin = origin.GetPrototype().GetEntry(DefaultPrototypeId.RegionConnectionTarget);
+                var target = (PrototypeId)connection.GetPrototype().GetFieldGroup(DefaultPrototypeId.RegionConnectionNode).GetField(FieldId.Target).Value;
+                PrototypeFieldGroup entryTarget = target.GetPrototype().GetFieldGroup(DefaultPrototypeId.RegionConnectionTarget);
+                var origin = (PrototypeId)connection.GetPrototype().GetFieldGroup(DefaultPrototypeId.RegionConnectionNode).GetField(FieldId.Origin).Value;
+                PrototypeFieldGroup entryOrigin = origin.GetPrototype().GetFieldGroup(DefaultPrototypeId.RegionConnectionTarget);
                 nodes.Add(new TargetObject
                 {
                     Area = FindArea(target),
@@ -109,7 +109,7 @@ namespace MHServerEmu.Games.Regions
             var groupedNodes = nodes.GroupBy(node => node.Area);
             foreach (var group in groupedNodes)
             {
-                var groupItems = new Dictionary<ulong, PrototypeId>();
+                var groupItems = new Dictionary<PrototypeGuid, PrototypeId>();
 
                 foreach (var node in group)
                     groupItems[node.Entity] = node.TargetId;
@@ -196,7 +196,7 @@ namespace MHServerEmu.Games.Regions
                                 //Logger.Warn($"EntityGuid = {door.EntityGuid}");
                                 Vector3 position = door.Position + areaOrigin;
                                 float dz = 60f;
-                                if (door.EntityGuid == 14397992695795297083) dz = 0f;
+                                if (door.EntityGuid == (PrototypeGuid)14397992695795297083) dz = 0f;
                                 position.Z += dz;
                                 _entityManager.SpawnDirectTeleport(
                                        (ulong)region.Prototype, GameDatabase.GetDataRefByPrototypeGuid(door.EntityGuid),
@@ -430,8 +430,8 @@ namespace MHServerEmu.Games.Regions
 
                             switch (npc.EntityGuid)
                             {
-                                case 17602051469318245682:// EncounterOpenMissionSmallV10
-                                case 292473193813839029: // EncounterOpenMissionLargeV1
+                                case (PrototypeGuid)17602051469318245682:// EncounterOpenMissionSmallV10
+                                case (PrototypeGuid)292473193813839029: // EncounterOpenMissionLargeV1
                                     _entityManager.CreateWorldEntityEnemy(region.Id, GameDatabase.GetPrototypeRefByName("Entity/Props/Throwables/ThrowablePoliceCar.prototype"),
                                         npc.Position, npc.Rotation,
                                         100, areaid, 100, cellid, area, false, 1, 1);
@@ -551,7 +551,7 @@ namespace MHServerEmu.Games.Regions
                                 Vector3 pos = new(npc.Position.X + areaOrigin.X, npc.Position.Y + areaOrigin.Y, npc.Position.Z + areaOrigin.Z);
                                 switch (npc.EntityGuid)
                                 {
-                                    case 2888059748704716317: // EncounterSmall
+                                    case (PrototypeGuid)2888059748704716317: // EncounterSmall
                                         num++;
                                         if (num == 1)
                                             _entityManager.CreateWorldEntityEnemy(region.Id, doop[3],
@@ -562,7 +562,7 @@ namespace MHServerEmu.Games.Regions
 
                                         break;
 
-                                    case 13880579250584290847: // EncounterMedium
+                                    case (PrototypeGuid)13880579250584290847: // EncounterMedium
                                         WorldEntity boss = _entityManager.CreateWorldEntityEnemy(region.Id, doop[4],
                                             pos, npc.Rotation,
                                             608, areaid, 608, cellid, area, false, 60, 60);
@@ -592,25 +592,25 @@ namespace MHServerEmu.Games.Regions
                             //Logger.Trace($"[{i}].EntityGuid = {npc.EntityGuid}");     // this is slow and causes Game tick time to go over 50 ms on loading
                             switch (npc.EntityGuid)
                             {
-                                case 9760489745388478121: // EncounterTinyV12                                    
+                                case (PrototypeGuid)9760489745388478121: // EncounterTinyV12                                    
                                     _entityManager.CreateWorldEntityEnemy(region.Id, GameDatabase.GetPrototypeRefByName("Entity/Characters/Mobs/TrainingRoom/TrainingHPDummyBoss.prototype"),
                                         npc.Position, npc.Rotation,
                                         608, areaid, 608, cellid, area, false, 60, 60);
                                     break;
 
-                                case 1411432581376189649: // EncounterTinyV13                                    
+                                case (PrototypeGuid)1411432581376189649: // EncounterTinyV13                                    
                                     _entityManager.CreateWorldEntityEnemy(region.Id, GameDatabase.GetPrototypeRefByName("Entity/Characters/Mobs/TrainingRoom/TrainingHPDummyRaidBoss.prototype"),
                                         npc.Position, npc.Rotation,
                                         608, areaid, 608, cellid, area, false, 60, 60);
                                     break;
 
-                                case 9712873838200498938: // EncounterTinyV14                                    
+                                case (PrototypeGuid)9712873838200498938: // EncounterTinyV14                                    
                                     _entityManager.CreateWorldEntityEnemy(region.Id, GameDatabase.GetPrototypeRefByName("Entity/Characters/Mobs/CowsEG/SpearCowD1.prototype"), // why not?
                                         npc.Position, npc.Rotation, //Entity/Characters/Mobs/TrainingRoom/TrainingDamageDummy.prototype
                                         608, areaid, 608, cellid, area, false, 10, 10);
                                     break;
 
-                                case 17473025685948150052: // EncounterTinyV15                                    
+                                case (PrototypeGuid)17473025685948150052: // EncounterTinyV15                                    
                                     _entityManager.CreateWorldEntityEnemy(region.Id, GameDatabase.GetPrototypeRefByName("Entity/Characters/Mobs/TrainingRoom/TrainingHPDummy.prototype"),
                                         npc.Position, npc.Rotation,
                                         608, areaid, 608, cellid, area, false, 10, 10);
