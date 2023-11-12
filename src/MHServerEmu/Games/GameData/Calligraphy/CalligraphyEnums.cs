@@ -4,23 +4,22 @@
 
     public enum CalligraphyValueType : byte
     {
-        A = 0x41,   // asset
-        B = 0x42,   // bool
-        C = 0x43,   // curve
-        D = 0x44,   // double
-        L = 0x4c,   // long
-        P = 0x50,   // prototype
-        R = 0x52,   // ??? (embedded / anonymous prototype)
-        S = 0x53,   // string
-        T = 0x54    // type
+        Asset = 0x41,       // A (Id reference to an asset)
+        Boolean = 0x42,     // B (Stored as a UInt64)
+        Curve = 0x43,       // C (Id reference to a curve)
+        Double = 0x44,      // D (For all floating point values)
+        Long = 0x4c,        // L (For all integer values)
+        Prototype = 0x50,   // P (Id reference to another prototype)
+        RHStruct = 0x52,    // R (Embedded prototype without an id, the name is mentioned in EntitySelectorActionPrototype::Validate)
+        String = 0x53,      // S (Id reference to a localized string)
+        Type = 0x54         // T (Id reference to an AssetType)
     }
 
     public enum CalligraphyContainerType : byte
     {
-        S = 0x53,   // Simple
-        L = 0x4c    // List (A P R T only)
+        Simple = 0x53,      // Simple
+        List = 0x4c         // List (only for assets, prototypes, rhstructs, and types)
     }
-
 
     // Enums for specific data for easy access
 
