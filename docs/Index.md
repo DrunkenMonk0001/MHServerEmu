@@ -1,29 +1,50 @@
 # MHServerEmu Documentation
 
-If this is your first time setting up MHServerEmu, you might be interested in this:
+If you would like to ask questions or get up to date information, please feel free to join our [Discord](https://discord.gg/hjR8Bj52t3).
 
-- [Setup.md](./Setup.md) - initial setup instructions.
+## Setup
 
-- [SetupAdvanced.md](./SetupAdvanced.md) - advanced setup instructions.
+If this is your first time using MHServerEmu, you may be interested in this.
 
-- [ServerCommands.md](./ServerCommands.md) - a list of available server commands.
+- [Initial Setup](./Setup/InitialSetup.md) - step by step instructions for setting up the server emulator for the first time.
 
-If you would like to help with the development, here are some resources you can use:
+- [Advanced Setup](./Setup/AdvancedSetup.md) - advanced setup instructions (enabling accounts, remote connections, etc.).
 
-- [Overview.md](./Overview.md) - lays out the basics (somewhat outdated).
+## Server Emulator
 
-- [ClientVersions.md](./ClientVersions.md) - information on various clients and how to get them.
+MHServerEmu-specific topics.
 
-- [ClientLaunchParameters.md](./ClientLaunchParameters.md) - lists various launch parameters that you can use when running the client (such as enabling verbose logging).
+- [Server Commands](./ServerEmu/ServerCommands.md) - a list of available server commands.
 
-- [Constants.md](./Constants.md) - lists various constants used by the client.
+## Networking
 
-For specific topics see these:
+Information about client <-> server communication.
 
-- [ClientConfig.md](./ClientConfig.md) - ClientConfig.xml file structure.
+- [Packet Structure](./Networking/PacketStructure.md) - an overview of the packet structure.
+- [Authentication](./Networking/Authentication.md) - an overview of the authentication flow.
 
-- [SiteConfig.md](./SiteConfig.md) - SiteConfig.xml file structure.
+## Game Data
 
-- [EmbeddedBrowser.md](./EmbeddedBrowser.md) - API documentation for the web browser embedded in the client.
+Information about how static game data is stored and processed by the game.
 
-If you would like to ask questions or get up to date information, please feel free to contact us on [Discord](https://discord.gg/hjR8Bj52t3).
+- [Pak File](./GameData/PakFile.md) - an overview of the custom archive format used by the game.
+
+## Web
+
+Information about various web assets that the client gets via HTTP.
+
+- [SiteConfig](./Web/SiteConfig.md) - SiteConfig.xml file structure.
+
+- [Embedded Browser](./Web/EmbeddedBrowser.md) - API documentation for the web browser embedded in the client.
+
+## Client
+
+Information about how the client functions.
+
+- [Client Versions](./Client/ClientVersions.md) - information on various client versions and how to get them.
+
+- [Client Launch Parameters](./Client/ClientLaunchParameters.md) - a list of various launch parameters that you can use when running the client (such as enabling verbose logging).
+
+- [ClientConfig](./Client/ClientConfig.md) - ClientConfig.xml file structure.
+
+- [Constants](./Client/Constants.md) - a list of various constants used by the client.
