@@ -14,7 +14,7 @@ struct CalligraphyHeader
 
 The magic string defines what format is used in the file. The version depends on the game version: game versions 1.9-1.17 used Calligraphy version 10, and all later game versions starting with 1.18 released on January 24th 2014 use Calligraphy version 11.
 
-All strings in Calligraphy files are fixed-length ASCII strings with the length encoded in a 16-bit value preceding the text:
+All strings in Calligraphy files are fixed-length UTF-8 strings with the length encoded in a 16-bit value preceding the text:
 
 ```csharp
 ushort StringLength;
@@ -29,8 +29,8 @@ All directories start with a Calligraphy header and the number of records contai
 
 ```csharp
 CalligraphyHeader Header;
-uint RecordsLength;
-Record[RecordsLength] Records;
+uint NumRecords;
+Record[NumRecords] Records;
 ```
 
 `Curve.directory` (signature `CDR`), `Type.directory` (signature `CDR`), and `Blueprint.directory` (signature `BDR`) have the same standard record structure:
@@ -83,8 +83,8 @@ Asset type files have the following structure:
 
 ```csharp
 CalligraphyHeader Header;
-ushort AssetsLength;
-Asset[AssetsLength]; Assets;
+ushort NumAssets;
+Asset[NumAssets]; Assets;
 ```
 
 Each asset in an asset type has the following structure:
@@ -107,14 +107,14 @@ CalligraphyHeader Header;
 string RuntimeBinding;    // Name of the class that handles prototypes that use this blueprint
 ulong DefaultPrototypeId;
 
-ushort ParentsLength;
-BlueprintReference[ParentsLength] Parents;
+ushort NumParents;
+BlueprintReference[NumParents] Parents;
 
-ushort ContributingBlueprintsLength;
-BlueprintReference[ContributingBlueprintsLength] ContributingBlueprints;
+ushort NumContributingBlueprints;
+BlueprintReference[NumContributingBlueprints] ContributingBlueprints;
 
-ushort MembersLength;
-BlueprintMember[MembersLength] Members;
+ushort NumMembers;
+BlueprintMember[NumMembers] Members;
 ```
 
 Blueprint references actually reference the default prototype bound to a blueprint, and not the blueprint itself. They have the following structure:
@@ -184,8 +184,8 @@ PrototypeDataHeader Header;
 
 if (Header.DataExists)
 {
-    ushort FieldGroupsLength;
-    PrototypeFieldGroup[FieldGroupsLength] FieldGroups;
+    ushort NumFieldGroups;
+    PrototypeFieldGroup[NumFieldGroups] FieldGroups;
 }
 ```
 
@@ -202,7 +202,6 @@ struct PrototypeDataHeader
     if (ReferenceExists)
         ulong ReferenceType;    // Parent prototype id, invalid (0) for .defaults 
 }
-
 ```
 
 Each field group is a collection of fields belonging to blueprints that contribute to a prototype. They have the following structure:
@@ -211,11 +210,11 @@ Each field group is a collection of fields belonging to blueprints that contribu
 ulong DeclaringBlueprintId;    // .defaults prototype id
 byte BlueprintCopyNumber;
 
-ushort SimpleFieldsLength;
-PrototypeSimpleField[SimpleFieldsLength] SimpleFields;
+ushort NumSimpleFields;
+PrototypeSimpleField[NumSimpleFields] SimpleFields;
 
-ushort ListFieldsLength;
-PrototypeListField[ListFieldsLength] ListFields;
+ushort NumListFields;
+PrototypeListField[NumListFields] ListFields;
 ```
 
 Simple fields contain a single value and have the following structure:
@@ -231,7 +230,7 @@ List fields contain a list of values and have a similar structure:
 ```csharp
 ulong FieldId;
 ValueType Type;
-ushort ValuesLength;
+ushort NumValues;
 object[ValuesLength] Values;
 ```
 
