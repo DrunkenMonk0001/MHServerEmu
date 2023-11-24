@@ -6,6 +6,14 @@ using MHServerEmu.Games.GameData.Prototypes;
 
 namespace MHServerEmu.Games.GameData
 {
+    public enum DataOrigin : byte
+    {
+        Unknown,        // Default value returned by DataDirectory::GetDataOrigin()
+        Calligraphy,
+        Resource,
+        Dynamic         // Unused? Mentioned in DataDirectory::GetPrototypeBlueprintDataRef()
+    }
+
     /// <summary>
     /// Manages all loaded game data.
     /// </summary>
@@ -168,7 +176,7 @@ namespace MHServerEmu.Games.GameData
                 PrototypeGuid = prototypeGuid,
                 BlueprintId = blueprintId,
                 Flags = flags,
-                IsCalligraphyPrototype = true
+                DataOrigin = DataOrigin.Calligraphy
             };
 
             _prototypeRecordDict.Add(prototypeId, record);
@@ -191,7 +199,7 @@ namespace MHServerEmu.Games.GameData
                 PrototypeGuid = PrototypeGuid.Invalid,
                 BlueprintId = BlueprintId.Invalid,
                 Flags = 0,
-                IsCalligraphyPrototype = false
+                DataOrigin = DataOrigin.Resource
             };
 
             _prototypeRecordDict.Add(prototypeId, record);
@@ -226,8 +234,10 @@ namespace MHServerEmu.Games.GameData
 
         private void CreatePrototypeDataRefsForDirectory(PakFile resourceFile)
         {
-            // Not yet properly implemented
-            // Todo: after combining both sips into PakfileSystem filter files here by "Resource/" prefix
+            // If we were to support older versions of the game where all data is stored in a single pak,
+            // we would have to implement file filtering by prefix here. See PakFileSystem::GetResourceFiles()
+            // for reference.
+
             foreach (PakEntry entry in resourceFile.Entries)
                 AddResource(entry.FilePath, entry.Data);
         }
@@ -298,12 +308,12 @@ namespace MHServerEmu.Games.GameData
 
         public List<ulong> GetPowerPropertyIdList(string filter) => _prototypeEnumManager.GetPowerPropertyIdList(filter);   // TO BE REMOVED: temp bruteforcing of power property ids
 
-        public bool IsCalligraphyPrototype(PrototypeId prototypeId)
+        public DataOrigin GetDataOrigin(PrototypeId prototypeId)
         {
             if (_prototypeRecordDict.TryGetValue(prototypeId, out PrototypeDataRefRecord record) == false)
-                return false;
+                return DataOrigin.Unknown;
 
-            return record.IsCalligraphyPrototype;
+            return record.DataOrigin;
         }
 
         private PrototypeDataRefRecord GetPrototypeDataRefRecord(PrototypeId prototypeId)
@@ -350,7 +360,7 @@ namespace MHServerEmu.Games.GameData
             public PrototypeGuid PrototypeGuid { get; set; }
             public BlueprintId BlueprintId { get; set; }
             public PrototypeRecordFlags Flags { get; set; }
-            public bool IsCalligraphyPrototype { get; set; }
+            public DataOrigin DataOrigin { get; set; }    // Original memory location: PrototypeDataRefRecord + 32
             public object Prototype { get; set; }
         }
     }
