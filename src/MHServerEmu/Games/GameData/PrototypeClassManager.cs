@@ -5,11 +5,15 @@ using MHServerEmu.Games.GameData.Prototypes;
 
 namespace MHServerEmu.Games.GameData
 {
+    // We use C# types and reflection instead of class ids / class info and GRTTI
+
     public class PrototypeClassManager
     {
         private static readonly Logger Logger = LogManager.CreateLogger();
 
-        private readonly Dictionary<string, Type> _prototypeNameToTypeDict = new();
+        private readonly Dictionary<string, Type> _prototypeNameToClassTypeDict = new();
+
+        public int ClassCount { get => _prototypeNameToClassTypeDict.Count; }
 
         public PrototypeClassManager()
         {
@@ -17,18 +21,21 @@ namespace MHServerEmu.Games.GameData
 
             foreach (Type type in Assembly.GetExecutingAssembly().GetTypes())
             {
-                if (type.IsSubclassOf(typeof(Prototype)) == false) continue;
-                _prototypeNameToTypeDict.Add(type.Name, type);
+                if (PrototypeClassIsA(type, typeof(Prototype)) == false) continue;  // Skip non-prototype classes
+                _prototypeNameToClassTypeDict.Add(type.Name, type);
             }
 
             stopwatch.Stop();
-            Logger.Info($"Initialized in {stopwatch.ElapsedMilliseconds} ms");
+            Logger.Info($"Initialized {ClassCount} prototype classes in {stopwatch.ElapsedMilliseconds} ms");
         }
 
-        public Type GetPrototypeTypeByName(string name)
+        public Type GetPrototypeClassTypeByName(string name)
         {
-            if (_prototypeNameToTypeDict.TryGetValue(name, out Type type) == false)
+            if (_prototypeNameToClassTypeDict.TryGetValue(name, out Type type) == false)
+            {
+                Logger.Warn($"Prototype class {name} not found");
                 return null;
+            }
 
             return type;
         }
