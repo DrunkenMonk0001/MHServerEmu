@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using MHServerEmu.Common.Config;
 using MHServerEmu.Common.Helpers;
 using MHServerEmu.Common.Logging;
 using MHServerEmu.Games.Achievements;
@@ -64,7 +65,12 @@ namespace MHServerEmu.Games.GameData
 
             // initializeKeywordPrototypes
 
-            // LoadAllData
+            // Preload all prototypes if needed
+            if (ConfigManager.GameData.LoadAllPrototypes)
+            {
+                foreach (PrototypeId prototypeId in DataDirectory.IterateAllPrototypes())
+                    DataDirectory.GetPrototype<Prototype>(prototypeId);
+            }
 
             // InteractionManager::Initialize 
 
@@ -205,9 +211,8 @@ namespace MHServerEmu.Games.GameData
                     : DataDirectory.IteratePrototypesInHierarchy(parentPrototypeClassType, PrototypeIterateFlags.None);
 
                 // Iterate
-                foreach (Prototype prototype in iterator)
+                foreach (PrototypeId prototypeId in iterator)
                 {
-                    PrototypeId prototypeId = prototype.DataRef;
                     string prototypeName = GetPrototypeName(prototypeId);
 
                     // Check pattern
