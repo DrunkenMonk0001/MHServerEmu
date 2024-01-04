@@ -19,55 +19,55 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
     public class RegionAffixPrototype : Prototype
     {
-        public ulong Name { get; set; }
-        public ulong EnemyBoost { get; set; }
-        public int Difficulty { get; set; }
-        public ulong AvatarPower { get; set; }
-        public ulong MetaState { get; set; }
-        public MetaStateChallengeTierEnum ChallengeTier { get; set; }
-        public int AdditionalLevels { get; set; }
-        public ulong Category { get; set; }
-        public ulong[] RestrictsAffixes { get; set; }
-        public int UISortOrder { get; set; }
-        public ulong[] KeywordsBlacklist { get; set; }
-        public ulong[] KeywordsWhitelist { get; set; }
-        public EnemyBoostEntryPrototype[] EnemyBoostsFiltered { get; set; }
-        public ulong[] AffixRarityRestrictions { get; set; }
-        public EvalPrototype Eval { get; set; }
+        public ulong Name { get; protected set; }
+        public ulong EnemyBoost { get; protected set; }
+        public int Difficulty { get; protected set; }
+        public ulong AvatarPower { get; protected set; }
+        public ulong MetaState { get; protected set; }
+        public MetaStateChallengeTierEnum ChallengeTier { get; protected set; }
+        public int AdditionalLevels { get; protected set; }
+        public ulong Category { get; protected set; }
+        public ulong[] RestrictsAffixes { get; protected set; }
+        public int UISortOrder { get; protected set; }
+        public ulong[] KeywordsBlacklist { get; protected set; }
+        public ulong[] KeywordsWhitelist { get; protected set; }
+        public EnemyBoostEntryPrototype[] EnemyBoostsFiltered { get; protected set; }
+        public ulong[] AffixRarityRestrictions { get; protected set; }
+        public EvalPrototype Eval { get; protected set; }
     }
 
     public class RegionAffixTableTierEntryPrototype : Prototype
     {
-        public ulong LootTable { get; set; }
-        public int Tier { get; set; }
-        public ulong Name { get; set; }
+        public ulong LootTable { get; protected set; }
+        public int Tier { get; protected set; }
+        public ulong Name { get; protected set; }
     }
 
     public class RegionAffixWeightedEntryPrototype : Prototype
     {
-        public ulong Affix { get; set; }
-        public int Weight { get; set; }
+        public ulong Affix { get; protected set; }
+        public int Weight { get; protected set; }
     }
 
     public class RegionAffixTablePrototype : Prototype
     {
-        public EvalPrototype EvalTier { get; set; }
-        public EvalPrototype EvalXPBonus { get; set; }
-        public RegionAffixWeightedEntryPrototype[] RegionAffixes { get; set; }
-        public RegionAffixTableTierEntryPrototype[] Tiers { get; set; }
-        public ulong LootSource { get; set; }
+        public EvalPrototype EvalTier { get; protected set; }
+        public EvalPrototype EvalXPBonus { get; protected set; }
+        public RegionAffixWeightedEntryPrototype[] RegionAffixes { get; protected set; }
+        public RegionAffixTableTierEntryPrototype[] Tiers { get; protected set; }
+        public ulong LootSource { get; protected set; }
     }
 
     public class RegionAffixCategoryPrototype : Prototype
     {
-        public int MaxPicks { get; set; }
-        public int MinPicks { get; set; }
+        public int MaxPicks { get; protected set; }
+        public int MinPicks { get; protected set; }
     }
 
     public class EnemyBoostEntryPrototype : Prototype
     {
-        public ulong EnemyBoost { get; set; }
-        public ulong[] RanksAllowed { get; set; }
-        public ulong[] RanksPrevented { get; set; }
+        public ulong EnemyBoost { get; protected set; }
+        public ulong[] RanksAllowed { get; protected set; }
+        public ulong[] RanksPrevented { get; protected set; }
     }
 }

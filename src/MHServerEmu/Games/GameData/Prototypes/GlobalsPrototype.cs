@@ -105,890 +105,890 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
     public class GlobalsPrototype : Prototype
     {
-        public ulong AdvancementGlobals { get; set; }
-        public ulong AvatarSwapChannelPower { get; set; }
-        public ulong ConnectionMarkerPrototype { get; set; }
-        public ulong DebugGlobals { get; set; }
-        public ulong UIGlobals { get; set; }
-        public ulong DefaultPlayer { get; set; }
-        public ulong DefaultStartTarget { get; set; }
-        public ulong[] PVPAlliances { get; set; }
-        public float HighFlyingHeight { get; set; }
-        public float LowHealthTrigger { get; set; }
-        public float MouseHitCollisionMultiplier { get; set; }
-        public float MouseHitMovingTargetsIncrease { get; set; }
-        public float MouseHitPowerTargetSearchDist { get; set; }
-        public float MouseHitPreferredAddition { get; set; }
-        public float MouseMovementNoPathRadius { get; set; }
-        public ulong MissionGlobals { get; set; }
-        public int TaggingResetDurationMS { get; set; }
-        public int PlayerPartyMaxSize { get; set; }
-        public float NaviBudgetBaseCellSizeWidth { get; set; }
-        public float NaviBudgetBaseCellSizeLength { get; set; }
-        public int NaviBudgetBaseCellMaxPoints { get; set; }
-        public int NaviBudgetBaseCellMaxEdges { get; set; }
-        public ulong[] UIConfigFiles { get; set; }
-        public int InteractRange { get; set; }
-        public ulong CreditsItemPrototype { get; set; }
-        public ulong NegStatusEffectList { get; set; }
-        public ulong PvPPrototype { get; set; }
-        public ulong MissionPrototype { get; set; }
-        public EvalPrototype ItemPriceMultiplierBuyFromVendor { get; set; }
-        public EvalPrototype ItemPriceMultiplierSellToVendor { get; set; }
-        public ModGlobalsPrototype ModGlobals { get; set; }
-        public float MouseMoveDrivePathMaxLengthMult { get; set; }
-        public ulong AudioGlobalEventsClass { get; set; }
-        public ulong MetaGamePrototype { get; set; }
-        public int MobLOSVisUpdatePeriodMS { get; set; }
-        public int MobLOSVisStayVisibleDelayMS { get; set; }
-        public bool MobLOSVisEnabled { get; set; }
-        public ulong BeginPlayAssetTypes { get; set; }
-        public ulong CachedAssetTypes { get; set; }
-        public ulong FileVerificationAssetTypes { get; set; }
-        public ulong LoadingMusic { get; set; }
-        public ulong SystemLocalized { get; set; }
-        public ulong PopulationGlobals { get; set; }
-        public ulong PlayerAlliance { get; set; }
-        public ulong ClusterConfigurationGlobals { get; set; }
-        public ulong DownloadChunks { get; set; }
-        public ulong UIItemInventory { get; set; }
-        public ulong AIGlobals { get; set; }
-        public ulong MusicAssetType { get; set; }
-        public ulong ResurrectionDefaultInfo { get; set; }
-        public ulong PartyJoinPortal { get; set; }
-        public ulong MatchJoinPortal { get; set; }
-        public ulong MovieAssetType { get; set; }
-        public ulong WaypointGraph { get; set; }
-        public ulong WaypointHotspot { get; set; }
-        public float MouseHoldDeadZoneRadius { get; set; }
-        public GlobalPropertiesPrototype Properties { get; set; }
-        public int PlayerGracePeroidInSeconds { get; set; }
-        public ulong CheckpointHotspot { get; set; }
-        public ulong ReturnToHubPower { get; set; }
-        public int DisableEndurRegenOnPowerEndMS { get; set; }
-        public ulong PowerPrototype { get; set; }
-        public ulong WorldEntityPrototype { get; set; }
-        public ulong AreaPrototype { get; set; }
-        public ulong PopulationObjectPrototype { get; set; }
-        public ulong RegionPrototype { get; set; }
-        public ulong AmbientSfxType { get; set; }
-        public ulong CombatGlobals { get; set; }
-        public float OrientForPowerMaxTimeSecs { get; set; }
-        public ulong KismetSequenceEntityPrototype { get; set; }
-        public ulong DynamicArea { get; set; }
-        public ulong ReturnToFieldPower { get; set; }
-        public float AssetCacheCellLoadOutRunSeconds { get; set; }
-        public int AssetCacheMRUSize { get; set; }
-        public int AssetCachePrefetchMRUSize { get; set; }
-        public ulong AvatarSwapInPower { get; set; }
-        public ulong PlayerStartingFaction { get; set; }
-        public ulong VendorBuybackInventory { get; set; }
-        public ulong AnyAlliancePrototype { get; set; }
-        public ulong AnyFriendlyAlliancePrototype { get; set; }
-        public ulong AnyHostileAlliancePrototype { get; set; }
-        public ulong ExperienceBonusCurve { get; set; }
-        public ulong TransitionGlobals { get; set; }
-        public int PlayerGuildMaxSize { get; set; }
-        public bool AutoPartyEnabledInitially { get; set; }
-        public ulong ItemBindingAffix { get; set; }
-        public int InteractFallbackRange { get; set; }
-        public ulong ItemAcquiredThroughMTXStoreAffix { get; set; }
-        public ulong TeleportToPartyMemberPower { get; set; }
-        public ulong AvatarSwapOutPower { get; set; }
-        public int KickIdlePlayerTimeSecs { get; set; }
-        public ulong PlayerCameraSettings { get; set; }
-        public ulong AvatarSynergyCondition { get; set; }
-        public ulong MetaGameLocalized { get; set; }
-        public ulong MetaGameTeamDefault { get; set; }
-        public ulong ItemNoVisualsAffix { get; set; }
-        public int AvatarSynergyConcurrentLimit { get; set; }
-        public ulong LootGlobals { get; set; }
-        public ulong MetaGameTeamBase { get; set; }
-        public ulong AudioGlobals { get; set; }
-        public int PlayerRaidMaxSize { get; set; }
-        public int TimeZone { get; set; }
-        public ulong TeamUpSummonPower { get; set; }
-        public int AssistPvPDurationMS { get; set; }
-        public ulong FulfillmentReceiptPrototype { get; set; }
-        public ulong PetTechVacuumPower { get; set; }
-        public ulong StolenPowerRestrictions { get; set; }
-        public ulong PowerVisualsGlobals { get; set; }
-        public ulong KeywordGlobals { get; set; }
-        public ulong CurrencyGlobals { get; set; }
-        public ulong PointerArrowTemplate { get; set; }
-        public ulong ObjectiveMarkerTemplate { get; set; }
-        public int VaporizedLootLifespanMS { get; set; }
-        public ulong CookedIconAssetTypes { get; set; }
-        public ulong LiveTuneAvatarXPDisplayCondition { get; set; }
-        public ulong LiveTuneCreditsDisplayCondition { get; set; }
-        public ulong LiveTuneRegionXPDisplayCondition { get; set; }
-        public ulong LiveTuneRIFDisplayCondition { get; set; }
-        public ulong LiveTuneSIFDisplayCondition { get; set; }
-        public ulong LiveTuneXPDisplayCondition { get; set; }
-        public ulong ItemLinkInventory { get; set; }
-        public ulong LimitedEditionBlueprint { get; set; }
-        public ulong MobileIconAssetTypes { get; set; }
-        public ulong PetItemBlueprint { get; set; }
-        public ulong AvatarPrototype { get; set; }
-        public int ServerBonusUnlockLevel { get; set; }
-        public ulong GamepadGlobals { get; set; }
-        public ulong CraftingRecipeLibraryInventory { get; set; }
-        public ulong ConditionPrototype { get; set; }
-        public ulong[] LiveTuneServerConditions { get; set; }
-        public ulong DefaultStartingAvatarPrototype { get; set; }
-        public ulong DefaultStartTargetFallbackRegion { get; set; }
-        public ulong DefaultStartTargetPrestigeRegion { get; set; }
-        public ulong DefaultStartTargetStartingRegion { get; set; }
-        public ulong DifficultyGlobals { get; set; }
-        public ulong PublicEventPrototype { get; set; }
-        public ulong AvatarCoopStartPower { get; set; }
-        public ulong AvatarCoopEndPower { get; set; }
-        public DifficultyTierPrototype DifficultyTiers { get; set; }
-        public ulong DefaultLoadingLobbyRegion { get; set; }
-        public ulong DifficultyTierDefault { get; set; }
-        public ulong AvatarHealPower { get; set; }
-        public ulong ConsoleGlobals { get; set; }
-        public ulong TeamUpSynergyCondition { get; set; }
-        public ulong MetricsFrequencyPrototype { get; set; }
-        public ulong ConsumableItemBlueprint { get; set; }
-        public int AvatarCoopInactiveTimeMS { get; set; }
-        public int AvatarCoopInactiveOnDeadBufferMS { get; set; }
+        public ulong AdvancementGlobals { get; protected set; }
+        public ulong AvatarSwapChannelPower { get; protected set; }
+        public ulong ConnectionMarkerPrototype { get; protected set; }
+        public ulong DebugGlobals { get; protected set; }
+        public ulong UIGlobals { get; protected set; }
+        public ulong DefaultPlayer { get; protected set; }
+        public ulong DefaultStartTarget { get; protected set; }
+        public ulong[] PVPAlliances { get; protected set; }
+        public float HighFlyingHeight { get; protected set; }
+        public float LowHealthTrigger { get; protected set; }
+        public float MouseHitCollisionMultiplier { get; protected set; }
+        public float MouseHitMovingTargetsIncrease { get; protected set; }
+        public float MouseHitPowerTargetSearchDist { get; protected set; }
+        public float MouseHitPreferredAddition { get; protected set; }
+        public float MouseMovementNoPathRadius { get; protected set; }
+        public ulong MissionGlobals { get; protected set; }
+        public int TaggingResetDurationMS { get; protected set; }
+        public int PlayerPartyMaxSize { get; protected set; }
+        public float NaviBudgetBaseCellSizeWidth { get; protected set; }
+        public float NaviBudgetBaseCellSizeLength { get; protected set; }
+        public int NaviBudgetBaseCellMaxPoints { get; protected set; }
+        public int NaviBudgetBaseCellMaxEdges { get; protected set; }
+        public ulong[] UIConfigFiles { get; protected set; }
+        public int InteractRange { get; protected set; }
+        public ulong CreditsItemPrototype { get; protected set; }
+        public ulong NegStatusEffectList { get; protected set; }
+        public ulong PvPPrototype { get; protected set; }
+        public ulong MissionPrototype { get; protected set; }
+        public EvalPrototype ItemPriceMultiplierBuyFromVendor { get; protected set; }
+        public EvalPrototype ItemPriceMultiplierSellToVendor { get; protected set; }
+        public ModGlobalsPrototype ModGlobals { get; protected set; }
+        public float MouseMoveDrivePathMaxLengthMult { get; protected set; }
+        public ulong AudioGlobalEventsClass { get; protected set; }
+        public ulong MetaGamePrototype { get; protected set; }
+        public int MobLOSVisUpdatePeriodMS { get; protected set; }
+        public int MobLOSVisStayVisibleDelayMS { get; protected set; }
+        public bool MobLOSVisEnabled { get; protected set; }
+        public ulong BeginPlayAssetTypes { get; protected set; }
+        public ulong CachedAssetTypes { get; protected set; }
+        public ulong FileVerificationAssetTypes { get; protected set; }
+        public ulong LoadingMusic { get; protected set; }
+        public ulong SystemLocalized { get; protected set; }
+        public ulong PopulationGlobals { get; protected set; }
+        public ulong PlayerAlliance { get; protected set; }
+        public ulong ClusterConfigurationGlobals { get; protected set; }
+        public ulong DownloadChunks { get; protected set; }
+        public ulong UIItemInventory { get; protected set; }
+        public ulong AIGlobals { get; protected set; }
+        public ulong MusicAssetType { get; protected set; }
+        public ulong ResurrectionDefaultInfo { get; protected set; }
+        public ulong PartyJoinPortal { get; protected set; }
+        public ulong MatchJoinPortal { get; protected set; }
+        public ulong MovieAssetType { get; protected set; }
+        public ulong WaypointGraph { get; protected set; }
+        public ulong WaypointHotspot { get; protected set; }
+        public float MouseHoldDeadZoneRadius { get; protected set; }
+        public GlobalPropertiesPrototype Properties { get; protected set; }
+        public int PlayerGracePeroidInSeconds { get; protected set; }
+        public ulong CheckpointHotspot { get; protected set; }
+        public ulong ReturnToHubPower { get; protected set; }
+        public int DisableEndurRegenOnPowerEndMS { get; protected set; }
+        public ulong PowerPrototype { get; protected set; }
+        public ulong WorldEntityPrototype { get; protected set; }
+        public ulong AreaPrototype { get; protected set; }
+        public ulong PopulationObjectPrototype { get; protected set; }
+        public ulong RegionPrototype { get; protected set; }
+        public ulong AmbientSfxType { get; protected set; }
+        public ulong CombatGlobals { get; protected set; }
+        public float OrientForPowerMaxTimeSecs { get; protected set; }
+        public ulong KismetSequenceEntityPrototype { get; protected set; }
+        public ulong DynamicArea { get; protected set; }
+        public ulong ReturnToFieldPower { get; protected set; }
+        public float AssetCacheCellLoadOutRunSeconds { get; protected set; }
+        public int AssetCacheMRUSize { get; protected set; }
+        public int AssetCachePrefetchMRUSize { get; protected set; }
+        public ulong AvatarSwapInPower { get; protected set; }
+        public ulong PlayerStartingFaction { get; protected set; }
+        public ulong VendorBuybackInventory { get; protected set; }
+        public ulong AnyAlliancePrototype { get; protected set; }
+        public ulong AnyFriendlyAlliancePrototype { get; protected set; }
+        public ulong AnyHostileAlliancePrototype { get; protected set; }
+        public ulong ExperienceBonusCurve { get; protected set; }
+        public ulong TransitionGlobals { get; protected set; }
+        public int PlayerGuildMaxSize { get; protected set; }
+        public bool AutoPartyEnabledInitially { get; protected set; }
+        public ulong ItemBindingAffix { get; protected set; }
+        public int InteractFallbackRange { get; protected set; }
+        public ulong ItemAcquiredThroughMTXStoreAffix { get; protected set; }
+        public ulong TeleportToPartyMemberPower { get; protected set; }
+        public ulong AvatarSwapOutPower { get; protected set; }
+        public int KickIdlePlayerTimeSecs { get; protected set; }
+        public ulong PlayerCameraSettings { get; protected set; }
+        public ulong AvatarSynergyCondition { get; protected set; }
+        public ulong MetaGameLocalized { get; protected set; }
+        public ulong MetaGameTeamDefault { get; protected set; }
+        public ulong ItemNoVisualsAffix { get; protected set; }
+        public int AvatarSynergyConcurrentLimit { get; protected set; }
+        public ulong LootGlobals { get; protected set; }
+        public ulong MetaGameTeamBase { get; protected set; }
+        public ulong AudioGlobals { get; protected set; }
+        public int PlayerRaidMaxSize { get; protected set; }
+        public int TimeZone { get; protected set; }
+        public ulong TeamUpSummonPower { get; protected set; }
+        public int AssistPvPDurationMS { get; protected set; }
+        public ulong FulfillmentReceiptPrototype { get; protected set; }
+        public ulong PetTechVacuumPower { get; protected set; }
+        public ulong StolenPowerRestrictions { get; protected set; }
+        public ulong PowerVisualsGlobals { get; protected set; }
+        public ulong KeywordGlobals { get; protected set; }
+        public ulong CurrencyGlobals { get; protected set; }
+        public ulong PointerArrowTemplate { get; protected set; }
+        public ulong ObjectiveMarkerTemplate { get; protected set; }
+        public int VaporizedLootLifespanMS { get; protected set; }
+        public ulong CookedIconAssetTypes { get; protected set; }
+        public ulong LiveTuneAvatarXPDisplayCondition { get; protected set; }
+        public ulong LiveTuneCreditsDisplayCondition { get; protected set; }
+        public ulong LiveTuneRegionXPDisplayCondition { get; protected set; }
+        public ulong LiveTuneRIFDisplayCondition { get; protected set; }
+        public ulong LiveTuneSIFDisplayCondition { get; protected set; }
+        public ulong LiveTuneXPDisplayCondition { get; protected set; }
+        public ulong ItemLinkInventory { get; protected set; }
+        public ulong LimitedEditionBlueprint { get; protected set; }
+        public ulong MobileIconAssetTypes { get; protected set; }
+        public ulong PetItemBlueprint { get; protected set; }
+        public ulong AvatarPrototype { get; protected set; }
+        public int ServerBonusUnlockLevel { get; protected set; }
+        public ulong GamepadGlobals { get; protected set; }
+        public ulong CraftingRecipeLibraryInventory { get; protected set; }
+        public ulong ConditionPrototype { get; protected set; }
+        public ulong[] LiveTuneServerConditions { get; protected set; }
+        public ulong DefaultStartingAvatarPrototype { get; protected set; }
+        public ulong DefaultStartTargetFallbackRegion { get; protected set; }
+        public ulong DefaultStartTargetPrestigeRegion { get; protected set; }
+        public ulong DefaultStartTargetStartingRegion { get; protected set; }
+        public ulong DifficultyGlobals { get; protected set; }
+        public ulong PublicEventPrototype { get; protected set; }
+        public ulong AvatarCoopStartPower { get; protected set; }
+        public ulong AvatarCoopEndPower { get; protected set; }
+        public DifficultyTierPrototype DifficultyTiers { get; protected set; }
+        public ulong DefaultLoadingLobbyRegion { get; protected set; }
+        public ulong DifficultyTierDefault { get; protected set; }
+        public ulong AvatarHealPower { get; protected set; }
+        public ulong ConsoleGlobals { get; protected set; }
+        public ulong TeamUpSynergyCondition { get; protected set; }
+        public ulong MetricsFrequencyPrototype { get; protected set; }
+        public ulong ConsumableItemBlueprint { get; protected set; }
+        public int AvatarCoopInactiveTimeMS { get; protected set; }
+        public int AvatarCoopInactiveOnDeadBufferMS { get; protected set; }
     }
 
     public class LoginRewardPrototype : Prototype
     {
-        public int Day { get; set; }
-        public ulong Item { get; set; }
-        public ulong TooltipText { get; set; }
-        public ulong LogoffPanelEntry { get; set; }
+        public int Day { get; protected set; }
+        public ulong Item { get; protected set; }
+        public ulong TooltipText { get; protected set; }
+        public ulong LogoffPanelEntry { get; protected set; }
     }
 
     public class PrestigeLevelPrototype : Prototype
     {
-        public ulong TextStyle { get; set; }
-        public ulong Reward { get; set; }
+        public ulong TextStyle { get; protected set; }
+        public ulong Reward { get; protected set; }
     }
 
     public class PetTechAffixInfoPrototype : Prototype
     {
-        public AffixPosition Position { get; set; }
-        public ulong ItemRarityToConsume { get; set; }
-        public int ItemsRequiredToUnlock { get; set; }
-        public ulong LockedDescriptionText { get; set; }
+        public AffixPosition Position { get; protected set; }
+        public ulong ItemRarityToConsume { get; protected set; }
+        public int ItemsRequiredToUnlock { get; protected set; }
+        public ulong LockedDescriptionText { get; protected set; }
     }
 
     public class AdvancementGlobalsPrototype : Prototype
     {
-        public ulong LevelingCurve { get; set; }
-        public ulong DeathPenaltyCost { get; set; }
-        public ulong ItemEquipRequirementOffset { get; set; }
-        public ulong VendorLevelingCurve { get; set; }
-        public ulong StatsEval { get; set; }
-        public ulong AvatarThrowabilityEval { get; set; }
-        public EvalPrototype VendorLevelingEval { get; set; }
-        public EvalPrototype VendorRollTableLevelEval { get; set; }
-        public float RestedHealthPerMinMult { get; set; }
-        public int PowerBoostMax { get; set; }
-        public PrestigeLevelPrototype PrestigeLevels { get; set; }
-        public ulong ItemAffixLevelingCurve { get; set; }
-        public ulong ExperienceBonusAvatarSynergy { get; set; }
-        public float ExperienceBonusAvatarSynergyMax { get; set; }
-        public int OriginalMaxLevel { get; set; }
-        public ulong ExperienceBonusLevel60Synergy { get; set; }
-        public int TeamUpPowersPerTier { get; set; }
-        public ulong TeamUpPowerTiersCurve { get; set; }
-        public OmegaBonusSetPrototype OmegaBonusSets { get; set; }
-        public int OmegaPointsCap { get; set; }
-        public int OmegaSystemLevelUnlock { get; set; }
-        public PetTechAffixInfoPrototype[] PetTechAffixInfo { get; set; }
-        public ulong PetTechDonationItemPrototype { get; set; }
-        public int AvatarPowerSpecsMax { get; set; }
-        public ulong PctXPFromPrestigeLevelCurve { get; set; }
-        public int StarterAvatarLevelCap { get; set; }
-        public ulong TeamUpLevelingCurve { get; set; }
-        public int TeamUpPowerSpecsMax { get; set; }
-        public ulong PctXPFromLevelDeltaCurve { get; set; }
-        public int InfinitySystemUnlockLevel { get; set; }
-        public long InfinityPointsCapPerGem { get; set; }
-        public InfinityGemSetPrototype InfinityGemSets { get; set; }
-        public long InfinityXPCap { get; set; }
-        public int TravelPowerUnlockLevel { get; set; }
-        public float ExperienceBonusCoop { get; set; }
-        public ulong CoopInactivityExperienceScalar { get; set; }
+        public ulong LevelingCurve { get; protected set; }
+        public ulong DeathPenaltyCost { get; protected set; }
+        public ulong ItemEquipRequirementOffset { get; protected set; }
+        public ulong VendorLevelingCurve { get; protected set; }
+        public ulong StatsEval { get; protected set; }
+        public ulong AvatarThrowabilityEval { get; protected set; }
+        public EvalPrototype VendorLevelingEval { get; protected set; }
+        public EvalPrototype VendorRollTableLevelEval { get; protected set; }
+        public float RestedHealthPerMinMult { get; protected set; }
+        public int PowerBoostMax { get; protected set; }
+        public PrestigeLevelPrototype PrestigeLevels { get; protected set; }
+        public ulong ItemAffixLevelingCurve { get; protected set; }
+        public ulong ExperienceBonusAvatarSynergy { get; protected set; }
+        public float ExperienceBonusAvatarSynergyMax { get; protected set; }
+        public int OriginalMaxLevel { get; protected set; }
+        public ulong ExperienceBonusLevel60Synergy { get; protected set; }
+        public int TeamUpPowersPerTier { get; protected set; }
+        public ulong TeamUpPowerTiersCurve { get; protected set; }
+        public OmegaBonusSetPrototype OmegaBonusSets { get; protected set; }
+        public int OmegaPointsCap { get; protected set; }
+        public int OmegaSystemLevelUnlock { get; protected set; }
+        public PetTechAffixInfoPrototype[] PetTechAffixInfo { get; protected set; }
+        public ulong PetTechDonationItemPrototype { get; protected set; }
+        public int AvatarPowerSpecsMax { get; protected set; }
+        public ulong PctXPFromPrestigeLevelCurve { get; protected set; }
+        public int StarterAvatarLevelCap { get; protected set; }
+        public ulong TeamUpLevelingCurve { get; protected set; }
+        public int TeamUpPowerSpecsMax { get; protected set; }
+        public ulong PctXPFromLevelDeltaCurve { get; protected set; }
+        public int InfinitySystemUnlockLevel { get; protected set; }
+        public long InfinityPointsCapPerGem { get; protected set; }
+        public InfinityGemSetPrototype InfinityGemSets { get; protected set; }
+        public long InfinityXPCap { get; protected set; }
+        public int TravelPowerUnlockLevel { get; protected set; }
+        public float ExperienceBonusCoop { get; protected set; }
+        public ulong CoopInactivityExperienceScalar { get; protected set; }
     }
 
     public class AIGlobalsPrototype : Prototype
     {
-        public ulong LeashReturnHeal { get; set; }
-        public ulong LeashReturnImmunity { get; set; }
-        public ulong LeashingProceduralProfile { get; set; }
-        public int RandomThinkVarianceMS { get; set; }
-        public int ControlledAgentResurrectTimerMS { get; set; }
-        public ulong ControlledAlliance { get; set; }
-        public float OrbAggroRangeMax { get; set; }
-        public ulong OrbAggroRangeBonusCurve { get; set; }
-        public ulong DefaultSimpleNpcBrain { get; set; }
-        public ulong CantBeControlledKeyword { get; set; }
-        public int ControlledAgentSummonDurationMS { get; set; }
+        public ulong LeashReturnHeal { get; protected set; }
+        public ulong LeashReturnImmunity { get; protected set; }
+        public ulong LeashingProceduralProfile { get; protected set; }
+        public int RandomThinkVarianceMS { get; protected set; }
+        public int ControlledAgentResurrectTimerMS { get; protected set; }
+        public ulong ControlledAlliance { get; protected set; }
+        public float OrbAggroRangeMax { get; protected set; }
+        public ulong OrbAggroRangeBonusCurve { get; protected set; }
+        public ulong DefaultSimpleNpcBrain { get; protected set; }
+        public ulong CantBeControlledKeyword { get; protected set; }
+        public int ControlledAgentSummonDurationMS { get; protected set; }
     }
 
     public class MusicStatePrototype : Prototype
     {
-        public ulong StateGroupName { get; set; }
-        public ulong StateName { get; set; }
-        public MusicStateEndBehavior EndBehavior { get; set; }
+        public ulong StateGroupName { get; protected set; }
+        public ulong StateName { get; protected set; }
+        public MusicStateEndBehavior EndBehavior { get; protected set; }
     }
 
     public class AudioGlobalsPrototype : Prototype
     {
-        public int DefaultMemPoolSizeMB { get; set; }
-        public int LowerEngineMemPoolSizeMB { get; set; }
-        public int StreamingMemPoolSizeMB { get; set; }
-        public int MemoryBudgetMB { get; set; }
-        public int MemoryBudgetDevMB { get; set; }
-        public float MaxAnimNotifyRadius { get; set; }
-        public float MaxMocoVolumeDB { get; set; }
-        public float FootstepNotifyMinFpsThreshold { get; set; }
-        public float BossCritBanterHealthPctThreshold { get; set; }
-        public int LongDownTimeInDaysThreshold { get; set; }
-        public float EncounterCheckRadius { get; set; }
+        public int DefaultMemPoolSizeMB { get; protected set; }
+        public int LowerEngineMemPoolSizeMB { get; protected set; }
+        public int StreamingMemPoolSizeMB { get; protected set; }
+        public int MemoryBudgetMB { get; protected set; }
+        public int MemoryBudgetDevMB { get; protected set; }
+        public float MaxAnimNotifyRadius { get; protected set; }
+        public float MaxMocoVolumeDB { get; protected set; }
+        public float FootstepNotifyMinFpsThreshold { get; protected set; }
+        public float BossCritBanterHealthPctThreshold { get; protected set; }
+        public int LongDownTimeInDaysThreshold { get; protected set; }
+        public float EncounterCheckRadius { get; protected set; }
     }
 
     public class DebugGlobalsPrototype : Prototype
     {
-        public ulong CreateEntityShortcutEntity { get; set; }
-        public ulong DynamicRegion { get; set; }
-        public float HardModeMobDmgBuff { get; set; }
-        public float HardModeMobHealthBuff { get; set; }
-        public float HardModeMobMoveSpdBuff { get; set; }
-        public float HardModePlayerEnduranceCostDebuff { get; set; }
-        public ulong PowersArtModeEntity { get; set; }
-        public int StartingLevelMobs { get; set; }
-        public ulong TransitionRef { get; set; }
-        public ulong CreateLootDummyEntity { get; set; }
-        public ulong MapErrorMapInfo { get; set; }
-        public bool IgnoreDeathPenalty { get; set; }
-        public bool TrashedItemsDropInWorld { get; set; }
-        public ulong PAMEnemyAlliance { get; set; }
-        public EvalPrototype DebugEval { get; set; }
-        public EvalPrototype DebugEvalUnitTest { get; set; }
-        public BotSettingsPrototype BotSettings { get; set; }
-        public ulong ReplacementTestingResultItem { get; set; }
-        public ulong ReplacementTestingTriggerItem { get; set; }
-        public ulong VendorEternitySplinterLoot { get; set; }
+        public ulong CreateEntityShortcutEntity { get; protected set; }
+        public ulong DynamicRegion { get; protected set; }
+        public float HardModeMobDmgBuff { get; protected set; }
+        public float HardModeMobHealthBuff { get; protected set; }
+        public float HardModeMobMoveSpdBuff { get; protected set; }
+        public float HardModePlayerEnduranceCostDebuff { get; protected set; }
+        public ulong PowersArtModeEntity { get; protected set; }
+        public int StartingLevelMobs { get; protected set; }
+        public ulong TransitionRef { get; protected set; }
+        public ulong CreateLootDummyEntity { get; protected set; }
+        public ulong MapErrorMapInfo { get; protected set; }
+        public bool IgnoreDeathPenalty { get; protected set; }
+        public bool TrashedItemsDropInWorld { get; protected set; }
+        public ulong PAMEnemyAlliance { get; protected set; }
+        public EvalPrototype DebugEval { get; protected set; }
+        public EvalPrototype DebugEvalUnitTest { get; protected set; }
+        public BotSettingsPrototype BotSettings { get; protected set; }
+        public ulong ReplacementTestingResultItem { get; protected set; }
+        public ulong ReplacementTestingTriggerItem { get; protected set; }
+        public ulong VendorEternitySplinterLoot { get; protected set; }
     }
 
     public class CharacterSheetDetailedStatPrototype : Prototype
     {
-        public EvalPrototype Expression { get; set; }
-        public ulong ExpressionExt { get; set; }
-        public ulong Format { get; set; }
-        public ulong Label { get; set; }
-        public ulong Tooltip { get; set; }
-        public ulong Icon { get; set; }
+        public EvalPrototype Expression { get; protected set; }
+        public ulong ExpressionExt { get; protected set; }
+        public ulong Format { get; protected set; }
+        public ulong Label { get; protected set; }
+        public ulong Tooltip { get; protected set; }
+        public ulong Icon { get; protected set; }
     }
 
     public class HelpGameTermPrototype : Prototype
     {
-        public ulong Name { get; set; }
-        public ulong Description { get; set; }
+        public ulong Name { get; protected set; }
+        public ulong Description { get; protected set; }
     }
 
     public class CoopOpUIDataEntryPrototype : Prototype
     {
-        public CoopOp Op { get; set; }
-        public CoopOpResult Result { get; set; }
-        public ulong SystemMessage { get; set; }
-        public ulong SystemMessageTemplate { get; set; }
-        public ulong BannerMessage { get; set; }
+        public CoopOp Op { get; protected set; }
+        public CoopOpResult Result { get; protected set; }
+        public ulong SystemMessage { get; protected set; }
+        public ulong SystemMessageTemplate { get; protected set; }
+        public ulong BannerMessage { get; protected set; }
     }
 
     public class HelpTextPrototype : Prototype
     {
-        public ulong GeneralControls { get; set; }
-        public HelpGameTermPrototype[] GameTerms { get; set; }
-        public ulong Crafting { get; set; }
-        public ulong EndgamePvE { get; set; }
-        public ulong PvP { get; set; }
-        public ulong Tutorial { get; set; }
+        public ulong GeneralControls { get; protected set; }
+        public HelpGameTermPrototype[] GameTerms { get; protected set; }
+        public ulong Crafting { get; protected set; }
+        public ulong EndgamePvE { get; protected set; }
+        public ulong PvP { get; protected set; }
+        public ulong Tutorial { get; protected set; }
     }
 
     public class AffixRollQualityPrototype : Prototype
     {
-        public TextStylePrototype Style { get; set; }
-        public float PercentThreshold { get; set; }
+        public TextStylePrototype Style { get; protected set; }
+        public float PercentThreshold { get; protected set; }
     }
 
     public class UIGlobalsPrototype : Prototype
     {
-        public ulong MessageDefault { get; set; }
-        public ulong MessageLevelUp { get; set; }
-        public ulong MessageItemError { get; set; }
-        public ulong MessageRegionChange { get; set; }
-        public ulong MessageMissionAccepted { get; set; }
-        public ulong MessageMissionCompleted { get; set; }
-        public ulong MessageMissionFailed { get; set; }
-        public int AvatarSwitchUIDeathDelayMS { get; set; }
-        public ulong UINotificationGlobals { get; set; }
-        public int RosterPageSize { get; set; }
-        public ulong LocalizedInfoDirectory { get; set; }
-        public int TooltipHideDelayMS { get; set; }
-        public ulong MessagePowerError { get; set; }
-        public ulong MessageWaypointError { get; set; }
-        public ulong UIStringGlobals { get; set; }
-        public ulong MessagePartyInvite { get; set; }
-        public ulong MapInfoMissionGiver { get; set; }
-        public ulong MapInfoMissionObjectiveTalk { get; set; }
-        public int NumAvatarsToDisplayInItemUsableLists { get; set; }
-        public ulong LoadingScreens { get; set; }
-        public int ChatFadeInMS { get; set; }
-        public int ChatBeginFadeOutMS { get; set; }
-        public int ChatFadeOutMS { get; set; }
-        public ulong MessageWaypointUnlocked { get; set; }
-        public ulong MessagePowerUnlocked { get; set; }
-        public ulong UIMapGlobals { get; set; }
-        public ulong TextStyleCurrentlyEquipped { get; set; }
-        public int ChatTextFadeOutMS { get; set; }
-        public int ChatTextHistoryMax { get; set; }
-        public ulong KeywordFemale { get; set; }
-        public ulong KeywordMale { get; set; }
-        public ulong TextStylePowerUpgradeImprovement { get; set; }
-        public ulong TextStylePowerUpgradeNoImprovement { get; set; }
-        public ulong LoadingScreenIntraRegion { get; set; }
-        public ulong TextStyleVendorPriceCanBuy { get; set; }
-        public ulong TextStyleVendorPriceCantBuy { get; set; }
-        public ulong TextStyleItemRestrictionFailure { get; set; }
-        public int CostumeClosetNumAvatarsVisible { get; set; }
-        public int CostumeClosetNumCostumesVisible { get; set; }
-        public ulong MessagePowerErrorDoNotQueue { get; set; }
-        public ulong TextStylePvPShopPurchased { get; set; }
-        public ulong TextStylePvPShopUnpurchased { get; set; }
-        public ulong MessagePowerPointsAwarded { get; set; }
-        public ulong MapInfoMissionObjectiveUse { get; set; }
-        public ulong TextStyleMissionRewardFloaty { get; set; }
-        public ulong PowerTooltipBodyCurRank0Unlkd { get; set; }
-        public ulong PowerTooltipBodyCurRankLocked { get; set; }
-        public ulong PowerTooltipBodyCurRank1AndUp { get; set; }
-        public ulong PowerTooltipBodyNextRank1First { get; set; }
-        public ulong PowerTooltipBodyNextRank2AndUp { get; set; }
-        public ulong PowerTooltipHeader { get; set; }
-        public ulong MapInfoFlavorNPC { get; set; }
-        public int TooltipSpawnHideDelayMS { get; set; }
-        public int KioskIdleResetTimeSec { get; set; }
-        public ulong KioskSizzleMovie { get; set; }
-        public int KioskSizzleMovieStartTimeSec { get; set; }
-        public ulong MapInfoHealer { get; set; }
-        public ulong TextStyleOpenMission { get; set; }
-        public ulong MapInfoPartyMember { get; set; }
-        public int LoadingScreenTipTimeIntervalMS { get; set; }
-        public ulong TextStyleKillRewardFloaty { get; set; }
-        public ulong TextStyleAvatarOverheadNormal { get; set; }
-        public ulong TextStyleAvatarOverheadParty { get; set; }
-        public CharacterSheetDetailedStatPrototype[] CharacterSheetDetailedStats { get; set; }
-        public ulong PowerProgTableTabRefTab1 { get; set; }
-        public ulong PowerProgTableTabRefTab2 { get; set; }
-        public ulong PowerProgTableTabRefTab3 { get; set; }
-        public float ScreenEdgeArrowRange { get; set; }
-        public ulong HelpText { get; set; }
-        public ulong MessagePvPFactionPortalFail { get; set; }
-        public ulong PropertyTooltipTextOverride { get; set; }
-        public ulong MessagePvPDisabledPortalFail { get; set; }
-        public ulong MessageStatProgression { get; set; }
-        public ulong MessagePvPPartyPortalFail { get; set; }
-        public ulong TextStyleMissionHudOpenMission { get; set; }
-        public ulong MapInfoAvatarDefeated { get; set; }
-        public ulong MapInfoPartyMemberDefeated { get; set; }
-        public ulong MessageGuildInvite { get; set; }
-        public ulong MapInfoMissionObjectiveMob { get; set; }
-        public ulong MapInfoMissionObjectivePortal { get; set; }
-        public ulong CinematicsListLoginScreen { get; set; }
-        public ulong TextStyleGuildLeader { get; set; }
-        public ulong TextStyleGuildOfficer { get; set; }
-        public ulong TextStyleGuildMember { get; set; }
-        public AffixDisplaySlotPrototype[] CostumeAffixDisplaySlots { get; set; }
-        public ulong MessagePartyError { get; set; }
-        public ulong MessageRegionRestricted { get; set; }
-        public ulong CreditsMovies { get; set; }
-        public ulong MessageMetaGameDefault { get; set; }
-        public ulong MessagePartyPvPPortalFail { get; set; }
-        public int ChatNewMsgDarkenBgMS { get; set; }
-        public ulong TextStyleKillZeroRewardFloaty { get; set; }
-        public ulong MessageAvatarSwitchError { get; set; }
-        public ulong TextStyleItemBlessed { get; set; }
-        public ulong TextStyleItemAffixLocked { get; set; }
-        public ulong MessageAlreadyInQueue { get; set; }
-        public ulong MessageOnlyPartyLeaderCanQueue { get; set; }
-        public ulong MessageTeleportTargetIsInMatch { get; set; }
-        public ulong PowerGrantItemTutorialTip { get; set; }
-        public ulong MessagePrivateDisallowedInRaid { get; set; }
-        public ulong MessageQueueNotAvailableInRaid { get; set; }
-        public ulong PowerTooltipBodyNextRank1Antireq { get; set; }
-        public ulong CosmicEquippedTutorialTip { get; set; }
-        public ulong MessageRegionDisabledPortalFail { get; set; }
-        public CharacterSheetDetailedStatPrototype[] TeamUpDetailedStats { get; set; }
-        public ulong MessageOmegaPointsAwarded { get; set; }
-        public ulong MetaGameWidgetMissionName { get; set; }
-        public UIConditionType[] BuffPageOrder { get; set; }
-        public ObjectiveTrackerPageType[] ObjectiveTrackerPageOrder { get; set; }
-        public ulong VanityTitleNoTitle { get; set; }
-        public ulong MessageStealablePowerOccupied { get; set; }
-        public ulong MessageStolenPowerDuplicate { get; set; }
-        public ulong CurrencyDisplayList { get; set; }
-        public ulong CinematicOpener { get; set; }
-        public ulong MessageCantQueueInQueueRegion { get; set; }
-        public int LogoffPanelStoryMissionLevelCap { get; set; }
-        public StoreCategoryPrototype[] MTXStoreCategories { get; set; }
-        public int GiftingAccessMinPlayerLevel { get; set; }
-        public ulong AffixRollRangeTooltipText { get; set; }
-        public ulong[] UISystemLockList { get; set; }
-        public ulong MessageUISystemUnlocked { get; set; }
-        public ulong TooltipInsigniaTeamAffiliations { get; set; }
-        public ulong PowerTooltipBodySpecLocked { get; set; }
-        public ulong PowerTooltipBodySpecUnlocked { get; set; }
-        public ulong PropertyValuePercentFormat { get; set; }
-        public ulong AffixStatDiffPositiveStyle { get; set; }
-        public ulong AffixStatDiffNegativeStyle { get; set; }
-        public ulong AffixStatDiffTooltipText { get; set; }
-        public ulong AffixStatDiffNeutralStyle { get; set; }
-        public ulong AffixStatFoundAffixStyle { get; set; }
-        public ulong[] StashTabCustomIcons { get; set; }
-        public ulong PropertyValueDefaultFormat { get; set; }
-        public ulong[] ItemSortCategoryList { get; set; }
-        public ulong[] ItemSortSubCategoryList { get; set; }
-        public AffixRollQualityPrototype[] AffixRollRangeRollQuality { get; set; }
-        public ulong RadialMenuEntriesList { get; set; }
-        public ulong TextStylePowerChargesEmpty { get; set; }
-        public ulong TextStylePowerChargesFull { get; set; }
-        public ulong MessageLeaderboardRewarded { get; set; }
-        public ulong GamepadIconDonateAction { get; set; }
-        public ulong GamepadIconDropAction { get; set; }
-        public ulong GamepadIconEquipAction { get; set; }
-        public ulong GamepadIconMoveAction { get; set; }
-        public ulong GamepadIconSelectAction { get; set; }
-        public ulong GamepadIconSellAction { get; set; }
-        public ulong ConsoleRadialMenuEntriesList { get; set; }
-        public CoopOpUIDataEntryPrototype[] CoopOpUIDatas { get; set; }
-        public ulong MessageOpenMissionEntered { get; set; }
-        public ulong MessageInfinityPointsAwarded { get; set; }
-        public ulong PowerTooltipBodyTalentLocked { get; set; }
-        public ulong PowerTooltipBodyTalentUnlocked { get; set; }
-        public ulong[] AffixTooltipOrder { get; set; }
-        public ulong PowerTooltipBodyCurRank1Only { get; set; }
-        public int InfinityMaxRanksHideThreshold { get; set; }
-        public ulong MessagePlayingAtLevelCap { get; set; }
-        public ulong GamepadIconRankDownAction { get; set; }
-        public ulong GamepadIconRankUpAction { get; set; }
-        public ulong MessageTeamUpDisabledCoop { get; set; }
-        public ulong MessageStolenPowerAvailable { get; set; }
-        public ulong BIFRewardMessage { get; set; }
-        public ulong PowerTooltipBodyTeamUpLocked { get; set; }
-        public ulong PowerTooltipBodyTeamUpUnlocked { get; set; }
-        public int InfinityNotificationThreshold { get; set; }
-        public ulong HelpTextConsole { get; set; }
-        public ulong MessageRegionNotDownloaded { get; set; }
+        public ulong MessageDefault { get; protected set; }
+        public ulong MessageLevelUp { get; protected set; }
+        public ulong MessageItemError { get; protected set; }
+        public ulong MessageRegionChange { get; protected set; }
+        public ulong MessageMissionAccepted { get; protected set; }
+        public ulong MessageMissionCompleted { get; protected set; }
+        public ulong MessageMissionFailed { get; protected set; }
+        public int AvatarSwitchUIDeathDelayMS { get; protected set; }
+        public ulong UINotificationGlobals { get; protected set; }
+        public int RosterPageSize { get; protected set; }
+        public ulong LocalizedInfoDirectory { get; protected set; }
+        public int TooltipHideDelayMS { get; protected set; }
+        public ulong MessagePowerError { get; protected set; }
+        public ulong MessageWaypointError { get; protected set; }
+        public ulong UIStringGlobals { get; protected set; }
+        public ulong MessagePartyInvite { get; protected set; }
+        public ulong MapInfoMissionGiver { get; protected set; }
+        public ulong MapInfoMissionObjectiveTalk { get; protected set; }
+        public int NumAvatarsToDisplayInItemUsableLists { get; protected set; }
+        public ulong LoadingScreens { get; protected set; }
+        public int ChatFadeInMS { get; protected set; }
+        public int ChatBeginFadeOutMS { get; protected set; }
+        public int ChatFadeOutMS { get; protected set; }
+        public ulong MessageWaypointUnlocked { get; protected set; }
+        public ulong MessagePowerUnlocked { get; protected set; }
+        public ulong UIMapGlobals { get; protected set; }
+        public ulong TextStyleCurrentlyEquipped { get; protected set; }
+        public int ChatTextFadeOutMS { get; protected set; }
+        public int ChatTextHistoryMax { get; protected set; }
+        public ulong KeywordFemale { get; protected set; }
+        public ulong KeywordMale { get; protected set; }
+        public ulong TextStylePowerUpgradeImprovement { get; protected set; }
+        public ulong TextStylePowerUpgradeNoImprovement { get; protected set; }
+        public ulong LoadingScreenIntraRegion { get; protected set; }
+        public ulong TextStyleVendorPriceCanBuy { get; protected set; }
+        public ulong TextStyleVendorPriceCantBuy { get; protected set; }
+        public ulong TextStyleItemRestrictionFailure { get; protected set; }
+        public int CostumeClosetNumAvatarsVisible { get; protected set; }
+        public int CostumeClosetNumCostumesVisible { get; protected set; }
+        public ulong MessagePowerErrorDoNotQueue { get; protected set; }
+        public ulong TextStylePvPShopPurchased { get; protected set; }
+        public ulong TextStylePvPShopUnpurchased { get; protected set; }
+        public ulong MessagePowerPointsAwarded { get; protected set; }
+        public ulong MapInfoMissionObjectiveUse { get; protected set; }
+        public ulong TextStyleMissionRewardFloaty { get; protected set; }
+        public ulong PowerTooltipBodyCurRank0Unlkd { get; protected set; }
+        public ulong PowerTooltipBodyCurRankLocked { get; protected set; }
+        public ulong PowerTooltipBodyCurRank1AndUp { get; protected set; }
+        public ulong PowerTooltipBodyNextRank1First { get; protected set; }
+        public ulong PowerTooltipBodyNextRank2AndUp { get; protected set; }
+        public ulong PowerTooltipHeader { get; protected set; }
+        public ulong MapInfoFlavorNPC { get; protected set; }
+        public int TooltipSpawnHideDelayMS { get; protected set; }
+        public int KioskIdleResetTimeSec { get; protected set; }
+        public ulong KioskSizzleMovie { get; protected set; }
+        public int KioskSizzleMovieStartTimeSec { get; protected set; }
+        public ulong MapInfoHealer { get; protected set; }
+        public ulong TextStyleOpenMission { get; protected set; }
+        public ulong MapInfoPartyMember { get; protected set; }
+        public int LoadingScreenTipTimeIntervalMS { get; protected set; }
+        public ulong TextStyleKillRewardFloaty { get; protected set; }
+        public ulong TextStyleAvatarOverheadNormal { get; protected set; }
+        public ulong TextStyleAvatarOverheadParty { get; protected set; }
+        public CharacterSheetDetailedStatPrototype[] CharacterSheetDetailedStats { get; protected set; }
+        public ulong PowerProgTableTabRefTab1 { get; protected set; }
+        public ulong PowerProgTableTabRefTab2 { get; protected set; }
+        public ulong PowerProgTableTabRefTab3 { get; protected set; }
+        public float ScreenEdgeArrowRange { get; protected set; }
+        public ulong HelpText { get; protected set; }
+        public ulong MessagePvPFactionPortalFail { get; protected set; }
+        public ulong PropertyTooltipTextOverride { get; protected set; }
+        public ulong MessagePvPDisabledPortalFail { get; protected set; }
+        public ulong MessageStatProgression { get; protected set; }
+        public ulong MessagePvPPartyPortalFail { get; protected set; }
+        public ulong TextStyleMissionHudOpenMission { get; protected set; }
+        public ulong MapInfoAvatarDefeated { get; protected set; }
+        public ulong MapInfoPartyMemberDefeated { get; protected set; }
+        public ulong MessageGuildInvite { get; protected set; }
+        public ulong MapInfoMissionObjectiveMob { get; protected set; }
+        public ulong MapInfoMissionObjectivePortal { get; protected set; }
+        public ulong CinematicsListLoginScreen { get; protected set; }
+        public ulong TextStyleGuildLeader { get; protected set; }
+        public ulong TextStyleGuildOfficer { get; protected set; }
+        public ulong TextStyleGuildMember { get; protected set; }
+        public AffixDisplaySlotPrototype[] CostumeAffixDisplaySlots { get; protected set; }
+        public ulong MessagePartyError { get; protected set; }
+        public ulong MessageRegionRestricted { get; protected set; }
+        public ulong CreditsMovies { get; protected set; }
+        public ulong MessageMetaGameDefault { get; protected set; }
+        public ulong MessagePartyPvPPortalFail { get; protected set; }
+        public int ChatNewMsgDarkenBgMS { get; protected set; }
+        public ulong TextStyleKillZeroRewardFloaty { get; protected set; }
+        public ulong MessageAvatarSwitchError { get; protected set; }
+        public ulong TextStyleItemBlessed { get; protected set; }
+        public ulong TextStyleItemAffixLocked { get; protected set; }
+        public ulong MessageAlreadyInQueue { get; protected set; }
+        public ulong MessageOnlyPartyLeaderCanQueue { get; protected set; }
+        public ulong MessageTeleportTargetIsInMatch { get; protected set; }
+        public ulong PowerGrantItemTutorialTip { get; protected set; }
+        public ulong MessagePrivateDisallowedInRaid { get; protected set; }
+        public ulong MessageQueueNotAvailableInRaid { get; protected set; }
+        public ulong PowerTooltipBodyNextRank1Antireq { get; protected set; }
+        public ulong CosmicEquippedTutorialTip { get; protected set; }
+        public ulong MessageRegionDisabledPortalFail { get; protected set; }
+        public CharacterSheetDetailedStatPrototype[] TeamUpDetailedStats { get; protected set; }
+        public ulong MessageOmegaPointsAwarded { get; protected set; }
+        public ulong MetaGameWidgetMissionName { get; protected set; }
+        public UIConditionType[] BuffPageOrder { get; protected set; }
+        public ObjectiveTrackerPageType[] ObjectiveTrackerPageOrder { get; protected set; }
+        public ulong VanityTitleNoTitle { get; protected set; }
+        public ulong MessageStealablePowerOccupied { get; protected set; }
+        public ulong MessageStolenPowerDuplicate { get; protected set; }
+        public ulong CurrencyDisplayList { get; protected set; }
+        public ulong CinematicOpener { get; protected set; }
+        public ulong MessageCantQueueInQueueRegion { get; protected set; }
+        public int LogoffPanelStoryMissionLevelCap { get; protected set; }
+        public StoreCategoryPrototype[] MTXStoreCategories { get; protected set; }
+        public int GiftingAccessMinPlayerLevel { get; protected set; }
+        public ulong AffixRollRangeTooltipText { get; protected set; }
+        public ulong[] UISystemLockList { get; protected set; }
+        public ulong MessageUISystemUnlocked { get; protected set; }
+        public ulong TooltipInsigniaTeamAffiliations { get; protected set; }
+        public ulong PowerTooltipBodySpecLocked { get; protected set; }
+        public ulong PowerTooltipBodySpecUnlocked { get; protected set; }
+        public ulong PropertyValuePercentFormat { get; protected set; }
+        public ulong AffixStatDiffPositiveStyle { get; protected set; }
+        public ulong AffixStatDiffNegativeStyle { get; protected set; }
+        public ulong AffixStatDiffTooltipText { get; protected set; }
+        public ulong AffixStatDiffNeutralStyle { get; protected set; }
+        public ulong AffixStatFoundAffixStyle { get; protected set; }
+        public ulong[] StashTabCustomIcons { get; protected set; }
+        public ulong PropertyValueDefaultFormat { get; protected set; }
+        public ulong[] ItemSortCategoryList { get; protected set; }
+        public ulong[] ItemSortSubCategoryList { get; protected set; }
+        public AffixRollQualityPrototype[] AffixRollRangeRollQuality { get; protected set; }
+        public ulong RadialMenuEntriesList { get; protected set; }
+        public ulong TextStylePowerChargesEmpty { get; protected set; }
+        public ulong TextStylePowerChargesFull { get; protected set; }
+        public ulong MessageLeaderboardRewarded { get; protected set; }
+        public ulong GamepadIconDonateAction { get; protected set; }
+        public ulong GamepadIconDropAction { get; protected set; }
+        public ulong GamepadIconEquipAction { get; protected set; }
+        public ulong GamepadIconMoveAction { get; protected set; }
+        public ulong GamepadIconSelectAction { get; protected set; }
+        public ulong GamepadIconSellAction { get; protected set; }
+        public ulong ConsoleRadialMenuEntriesList { get; protected set; }
+        public CoopOpUIDataEntryPrototype[] CoopOpUIDatas { get; protected set; }
+        public ulong MessageOpenMissionEntered { get; protected set; }
+        public ulong MessageInfinityPointsAwarded { get; protected set; }
+        public ulong PowerTooltipBodyTalentLocked { get; protected set; }
+        public ulong PowerTooltipBodyTalentUnlocked { get; protected set; }
+        public ulong[] AffixTooltipOrder { get; protected set; }
+        public ulong PowerTooltipBodyCurRank1Only { get; protected set; }
+        public int InfinityMaxRanksHideThreshold { get; protected set; }
+        public ulong MessagePlayingAtLevelCap { get; protected set; }
+        public ulong GamepadIconRankDownAction { get; protected set; }
+        public ulong GamepadIconRankUpAction { get; protected set; }
+        public ulong MessageTeamUpDisabledCoop { get; protected set; }
+        public ulong MessageStolenPowerAvailable { get; protected set; }
+        public ulong BIFRewardMessage { get; protected set; }
+        public ulong PowerTooltipBodyTeamUpLocked { get; protected set; }
+        public ulong PowerTooltipBodyTeamUpUnlocked { get; protected set; }
+        public int InfinityNotificationThreshold { get; protected set; }
+        public ulong HelpTextConsole { get; protected set; }
+        public ulong MessageRegionNotDownloaded { get; protected set; }
     }
 
     public class UINotificationGlobalsPrototype : Prototype
     {
-        public ulong NotificationPartyInvite { get; set; }
-        public ulong NotificationLevelUp { get; set; }
-        public ulong NotificationServerMessage { get; set; }
-        public ulong NotificationRemoteMission { get; set; }
-        public ulong NotificationMissionUpdate { get; set; }
-        public ulong NotificationMatchInvite { get; set; }
-        public ulong NotificationMatchQueue { get; set; }
-        public ulong NotificationMatchGroupInvite { get; set; }
-        public ulong NotificationPvPShop { get; set; }
-        public ulong NotificationPowerPointsAwarded { get; set; }
-        public int NotificationPartyAIAggroRange { get; set; }
-        public ulong NotificationOfferingUI { get; set; }
-        public ulong NotificationGuildInvite { get; set; }
-        public ulong NotificationMetaGameInfo { get; set; }
-        public ulong NotificationLegendaryMission { get; set; }
-        public ulong NotificationMatchPending { get; set; }
-        public ulong NotificationMatchGroupPending { get; set; }
-        public ulong NotificationMatchWaitlisted { get; set; }
-        public ulong NotificationLegendaryQuestShare { get; set; }
-        public ulong NotificationSynergyPoints { get; set; }
-        public ulong NotificationPvPScoreboard { get; set; }
-        public ulong NotificationOmegaPoints { get; set; }
-        public ulong NotificationTradeInvite { get; set; }
-        public ulong NotificationMatchLocked { get; set; }
-        public ulong NotificationLoginReward { get; set; }
-        public ulong NotificationMatchGracePeriod { get; set; }
-        public ulong NotificationPartyKickGracePeriod { get; set; }
-        public ulong NotificationGiftReceived { get; set; }
-        public ulong NotificationLeaderboardRewarded { get; set; }
-        public ulong NotificationCouponReceived { get; set; }
-        public ulong NotificationPublicEvent { get; set; }
+        public ulong NotificationPartyInvite { get; protected set; }
+        public ulong NotificationLevelUp { get; protected set; }
+        public ulong NotificationServerMessage { get; protected set; }
+        public ulong NotificationRemoteMission { get; protected set; }
+        public ulong NotificationMissionUpdate { get; protected set; }
+        public ulong NotificationMatchInvite { get; protected set; }
+        public ulong NotificationMatchQueue { get; protected set; }
+        public ulong NotificationMatchGroupInvite { get; protected set; }
+        public ulong NotificationPvPShop { get; protected set; }
+        public ulong NotificationPowerPointsAwarded { get; protected set; }
+        public int NotificationPartyAIAggroRange { get; protected set; }
+        public ulong NotificationOfferingUI { get; protected set; }
+        public ulong NotificationGuildInvite { get; protected set; }
+        public ulong NotificationMetaGameInfo { get; protected set; }
+        public ulong NotificationLegendaryMission { get; protected set; }
+        public ulong NotificationMatchPending { get; protected set; }
+        public ulong NotificationMatchGroupPending { get; protected set; }
+        public ulong NotificationMatchWaitlisted { get; protected set; }
+        public ulong NotificationLegendaryQuestShare { get; protected set; }
+        public ulong NotificationSynergyPoints { get; protected set; }
+        public ulong NotificationPvPScoreboard { get; protected set; }
+        public ulong NotificationOmegaPoints { get; protected set; }
+        public ulong NotificationTradeInvite { get; protected set; }
+        public ulong NotificationMatchLocked { get; protected set; }
+        public ulong NotificationLoginReward { get; protected set; }
+        public ulong NotificationMatchGracePeriod { get; protected set; }
+        public ulong NotificationPartyKickGracePeriod { get; protected set; }
+        public ulong NotificationGiftReceived { get; protected set; }
+        public ulong NotificationLeaderboardRewarded { get; protected set; }
+        public ulong NotificationCouponReceived { get; protected set; }
+        public ulong NotificationPublicEvent { get; protected set; }
     }
 
     public class UIMapGlobalsPrototype : Prototype
     {
-        public float DefaultRevealRadius { get; set; }
-        public float DefaultZoom { get; set; }
-        public float FullScreenMapAlphaMax { get; set; }
-        public float FullScreenMapAlphaMin { get; set; }
-        public int FullScreenMapResolutionHeight { get; set; }
-        public int FullScreenMapResolutionWidth { get; set; }
-        public float FullScreenMapScale { get; set; }
-        public float LowResRevealMultiplier { get; set; }
-        public ulong MapColorFiller { get; set; }
-        public ulong MapColorWalkable { get; set; }
-        public ulong MapColorWall { get; set; }
-        public float MiniMapAlpha { get; set; }
-        public int MiniMapResolution { get; set; }
-        public float CameraAngleX { get; set; }
-        public float CameraAngleY { get; set; }
-        public float CameraAngleZ { get; set; }
-        public float CameraFOV { get; set; }
-        public float CameraNearPlane { get; set; }
-        public float FullScreenMapPOISize { get; set; }
-        public float POIScreenFacingRot { get; set; }
-        public bool DrawPOIInCanvas { get; set; }
-        public bool EnableMinimapProjection { get; set; }
-        public float DefaultZoomMin { get; set; }
-        public float DefaultZoomMax { get; set; }
-        public float MiniMapPOISizeMin { get; set; }
-        public float MiniMapPOISizeMax { get; set; }
-        public ulong MapColorFillerConsole { get; set; }
-        public ulong MapColorWalkableConsole { get; set; }
-        public ulong MapColorWallConsole { get; set; }
-        public float DefaultZoomConsole { get; set; }
-        public float DefaultZoomMinConsole { get; set; }
-        public float DefaultZoomMaxConsole { get; set; }
-        public float MiniMapPOISizeMinConsole { get; set; }
-        public float MiniMapPOISizeMaxConsole { get; set; }
-        public float MiniMapAlphaConsole { get; set; }
+        public float DefaultRevealRadius { get; protected set; }
+        public float DefaultZoom { get; protected set; }
+        public float FullScreenMapAlphaMax { get; protected set; }
+        public float FullScreenMapAlphaMin { get; protected set; }
+        public int FullScreenMapResolutionHeight { get; protected set; }
+        public int FullScreenMapResolutionWidth { get; protected set; }
+        public float FullScreenMapScale { get; protected set; }
+        public float LowResRevealMultiplier { get; protected set; }
+        public ulong MapColorFiller { get; protected set; }
+        public ulong MapColorWalkable { get; protected set; }
+        public ulong MapColorWall { get; protected set; }
+        public float MiniMapAlpha { get; protected set; }
+        public int MiniMapResolution { get; protected set; }
+        public float CameraAngleX { get; protected set; }
+        public float CameraAngleY { get; protected set; }
+        public float CameraAngleZ { get; protected set; }
+        public float CameraFOV { get; protected set; }
+        public float CameraNearPlane { get; protected set; }
+        public float FullScreenMapPOISize { get; protected set; }
+        public float POIScreenFacingRot { get; protected set; }
+        public bool DrawPOIInCanvas { get; protected set; }
+        public bool EnableMinimapProjection { get; protected set; }
+        public float DefaultZoomMin { get; protected set; }
+        public float DefaultZoomMax { get; protected set; }
+        public float MiniMapPOISizeMin { get; protected set; }
+        public float MiniMapPOISizeMax { get; protected set; }
+        public ulong MapColorFillerConsole { get; protected set; }
+        public ulong MapColorWalkableConsole { get; protected set; }
+        public ulong MapColorWallConsole { get; protected set; }
+        public float DefaultZoomConsole { get; protected set; }
+        public float DefaultZoomMinConsole { get; protected set; }
+        public float DefaultZoomMaxConsole { get; protected set; }
+        public float MiniMapPOISizeMinConsole { get; protected set; }
+        public float MiniMapPOISizeMaxConsole { get; protected set; }
+        public float MiniMapAlphaConsole { get; protected set; }
     }
 
     public class MetricsFrequencyPrototype : Prototype
     {
-        public float SampleRate { get; set; }
+        public float SampleRate { get; protected set; }
     }
 
     public class CameraSettingPrototype : Prototype
     {
-        public float DirectionX { get; set; }
-        public float DirectionY { get; set; }
-        public float DirectionZ { get; set; }
-        public float Distance { get; set; }
-        public float FieldOfView { get; set; }
-        public float ListenerDistance { get; set; }
-        public int RotationPitch { get; set; }
-        public int RotationRoll { get; set; }
-        public int RotationYaw { get; set; }
-        public float LookAtOffsetX { get; set; }
-        public float LookAtOffsetY { get; set; }
-        public float LookAtOffsetZ { get; set; }
-        public bool AllowCharacterSpecificZOffset { get; set; }
-        public bool OrbitalCam { get; set; }
-        public float OrbitalFocusAngle { get; set; }
-        public float OrbitalFocusPosX { get; set; }
-        public float OrbitalFocusPosY { get; set; }
+        public float DirectionX { get; protected set; }
+        public float DirectionY { get; protected set; }
+        public float DirectionZ { get; protected set; }
+        public float Distance { get; protected set; }
+        public float FieldOfView { get; protected set; }
+        public float ListenerDistance { get; protected set; }
+        public int RotationPitch { get; protected set; }
+        public int RotationRoll { get; protected set; }
+        public int RotationYaw { get; protected set; }
+        public float LookAtOffsetX { get; protected set; }
+        public float LookAtOffsetY { get; protected set; }
+        public float LookAtOffsetZ { get; protected set; }
+        public bool AllowCharacterSpecificZOffset { get; protected set; }
+        public bool OrbitalCam { get; protected set; }
+        public float OrbitalFocusAngle { get; protected set; }
+        public float OrbitalFocusPosX { get; protected set; }
+        public float OrbitalFocusPosY { get; protected set; }
     }
 
     public class CameraSettingCollectionPrototype : Prototype
     {
-        public CameraSettingPrototype[] CameraSettings { get; set; }
-        public CameraSettingPrototype[] CameraSettingsFlying { get; set; }
-        public int CameraStartingIndex { get; set; }
-        public bool CameraAllowCustomMaxZoom { get; set; }
+        public CameraSettingPrototype[] CameraSettings { get; protected set; }
+        public CameraSettingPrototype[] CameraSettingsFlying { get; protected set; }
+        public int CameraStartingIndex { get; protected set; }
+        public bool CameraAllowCustomMaxZoom { get; protected set; }
     }
 
     public class GlobalPropertiesPrototype : Prototype
     {
-        public ulong Properties { get; set; }
+        public ulong Properties { get; protected set; }
     }
 
     public class PowerVisualsGlobalsPrototype : Prototype
     {
-        public ulong DailyMissionCompleteClass { get; set; }
-        public ulong UnlockPetTechR1CommonClass { get; set; }
-        public ulong UnlockPetTechR2UncommonClass { get; set; }
-        public ulong UnlockPetTechR3RareClass { get; set; }
-        public ulong UnlockPetTechR4EpicClass { get; set; }
-        public ulong UnlockPetTechR5CosmicClass { get; set; }
-        public ulong LootVaporizedClass { get; set; }
-        public ulong AchievementUnlockedClass { get; set; }
-        public ulong OmegaPointGainedClass { get; set; }
-        public ulong AvatarLeashTeleportClass { get; set; }
-        public ulong InfinityTimePointEarnedClass { get; set; }
-        public ulong InfinitySpacePointEarnedClass { get; set; }
-        public ulong InfinitySoulPointEarnedClass { get; set; }
-        public ulong InfinityMindPointEarnedClass { get; set; }
-        public ulong InfinityRealityPointEarnedClass { get; set; }
-        public ulong InfinityPowerPointEarnedClass { get; set; }
+        public ulong DailyMissionCompleteClass { get; protected set; }
+        public ulong UnlockPetTechR1CommonClass { get; protected set; }
+        public ulong UnlockPetTechR2UncommonClass { get; protected set; }
+        public ulong UnlockPetTechR3RareClass { get; protected set; }
+        public ulong UnlockPetTechR4EpicClass { get; protected set; }
+        public ulong UnlockPetTechR5CosmicClass { get; protected set; }
+        public ulong LootVaporizedClass { get; protected set; }
+        public ulong AchievementUnlockedClass { get; protected set; }
+        public ulong OmegaPointGainedClass { get; protected set; }
+        public ulong AvatarLeashTeleportClass { get; protected set; }
+        public ulong InfinityTimePointEarnedClass { get; protected set; }
+        public ulong InfinitySpacePointEarnedClass { get; protected set; }
+        public ulong InfinitySoulPointEarnedClass { get; protected set; }
+        public ulong InfinityMindPointEarnedClass { get; protected set; }
+        public ulong InfinityRealityPointEarnedClass { get; protected set; }
+        public ulong InfinityPowerPointEarnedClass { get; protected set; }
     }
 
     public class RankDefaultEntryPrototype : Prototype
     {
-        public ulong Data { get; set; }
-        public Rank Rank { get; set; }
+        public ulong Data { get; protected set; }
+        public Rank Rank { get; protected set; }
     }
 
     public class PopulationGlobalsPrototype : Prototype
     {
-        public ulong MessageEnemiesGrowStronger { get; set; }
-        public ulong MessageEnemiesGrowWeaker { get; set; }
-        public int SpawnMapPoolTickMS { get; set; }
-        public int SpawnMapLevelTickMS { get; set; }
-        public float CrowdSupressionRadius { get; set; }
-        public bool SupressSpawnOnPlayer { get; set; }
-        public int SpawnMapGimbalRadius { get; set; }
-        public int SpawnMapHorizon { get; set; }
-        public float SpawnMapMaxChance { get; set; }
-        public ulong EmptyPopulation { get; set; }
-        public ulong TwinEnemyBoost { get; set; }
-        public int DestructiblesForceSpawnMS { get; set; }
-        public ulong TwinEnemyCondition { get; set; }
-        public int SpawnMapHeatPerSecondMax { get; set; }
-        public int SpawnMapHeatPerSecondMin { get; set; }
-        public int SpawnMapHeatPerSecondScalar { get; set; }
-        public ulong TwinEnemyRank { get; set; }
-        public RankDefaultEntryPrototype[] RankDefaults { get; set; }
+        public ulong MessageEnemiesGrowStronger { get; protected set; }
+        public ulong MessageEnemiesGrowWeaker { get; protected set; }
+        public int SpawnMapPoolTickMS { get; protected set; }
+        public int SpawnMapLevelTickMS { get; protected set; }
+        public float CrowdSupressionRadius { get; protected set; }
+        public bool SupressSpawnOnPlayer { get; protected set; }
+        public int SpawnMapGimbalRadius { get; protected set; }
+        public int SpawnMapHorizon { get; protected set; }
+        public float SpawnMapMaxChance { get; protected set; }
+        public ulong EmptyPopulation { get; protected set; }
+        public ulong TwinEnemyBoost { get; protected set; }
+        public int DestructiblesForceSpawnMS { get; protected set; }
+        public ulong TwinEnemyCondition { get; protected set; }
+        public int SpawnMapHeatPerSecondMax { get; protected set; }
+        public int SpawnMapHeatPerSecondMin { get; protected set; }
+        public int SpawnMapHeatPerSecondScalar { get; protected set; }
+        public ulong TwinEnemyRank { get; protected set; }
+        public RankDefaultEntryPrototype[] RankDefaults { get; protected set; }
     }
 
     public class ClusterConfigurationGlobalsPrototype : Prototype
     {
-        public int MinutesToKeepOfflinePlayerGames { get; set; }
-        public int MinutesToKeepUnusedRegions { get; set; }
-        public bool HotspotCheckLOSInTown { get; set; }
-        public int HotspotCheckTargetIntervalMS { get; set; }
-        public int HotspotCheckTargetTownIntervalMS { get; set; }
-        public int PartyKickGracePeriodMS { get; set; }
-        public int QueueReservationGracePeriodMS { get; set; }
+        public int MinutesToKeepOfflinePlayerGames { get; protected set; }
+        public int MinutesToKeepUnusedRegions { get; protected set; }
+        public bool HotspotCheckLOSInTown { get; protected set; }
+        public int HotspotCheckTargetIntervalMS { get; protected set; }
+        public int HotspotCheckTargetTownIntervalMS { get; protected set; }
+        public int PartyKickGracePeriodMS { get; protected set; }
+        public int QueueReservationGracePeriodMS { get; protected set; }
     }
 
     public class CombatGlobalsPrototype : Prototype
     {
-        public float PowerDmgBonusHardcoreAttenuation { get; set; }
-        public int MouseHoldStartMoveDelayMeleeMS { get; set; }
-        public int MouseHoldStartMoveDelayRangedMS { get; set; }
-        public float CriticalForceApplicationChance { get; set; }
-        public float CriticalForceApplicationMag { get; set; }
-        public float EnduranceCostChangePctMin { get; set; }
-        public EvalPrototype EvalBlockChanceFormula { get; set; }
-        public ulong EvalInterruptChanceFormula { get; set; }
-        public ulong EvalNegStatusResistPctFormula { get; set; }
-        public ulong ChannelInterruptCondition { get; set; }
-        public EvalPrototype EvalDamageReduction { get; set; }
-        public EvalPrototype EvalCritChanceFormula { get; set; }
-        public EvalPrototype EvalSuperCritChanceFormula { get; set; }
-        public EvalPrototype EvalDamageRatingFormula { get; set; }
-        public EvalPrototype EvalCritDamageRatingFormula { get; set; }
-        public EvalPrototype EvalDodgeChanceFormula { get; set; }
-        public EvalPrototype EvalDamageReductionDefenseOnly { get; set; }
-        public EvalPrototype EvalDamageReductionForDisplay { get; set; }
-        public float TravelPowerMaxSpeed { get; set; }
-        public ulong TUSynergyBonusPerLvl { get; set; }
-        public ulong TUSynergyBonusPerMaxLvlTU { get; set; }
+        public float PowerDmgBonusHardcoreAttenuation { get; protected set; }
+        public int MouseHoldStartMoveDelayMeleeMS { get; protected set; }
+        public int MouseHoldStartMoveDelayRangedMS { get; protected set; }
+        public float CriticalForceApplicationChance { get; protected set; }
+        public float CriticalForceApplicationMag { get; protected set; }
+        public float EnduranceCostChangePctMin { get; protected set; }
+        public EvalPrototype EvalBlockChanceFormula { get; protected set; }
+        public ulong EvalInterruptChanceFormula { get; protected set; }
+        public ulong EvalNegStatusResistPctFormula { get; protected set; }
+        public ulong ChannelInterruptCondition { get; protected set; }
+        public EvalPrototype EvalDamageReduction { get; protected set; }
+        public EvalPrototype EvalCritChanceFormula { get; protected set; }
+        public EvalPrototype EvalSuperCritChanceFormula { get; protected set; }
+        public EvalPrototype EvalDamageRatingFormula { get; protected set; }
+        public EvalPrototype EvalCritDamageRatingFormula { get; protected set; }
+        public EvalPrototype EvalDodgeChanceFormula { get; protected set; }
+        public EvalPrototype EvalDamageReductionDefenseOnly { get; protected set; }
+        public EvalPrototype EvalDamageReductionForDisplay { get; protected set; }
+        public float TravelPowerMaxSpeed { get; protected set; }
+        public ulong TUSynergyBonusPerLvl { get; protected set; }
+        public ulong TUSynergyBonusPerMaxLvlTU { get; protected set; }
     }
 
     public class VendorXPCapInfoPrototype : Prototype
     {
-        public ulong Vendor { get; set; }
-        public int Cap { get; set; }
-        public float WallClockTime24Hr { get; set; }
-        public Weekday WallClockTimeDay { get; set; }
+        public ulong Vendor { get; protected set; }
+        public int Cap { get; protected set; }
+        public float WallClockTime24Hr { get; protected set; }
+        public Weekday WallClockTimeDay { get; protected set; }
     }
 
     public class AffixCategoryTableEntryPrototype : Prototype
     {
-        public ulong Category { get; set; }
-        public ulong[] Affixes { get; set; }
+        public ulong Category { get; protected set; }
+        public ulong[] Affixes { get; protected set; }
     }
 
     public class LootGlobalsPrototype : Prototype
     {
-        public ulong LootBonusRarityCurve { get; set; }
-        public ulong LootBonusSpecialCurve { get; set; }
-        public ulong LootContainerKeyword { get; set; }
-        public float LootDropScalar { get; set; }
-        public int LootInitializationLevelOffset { get; set; }
-        public ulong LootLevelDistribution { get; set; }
-        public float LootRarityScalar { get; set; }
-        public float LootSpecialItemFindScalar { get; set; }
-        public float LootUnrestedSpecialFindScalar { get; set; }
-        public float LootUsableByRecipientPercent { get; set; }
-        public ulong NoLootTable { get; set; }
-        public ulong SpecialOnKilledLootTable { get; set; }
-        public int SpecialOnKilledLootCooldownHours { get; set; }
-        public ulong RarityCosmic { get; set; }
-        public ulong LootBonusFlatCreditsCurve { get; set; }
-        public ulong RarityUruForged { get; set; }
-        public ulong LootTableBlueprint { get; set; }
-        public ulong RarityUnique { get; set; }
-        public int LootLevelMaxForDrops { get; set; }
-        public ulong InsigniaBlueprint { get; set; }
-        public ulong UniquesBoxCheatItem { get; set; }
-        public ulong[] EmptySocketAffixes { get; set; }
-        public ulong GemBlueprint { get; set; }
-        public VendorXPCapInfoPrototype[] VendorXPCapInfo { get; set; }
-        public float DropDistanceThreshold { get; set; }
-        public AffixCategoryTableEntryPrototype[] AffixCategoryTable { get; set; }
-        public ulong BonusItemFindCurve { get; set; }
-        public int BonusItemFindNumPointsForBonus { get; set; }
-        public ulong BonusItemFindLootTable { get; set; }
-        public float LootCoopPlayerRewardPct { get; set; }
-        public ulong RarityDefault { get; set; }
+        public ulong LootBonusRarityCurve { get; protected set; }
+        public ulong LootBonusSpecialCurve { get; protected set; }
+        public ulong LootContainerKeyword { get; protected set; }
+        public float LootDropScalar { get; protected set; }
+        public int LootInitializationLevelOffset { get; protected set; }
+        public ulong LootLevelDistribution { get; protected set; }
+        public float LootRarityScalar { get; protected set; }
+        public float LootSpecialItemFindScalar { get; protected set; }
+        public float LootUnrestedSpecialFindScalar { get; protected set; }
+        public float LootUsableByRecipientPercent { get; protected set; }
+        public ulong NoLootTable { get; protected set; }
+        public ulong SpecialOnKilledLootTable { get; protected set; }
+        public int SpecialOnKilledLootCooldownHours { get; protected set; }
+        public ulong RarityCosmic { get; protected set; }
+        public ulong LootBonusFlatCreditsCurve { get; protected set; }
+        public ulong RarityUruForged { get; protected set; }
+        public ulong LootTableBlueprint { get; protected set; }
+        public ulong RarityUnique { get; protected set; }
+        public int LootLevelMaxForDrops { get; protected set; }
+        public ulong InsigniaBlueprint { get; protected set; }
+        public ulong UniquesBoxCheatItem { get; protected set; }
+        public ulong[] EmptySocketAffixes { get; protected set; }
+        public ulong GemBlueprint { get; protected set; }
+        public VendorXPCapInfoPrototype[] VendorXPCapInfo { get; protected set; }
+        public float DropDistanceThreshold { get; protected set; }
+        public AffixCategoryTableEntryPrototype[] AffixCategoryTable { get; protected set; }
+        public ulong BonusItemFindCurve { get; protected set; }
+        public int BonusItemFindNumPointsForBonus { get; protected set; }
+        public ulong BonusItemFindLootTable { get; protected set; }
+        public float LootCoopPlayerRewardPct { get; protected set; }
+        public ulong RarityDefault { get; protected set; }
     }
 
     public class MatchQueueStringEntryPrototype : Prototype
     {
-        public RegionRequestQueueUpdateVar StatusKey { get; set; }  // Regions/QueueStatus.type, also appears in protocol
-        public ulong StringLog { get; set; }
-        public ulong StringStatus { get; set; }
+        public RegionRequestQueueUpdateVar StatusKey { get; protected set; }  // Regions/QueueStatus.type, also appears in protocol
+        public ulong StringLog { get; protected set; }
+        public ulong StringStatus { get; protected set; }
     }
 
     public class TransitionGlobalsPrototype : Prototype
     {
-        public RegionPortalControlEntryPrototype[] ControlledRegions { get; set; }
-        public ulong EnabledState { get; set; }
-        public ulong DisabledState { get; set; }
-        public MatchQueueStringEntryPrototype[] QueueStrings { get; set; }
-        public ulong TransitionEmptyClass { get; set; }
+        public RegionPortalControlEntryPrototype[] ControlledRegions { get; protected set; }
+        public ulong EnabledState { get; protected set; }
+        public ulong DisabledState { get; protected set; }
+        public MatchQueueStringEntryPrototype[] QueueStrings { get; protected set; }
+        public ulong TransitionEmptyClass { get; protected set; }
     }
 
     public class KeywordGlobalsPrototype : Prototype
     {
-        public ulong PowerKeywordPrototype { get; set; }
-        public ulong DestructibleKeyword { get; set; }
-        public ulong PetPowerKeyword { get; set; }
-        public ulong VacuumableKeyword { get; set; }
-        public ulong EntityKeywordPrototype { get; set; }
-        public ulong BodysliderPowerKeyword { get; set; }
-        public ulong OrbEntityKeyword { get; set; }
-        public ulong UltimatePowerKeyword { get; set; }
-        public ulong MeleePowerKeyword { get; set; }
-        public ulong RangedPowerKeyword { get; set; }
-        public ulong BasicPowerKeyword { get; set; }
-        public ulong TeamUpSpecialPowerKeyword { get; set; }
-        public ulong TeamUpDefaultPowerKeyword { get; set; }
-        public ulong StealthPowerKeyword { get; set; }
-        public ulong TeamUpAwayPowerKeyword { get; set; }
-        public ulong VanityPetKeyword { get; set; }
-        public ulong ControlPowerKeywordPrototype { get; set; }
-        public ulong AreaPowerKeyword { get; set; }
-        public ulong EnergyPowerKeyword { get; set; }
-        public ulong MentalPowerKeyword { get; set; }
-        public ulong PhysicalPowerKeyword { get; set; }
-        public ulong MedKitKeyword { get; set; }
-        public ulong OrbExperienceEntityKeyword { get; set; }
-        public ulong TutorialRegionKeyword { get; set; }
-        public ulong TeamUpKeyword { get; set; }
-        public ulong MovementPowerKeyword { get; set; }
-        public ulong ThrownPowerKeyword { get; set; }
-        public ulong HoloSimKeyword { get; set; }
-        public ulong ControlledSummonDurationKeyword { get; set; }
-        public ulong TreasureRoomKeyword { get; set; }
-        public ulong DangerRoomKeyword { get; set; }
-        public ulong StealingPowerKeyword { get; set; }
-        public ulong SummonPowerKeyword { get; set; }
+        public ulong PowerKeywordPrototype { get; protected set; }
+        public ulong DestructibleKeyword { get; protected set; }
+        public ulong PetPowerKeyword { get; protected set; }
+        public ulong VacuumableKeyword { get; protected set; }
+        public ulong EntityKeywordPrototype { get; protected set; }
+        public ulong BodysliderPowerKeyword { get; protected set; }
+        public ulong OrbEntityKeyword { get; protected set; }
+        public ulong UltimatePowerKeyword { get; protected set; }
+        public ulong MeleePowerKeyword { get; protected set; }
+        public ulong RangedPowerKeyword { get; protected set; }
+        public ulong BasicPowerKeyword { get; protected set; }
+        public ulong TeamUpSpecialPowerKeyword { get; protected set; }
+        public ulong TeamUpDefaultPowerKeyword { get; protected set; }
+        public ulong StealthPowerKeyword { get; protected set; }
+        public ulong TeamUpAwayPowerKeyword { get; protected set; }
+        public ulong VanityPetKeyword { get; protected set; }
+        public ulong ControlPowerKeywordPrototype { get; protected set; }
+        public ulong AreaPowerKeyword { get; protected set; }
+        public ulong EnergyPowerKeyword { get; protected set; }
+        public ulong MentalPowerKeyword { get; protected set; }
+        public ulong PhysicalPowerKeyword { get; protected set; }
+        public ulong MedKitKeyword { get; protected set; }
+        public ulong OrbExperienceEntityKeyword { get; protected set; }
+        public ulong TutorialRegionKeyword { get; protected set; }
+        public ulong TeamUpKeyword { get; protected set; }
+        public ulong MovementPowerKeyword { get; protected set; }
+        public ulong ThrownPowerKeyword { get; protected set; }
+        public ulong HoloSimKeyword { get; protected set; }
+        public ulong ControlledSummonDurationKeyword { get; protected set; }
+        public ulong TreasureRoomKeyword { get; protected set; }
+        public ulong DangerRoomKeyword { get; protected set; }
+        public ulong StealingPowerKeyword { get; protected set; }
+        public ulong SummonPowerKeyword { get; protected set; }
     }
 
     public class CurrencyGlobalsPrototype : Prototype
     {
-        public ulong CosmicWorldstones { get; set; }
-        public ulong Credits { get; set; }
-        public ulong CubeShards { get; set; }
-        public ulong EternitySplinters { get; set; }
-        public ulong EyesOfDemonfire { get; set; }
-        public ulong HeartsOfDemonfire { get; set; }
-        public ulong LegendaryMarks { get; set; }
-        public ulong OmegaFiles { get; set; }
-        public ulong PvPCrowns { get; set; }
-        public ulong ResearchDrives { get; set; }
-        public ulong GenoshaRaid { get; set; }
-        public ulong DangerRoomMerits { get; set; }
-        public ulong GazillioniteGs { get; set; }
+        public ulong CosmicWorldstones { get; protected set; }
+        public ulong Credits { get; protected set; }
+        public ulong CubeShards { get; protected set; }
+        public ulong EternitySplinters { get; protected set; }
+        public ulong EyesOfDemonfire { get; protected set; }
+        public ulong HeartsOfDemonfire { get; protected set; }
+        public ulong LegendaryMarks { get; protected set; }
+        public ulong OmegaFiles { get; protected set; }
+        public ulong PvPCrowns { get; protected set; }
+        public ulong ResearchDrives { get; protected set; }
+        public ulong GenoshaRaid { get; protected set; }
+        public ulong DangerRoomMerits { get; protected set; }
+        public ulong GazillioniteGs { get; protected set; }
     }
 
     public class GamepadInputAssetPrototype : Prototype
     {
-        public GamepadInput Input { get; set; }
-        public ulong DualShockPath { get; set; }
-        public ulong XboxPath { get; set; }
+        public GamepadInput Input { get; protected set; }
+        public ulong DualShockPath { get; protected set; }
+        public ulong XboxPath { get; protected set; }
     }
 
     public class GamepadSlotBindingPrototype : Prototype
     {
-        public int OrbisSlotNumber { get; set; }
-        public int PCSlotNumber { get; set; }
-        public int SlotNumber { get; set; }
+        public int OrbisSlotNumber { get; protected set; }
+        public int PCSlotNumber { get; protected set; }
+        public int SlotNumber { get; protected set; }
     }
 
     public class GamepadGlobalsPrototype : Prototype
     {
-        public int GamepadDialogAcceptTimerMS { get; set; }
-        public float GamepadMaxTargetingRange { get; set; }
-        public float GamepadTargetingHalfAngle { get; set; }
-        public float GamepadTargetingDeflectionCost { get; set; }
-        public float GamepadTargetingPriorityCost { get; set; }
-        public int UltimateActivationTimeoutMS { get; set; }
-        public GamepadInputAssetPrototype[] InputAssets { get; set; }
-        public float GamepadInteractionHalfAngle { get; set; }
-        public float DisableInteractDangerRadius { get; set; }
-        public int GamepadInteractRange { get; set; }
-        public float GamepadInteractionOffset { get; set; }
-        public float GamepadTargetLockAssistHalfAngle { get; set; }
-        public float GamepadTargetLockAssistDflctCost { get; set; }
-        public float GamepadInteractBoundsIncrease { get; set; }
-        public float GamepadTargetLockDropRadius { get; set; }
-        public int GamepadTargetLockDropTimeMS { get; set; }
-        public GamepadSlotBindingPrototype[] GamepadSlotBindings { get; set; }
-        public float GamepadMeleeMoveIntoRangeDist { get; set; }
-        public float GamepadMeleeMoveIntoRangeSpeed { get; set; }
-        public float GamepadAutoTargetLockRadius { get; set; }
-        public float GamepadDestructTargetDeflctCost { get; set; }
-        public float GamepadDestructTargetHalfAngle { get; set; }
-        public float GamepadDestructTargetRange { get; set; }
+        public int GamepadDialogAcceptTimerMS { get; protected set; }
+        public float GamepadMaxTargetingRange { get; protected set; }
+        public float GamepadTargetingHalfAngle { get; protected set; }
+        public float GamepadTargetingDeflectionCost { get; protected set; }
+        public float GamepadTargetingPriorityCost { get; protected set; }
+        public int UltimateActivationTimeoutMS { get; protected set; }
+        public GamepadInputAssetPrototype[] InputAssets { get; protected set; }
+        public float GamepadInteractionHalfAngle { get; protected set; }
+        public float DisableInteractDangerRadius { get; protected set; }
+        public int GamepadInteractRange { get; protected set; }
+        public float GamepadInteractionOffset { get; protected set; }
+        public float GamepadTargetLockAssistHalfAngle { get; protected set; }
+        public float GamepadTargetLockAssistDflctCost { get; protected set; }
+        public float GamepadInteractBoundsIncrease { get; protected set; }
+        public float GamepadTargetLockDropRadius { get; protected set; }
+        public int GamepadTargetLockDropTimeMS { get; protected set; }
+        public GamepadSlotBindingPrototype[] GamepadSlotBindings { get; protected set; }
+        public float GamepadMeleeMoveIntoRangeDist { get; protected set; }
+        public float GamepadMeleeMoveIntoRangeSpeed { get; protected set; }
+        public float GamepadAutoTargetLockRadius { get; protected set; }
+        public float GamepadDestructTargetDeflctCost { get; protected set; }
+        public float GamepadDestructTargetHalfAngle { get; protected set; }
+        public float GamepadDestructTargetRange { get; protected set; }
     }
 
     public class ConsoleGlobalsPrototype : Prototype
     {
-        public ulong OrbisDefaultSessionDescription { get; set; }
-        public ulong OrbisDefaultSessionImage { get; set; }
-        public int OrbisMaxSessionSize { get; set; }
-        public int MaxSuggestedPlayers { get; set; }
-        public ulong OrbisPlayerCameraSettings { get; set; }
-        public ulong OrbisFriendsInvitationDialogDesc { get; set; }
-        public int OrbisMaxFriendInvites { get; set; }
-        public ulong OrbisFriendsSuggestionDialogDesc { get; set; }
-        public int OrbisMaxFriendSuggestions { get; set; }
+        public ulong OrbisDefaultSessionDescription { get; protected set; }
+        public ulong OrbisDefaultSessionImage { get; protected set; }
+        public int OrbisMaxSessionSize { get; protected set; }
+        public int MaxSuggestedPlayers { get; protected set; }
+        public ulong OrbisPlayerCameraSettings { get; protected set; }
+        public ulong OrbisFriendsInvitationDialogDesc { get; protected set; }
+        public int OrbisMaxFriendInvites { get; protected set; }
+        public ulong OrbisFriendsSuggestionDialogDesc { get; protected set; }
+        public int OrbisMaxFriendSuggestions { get; protected set; }
     }
 
     public class AvatarOnKilledInfoPrototype : Prototype
     {
-        public DeathReleaseBehavior DeathReleaseBehavior { get; set; }
-        public ulong DeathReleaseButton { get; set; }
-        public ulong DeathReleaseDialogMessage { get; set; }
-        public int DeathReleaseTimeoutMS { get; set; }
-        public ulong ResurrectionDialogMessage { get; set; }
-        public int ResurrectionTimeoutMS { get; set; }
-        public int RespawnLockoutMS { get; set; }
+        public DeathReleaseBehavior DeathReleaseBehavior { get; protected set; }
+        public ulong DeathReleaseButton { get; protected set; }
+        public ulong DeathReleaseDialogMessage { get; protected set; }
+        public int DeathReleaseTimeoutMS { get; protected set; }
+        public ulong ResurrectionDialogMessage { get; protected set; }
+        public int ResurrectionTimeoutMS { get; protected set; }
+        public int RespawnLockoutMS { get; protected set; }
     }
 
     public class GlobalEventPrototype : Prototype
     {
-        public bool Active { get; set; }
-        public ulong CriteriaList { get; set; }
-        public GlobalEventCriteriaLogic CriteriaLogic { get; set; }
-        public ulong DisplayName { get; set; }
-        public int LeaderboardLength { get; set; }
+        public bool Active { get; protected set; }
+        public ulong CriteriaList { get; protected set; }
+        public GlobalEventCriteriaLogic CriteriaLogic { get; protected set; }
+        public ulong DisplayName { get; protected set; }
+        public int LeaderboardLength { get; protected set; }
     }
 
     public class GlobalEventCriteriaPrototype : Prototype
     {
-        public ulong DisplayColor { get; set; }
-        public ulong DisplayName { get; set; }
-        public int Score { get; set; }
-        public int ThresholdCount { get; set; }
-        public ulong DisplayTooltip { get; set; }
+        public ulong DisplayColor { get; protected set; }
+        public ulong DisplayName { get; protected set; }
+        public int Score { get; protected set; }
+        public int ThresholdCount { get; protected set; }
+        public ulong DisplayTooltip { get; protected set; }
     }
 
     public class GlobalEventCriteriaItemCollectPrototype : GlobalEventCriteriaPrototype
     {
-        public EntityFilterPrototype ItemFilter { get; set; }
+        public EntityFilterPrototype ItemFilter { get; protected set; }
     }
 }

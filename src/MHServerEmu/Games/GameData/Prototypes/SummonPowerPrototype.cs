@@ -2,57 +2,57 @@
 {
     public class SummonPowerPrototype : PowerPrototype
     {
-        public bool AttachSummonsToTarget { get; set; }
-        public bool SummonsLiveWhilePowerActive { get; set; }
-        public SummonEntityContextPrototype[] SummonEntityContexts { get; set; }
-        public EvalPrototype SummonMax { get; set; }
-        public bool SummonMaxReachedDestroyOwner { get; set; }
-        public int SummonIntervalMS { get; set; }
-        public bool SummonRandomSelection { get; set; }
-        public bool TrackInInventory { get; set; }
-        public bool AttachSummonsToCaster { get; set; }
-        public EvalPrototype SummonMaxSimultaneous { get; set; }
-        public ulong SummonMaxCountWithOthers { get; set; }
-        public bool PersistAcrossRegions { get; set; }
-        public EvalPrototype EvalSelectSummonContextIndex { get; set; }
-        public bool UseTargetAsSource { get; set; }
-        public bool KillPreviousSummons { get; set; }
-        public bool SummonAsPopulation { get; set; }
+        public bool AttachSummonsToTarget { get; protected set; }
+        public bool SummonsLiveWhilePowerActive { get; protected set; }
+        public SummonEntityContextPrototype[] SummonEntityContexts { get; protected set; }
+        public EvalPrototype SummonMax { get; protected set; }
+        public bool SummonMaxReachedDestroyOwner { get; protected set; }
+        public int SummonIntervalMS { get; protected set; }
+        public bool SummonRandomSelection { get; protected set; }
+        public bool TrackInInventory { get; protected set; }
+        public bool AttachSummonsToCaster { get; protected set; }
+        public EvalPrototype SummonMaxSimultaneous { get; protected set; }
+        public ulong SummonMaxCountWithOthers { get; protected set; }
+        public bool PersistAcrossRegions { get; protected set; }
+        public EvalPrototype EvalSelectSummonContextIndex { get; protected set; }
+        public bool UseTargetAsSource { get; protected set; }
+        public bool KillPreviousSummons { get; protected set; }
+        public bool SummonAsPopulation { get; protected set; }
     }
 
     public class SummonPowerOverridePrototype : PowerUnrealOverridePrototype
     {
-        public ulong SummonEntity { get; set; }
+        public ulong SummonEntity { get; protected set; }
     }
 
     public class SummonRemovalPrototype : Prototype
     {
-        public ulong FromPowers { get; set; }
-        public ulong Keywords { get; set; }
+        public ulong FromPowers { get; protected set; }
+        public ulong Keywords { get; protected set; }
     }
 
     public class SummonEntityContextPrototype : Prototype
     {
-        public ulong SummonEntity { get; set; }
-        public LocomotorMethod PathFilterOverride { get; set; }
-        public bool RandomSpawnLocation { get; set; }
-        public bool IgnoreBlockingOnSpawn { get; set; }
-        public bool SnapToFloor { get; set; }
-        public bool TransferMissionPrototype { get; set; }
-        public float SummonRadius { get; set; }
-        public bool EnforceExactSummonPos { get; set; }
-        public bool ForceBlockingCollisionForSpawn { get; set; }
-        public bool VisibleWhileAttached { get; set; }
-        public Vector3Prototype SummonOffsetVector { get; set; }
-        public SummonRemovalPrototype SummonEntityRemoval { get; set; }
-        public EvalPrototype[] EvalOnSummon { get; set; }
-        public float SummonOffsetAngle { get; set; }
-        public bool HideEntityOnSummon { get; set; }
-        public bool CopyOwnerProperties { get; set; }
-        public bool KillEntityOnOwnerDeath { get; set; }
-        public PowerPrototype[] PowersToAssignToOwnerOnKilled { get; set; }
-        public PowerPrototype[] PowersToUnassignFromOwnerOnEnter { get; set; }
-        public EvalPrototype EvalCanSummon { get; set; }
-        public ulong TrackInInventoryOwnerCondition { get; set; }
+        public ulong SummonEntity { get; protected set; }
+        public LocomotorMethod PathFilterOverride { get; protected set; }
+        public bool RandomSpawnLocation { get; protected set; }
+        public bool IgnoreBlockingOnSpawn { get; protected set; }
+        public bool SnapToFloor { get; protected set; }
+        public bool TransferMissionPrototype { get; protected set; }
+        public float SummonRadius { get; protected set; }
+        public bool EnforceExactSummonPos { get; protected set; }
+        public bool ForceBlockingCollisionForSpawn { get; protected set; }
+        public bool VisibleWhileAttached { get; protected set; }
+        public Vector3Prototype SummonOffsetVector { get; protected set; }
+        public SummonRemovalPrototype SummonEntityRemoval { get; protected set; }
+        public EvalPrototype[] EvalOnSummon { get; protected set; }
+        public float SummonOffsetAngle { get; protected set; }
+        public bool HideEntityOnSummon { get; protected set; }
+        public bool CopyOwnerProperties { get; protected set; }
+        public bool KillEntityOnOwnerDeath { get; protected set; }
+        public PowerPrototype[] PowersToAssignToOwnerOnKilled { get; protected set; }
+        public PowerPrototype[] PowersToUnassignFromOwnerOnEnter { get; protected set; }
+        public EvalPrototype EvalCanSummon { get; protected set; }
+        public ulong TrackInInventoryOwnerCondition { get; protected set; }
     }
 }

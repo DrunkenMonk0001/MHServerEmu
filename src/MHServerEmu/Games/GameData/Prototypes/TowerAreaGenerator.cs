@@ -2,9 +2,9 @@
 {
     public class TowerAreaGeneratorPrototype : GeneratorPrototype
     {
-        public int CellSize { get; set; }
-        public int CellSpacing { get; set; }
-        public TowerAreaEntryPrototype[] Entries { get; set; }
+        public int CellSize { get; protected set; }
+        public int CellSpacing { get; protected set; }
+        public TowerAreaEntryPrototype[] Entries { get; protected set; }
     }
 
     #region TowerAreaEntryPrototype
@@ -15,15 +15,15 @@
 
     public class TowerAreaRandomSeqCellsEntryPrototype : TowerAreaEntryPrototype
     {
-        public int CellMax { get; set; }
-        public int CellMin { get; set; }
-        public CellSetEntryPrototype[] CellSets { get; set; }
+        public int CellMax { get; protected set; }
+        public int CellMin { get; protected set; }
+        public CellSetEntryPrototype[] CellSets { get; protected set; }
     }
 
     public class TowerAreaStaticCellEntryPrototype : TowerAreaEntryPrototype
     {
-        public ulong Cell { get; set; }
-        public ulong Name { get; set; }
+        public ulong Cell { get; protected set; }
+        public ulong Name { get; protected set; }
     }
 
     #endregion

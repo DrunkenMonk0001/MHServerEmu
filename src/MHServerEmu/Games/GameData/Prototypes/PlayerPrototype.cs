@@ -2,25 +2,25 @@
 {
     public class PlayerPrototype : EntityPrototype
     {
-        public float CameraFacingDirX { get; set; }
-        public float CameraFacingDirY { get; set; }
-        public float CameraFacingDirZ { get; set; }
-        public float CameraFOV { get; set; }
-        public float CameraZoomDistance { get; set; }
-        public float ResurrectWaitTime { get; set; }
-        public int NumConsumableSlots { get; set; }
-        public AbilityAssignmentPrototype[] StartingEmotes { get; set; }
-        public EntityInventoryAssignmentPrototype[] StashInventories { get; set; }
-        public int MaxDroppedItems { get; set; }
+        public float CameraFacingDirX { get; protected set; }
+        public float CameraFacingDirY { get; protected set; }
+        public float CameraFacingDirZ { get; protected set; }
+        public float CameraFOV { get; protected set; }
+        public float CameraZoomDistance { get; protected set; }
+        public float ResurrectWaitTime { get; protected set; }
+        public int NumConsumableSlots { get; protected set; }
+        public AbilityAssignmentPrototype[] StartingEmotes { get; protected set; }
+        public EntityInventoryAssignmentPrototype[] StashInventories { get; protected set; }
+        public int MaxDroppedItems { get; protected set; }
     }
 
     public class CohortPrototype : Prototype
     {
-        public int Weight { get; set; }
+        public int Weight { get; protected set; }
     }
 
     public class CohortExperimentPrototype : Prototype
     {
-        public CohortPrototype Cohorts { get; set; }
+        public CohortPrototype Cohorts { get; protected set; }
     }
 }

@@ -27,142 +27,142 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
     public class AvatarPrototype : AgentPrototype
     {
-        public ulong BioText { get; set; }
-        public AbilityAssignmentPrototype[] HiddenPassivePowers { get; set; }
-        public ulong PortraitPath { get; set; }
-        public ulong StartingLootTable { get; set; }
-        public ulong UnlockDialogImage { get; set; }
-        public ulong HUDTheme { get; set; }
-        public AvatarPrimaryStatPrototype[] PrimaryStats { get; set; }
-        public PowerProgressionTablePrototype[] PowerProgressionTables { get; set; }
-        public ItemAssignmentPrototype StartingCostume { get; set; }
-        public ulong ResurrectOtherEntityPower { get; set; }
-        public AvatarEquipInventoryAssignmentPrototype[] EquipmentInventories { get; set; }
-        public ulong PartyBonusPower { get; set; }
-        public ulong UnlockDialogText { get; set; }
-        public ulong SecondaryResourceBehavior { get; set; }
-        public ulong LoadingScreens { get; set; }
-        public int PowerProgressionVersion { get; set; }
-        public ulong OnLevelUpEval { get; set; }
-        public EvalPrototype OnPartySizeChange { get; set; }
-        public ulong StatsPower { get; set; }
-        public ulong SocialIconPath { get; set; }
-        public ulong CharacterSelectIconPath { get; set; }
-        public ulong StatProgressionTable { get; set; }
-        public TransformModeEntryPrototype[] TransformModes { get; set; }
-        public AvatarSynergyEntryPrototype[] SynergyTable { get; set; }
-        public ulong[] SuperteamMemberships { get; set; }
-        public ulong CharacterSelectPowers { get; set; }
-        public PrimaryResourceManaBehaviorPrototype PrimaryResourceBehaviors { get; set; }
-        public StealablePowerInfoPrototype StealablePowersAllowed { get; set; }
-        public bool ShowInRosterIfLocked { get; set; }
-        public ulong CharacterVideoUrl { get; set; }
-        public ulong CharacterSelectIconPortraitSmall { get; set; }
-        public ulong CharacterSelectIconPortraitFull { get; set; }
-        public ulong PrimaryResourceBehaviorNames { get; set; }
-        public bool IsStarterAvatar { get; set; }
-        public int CharacterSelectDisplayOrder { get; set; }
-        public ulong CostumeCore { get; set; }
-        public TalentGroupPrototype[] TalentGroups { get; set; }
-        public ulong TravelPower { get; set; }
-        public AbilityAutoAssignmentSlotPrototype[] AbilityAutoAssignmentSlot { get; set; }
-        public ulong LoadingScreensConsole { get; set; }
-        public ItemAssignmentPrototype StartingCostumePS4 { get; set; }
-        public ItemAssignmentPrototype StartingCostumeXboxOne { get; set; }
+        public ulong BioText { get; protected set; }
+        public AbilityAssignmentPrototype[] HiddenPassivePowers { get; protected set; }
+        public ulong PortraitPath { get; protected set; }
+        public ulong StartingLootTable { get; protected set; }
+        public ulong UnlockDialogImage { get; protected set; }
+        public ulong HUDTheme { get; protected set; }
+        public AvatarPrimaryStatPrototype[] PrimaryStats { get; protected set; }
+        public PowerProgressionTablePrototype[] PowerProgressionTables { get; protected set; }
+        public ItemAssignmentPrototype StartingCostume { get; protected set; }
+        public ulong ResurrectOtherEntityPower { get; protected set; }
+        public AvatarEquipInventoryAssignmentPrototype[] EquipmentInventories { get; protected set; }
+        public ulong PartyBonusPower { get; protected set; }
+        public ulong UnlockDialogText { get; protected set; }
+        public ulong SecondaryResourceBehavior { get; protected set; }
+        public ulong LoadingScreens { get; protected set; }
+        public int PowerProgressionVersion { get; protected set; }
+        public ulong OnLevelUpEval { get; protected set; }
+        public EvalPrototype OnPartySizeChange { get; protected set; }
+        public ulong StatsPower { get; protected set; }
+        public ulong SocialIconPath { get; protected set; }
+        public ulong CharacterSelectIconPath { get; protected set; }
+        public ulong StatProgressionTable { get; protected set; }
+        public TransformModeEntryPrototype[] TransformModes { get; protected set; }
+        public AvatarSynergyEntryPrototype[] SynergyTable { get; protected set; }
+        public ulong[] SuperteamMemberships { get; protected set; }
+        public ulong CharacterSelectPowers { get; protected set; }
+        public PrimaryResourceManaBehaviorPrototype PrimaryResourceBehaviors { get; protected set; }
+        public StealablePowerInfoPrototype StealablePowersAllowed { get; protected set; }
+        public bool ShowInRosterIfLocked { get; protected set; }
+        public ulong CharacterVideoUrl { get; protected set; }
+        public ulong CharacterSelectIconPortraitSmall { get; protected set; }
+        public ulong CharacterSelectIconPortraitFull { get; protected set; }
+        public ulong PrimaryResourceBehaviorNames { get; protected set; }
+        public bool IsStarterAvatar { get; protected set; }
+        public int CharacterSelectDisplayOrder { get; protected set; }
+        public ulong CostumeCore { get; protected set; }
+        public TalentGroupPrototype[] TalentGroups { get; protected set; }
+        public ulong TravelPower { get; protected set; }
+        public AbilityAutoAssignmentSlotPrototype[] AbilityAutoAssignmentSlot { get; protected set; }
+        public ulong LoadingScreensConsole { get; protected set; }
+        public ItemAssignmentPrototype StartingCostumePS4 { get; protected set; }
+        public ItemAssignmentPrototype StartingCostumeXboxOne { get; protected set; }
     }
 
     public class ItemAssignmentPrototype : Prototype
     {
-        public ulong Item { get; set; }
-        public ulong Rarity { get; set; }
+        public ulong Item { get; protected set; }
+        public ulong Rarity { get; protected set; }
     }
 
     public class AvatarPrimaryStatPrototype : Prototype
     {
-        public AvatarStat Stat { get; set; }
-        public ulong Tooltip { get; set; }
+        public AvatarStat Stat { get; protected set; }
+        public ulong Tooltip { get; protected set; }
     }
 
     public class IngredientLookupEntryPrototype : Prototype
     {
-        public long LookupSlot { get; set; }
-        public ulong Ingredient { get; set; }
+        public long LookupSlot { get; protected set; }
+        public ulong Ingredient { get; protected set; }
     }
 
     public class AvatarSynergyEntryPrototype : Prototype
     {
-        public int Level { get; set; }
-        public ulong TooltipTextForIcon { get; set; }
-        public ulong UIData { get; set; }
+        public int Level { get; protected set; }
+        public ulong TooltipTextForIcon { get; protected set; }
+        public ulong UIData { get; protected set; }
     }
 
     public class AvatarSynergyEvalEntryPrototype : AvatarSynergyEntryPrototype
     {
-        public EvalPrototype SynergyEval { get; set; }
+        public EvalPrototype SynergyEval { get; protected set; }
     }
 
     public class VanityTitlePrototype : Prototype
     {
-        public ulong Text { get; set; }
+        public ulong Text { get; protected set; }
     }
 
     public class PowerSpecPrototype : Prototype
     {
-        public int Index { get; set; }
+        public int Index { get; protected set; }
     }
 
     public class TalentEntryPrototype : Prototype
     {
-        public ulong Talent { get; set; }
-        public int UnlockLevel { get; set; }
+        public ulong Talent { get; protected set; }
+        public int UnlockLevel { get; protected set; }
     }
 
     public class TalentGroupPrototype : Prototype
     {
-        public TalentEntryPrototype[] Talents { get; set; }
-        public float UIPositionPctX { get; set; }
-        public float UIPositionPctY { get; set; }
+        public TalentEntryPrototype[] Talents { get; protected set; }
+        public float UIPositionPctX { get; protected set; }
+        public float UIPositionPctY { get; protected set; }
     }
 
     public class AvatarModePrototype : Prototype
     {
-        public AvatarMode AvatarModeEnum { get; set; }
-        public ConvenienceLabel Inventory { get; set; }
+        public AvatarMode AvatarModeEnum { get; protected set; }
+        public ConvenienceLabel Inventory { get; protected set; }
     }
 
     public class StatProgressionEntryPrototype : Prototype
     {
-        public int Level { get; set; }
-        public int DurabilityValue { get; set; }
-        public int EnergyProjectionValue { get; set; }
-        public int FightingSkillsValue { get; set; }
-        public int IntelligenceValue { get; set; }
-        public int SpeedValue { get; set; }
-        public int StrengthValue { get; set; }
+        public int Level { get; protected set; }
+        public int DurabilityValue { get; protected set; }
+        public int EnergyProjectionValue { get; protected set; }
+        public int FightingSkillsValue { get; protected set; }
+        public int IntelligenceValue { get; protected set; }
+        public int SpeedValue { get; protected set; }
+        public int StrengthValue { get; protected set; }
     }
 
     public class PowerProgressionEntryPrototype : ProgressionEntryPrototype
     {
-        public int Level { get; set; }
-        public AbilityAssignmentPrototype PowerAssignment { get; set; }
-        public ulong MaxRankForPowerAtCharacterLevel { get; set; }
-        public ulong[] Prerequisites { get; set; }
-        public float UIPositionPctX { get; set; }
-        public float UIPositionPctY { get; set; }
-        public int UIFanSortNumber { get; set; }
-        public int UIFanTier { get; set; }
-        public ulong[] Antirequisites { get; set; }
-        public bool IsTrait { get; set; }
+        public int Level { get; protected set; }
+        public AbilityAssignmentPrototype PowerAssignment { get; protected set; }
+        public ulong MaxRankForPowerAtCharacterLevel { get; protected set; }
+        public ulong[] Prerequisites { get; protected set; }
+        public float UIPositionPctX { get; protected set; }
+        public float UIPositionPctY { get; protected set; }
+        public int UIFanSortNumber { get; protected set; }
+        public int UIFanTier { get; protected set; }
+        public ulong[] Antirequisites { get; protected set; }
+        public bool IsTrait { get; protected set; }
     }
 
     public class PowerProgressionTablePrototype : Prototype
     {
-        public ulong DisplayName { get; set; }
-        public PowerProgressionEntryPrototype[] PowerProgressionEntries { get; set; }
+        public ulong DisplayName { get; protected set; }
+        public PowerProgressionEntryPrototype[] PowerProgressionEntries { get; protected set; }
     }
 
     public class PowerProgTableTabRefPrototype : Prototype
     {
-        public int PowerProgTableTabIndex { get; set; }
+        public int PowerProgTableTabIndex { get; protected set; }
     }
 }

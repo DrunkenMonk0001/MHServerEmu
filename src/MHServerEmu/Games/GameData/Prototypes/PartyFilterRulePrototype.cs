@@ -6,38 +6,38 @@
 
     public class PartyFilterRuleHasKeywordPrototype : PartyFilterRulePrototype
     {
-        public ulong Keyword { get; set; }
+        public ulong Keyword { get; protected set; }
     }
 
     public class PartyFilterRuleHasPrototypePrototype : PartyFilterRulePrototype
     {
-        public ulong Avatar { get; set; }
+        public ulong Avatar { get; protected set; }
     }
 
     public class PartyFilterRuleMemberOfTeamPrototype : PartyFilterRulePrototype
     {
-        public ulong Superteam { get; set; }
+        public ulong Superteam { get; protected set; }
     }
 
     public class PartyFilterRuleWearingCostumePrototype : PartyFilterRulePrototype
     {
-        public ulong Costume { get; set; }
+        public ulong Costume { get; protected set; }
     }
 
     public class PartyFilterPrototype : Prototype
     {
-        public bool AllowOutsiders { get; set; }
-        public bool AllUniqueAvatars { get; set; }
-        public DesignWorkflowState DesignState { get; set; }
-        public int NumberRequired { get; set; }
-        public PartyFilterRulePrototype[] Rules { get; set; }
+        public bool AllowOutsiders { get; protected set; }
+        public bool AllUniqueAvatars { get; protected set; }
+        public DesignWorkflowState DesignState { get; protected set; }
+        public int NumberRequired { get; protected set; }
+        public PartyFilterRulePrototype[] Rules { get; protected set; }
     }
 
     public class PublicEventPrototype : Prototype
     {
-        public bool DefaultEnabled { get; set; }
-        public ulong Name { get; set; }
-        public ulong[] Teams { get; set; }
-        public ulong PanelName { get; set; }
+        public bool DefaultEnabled { get; protected set; }
+        public ulong Name { get; protected set; }
+        public ulong[] Teams { get; protected set; }
+        public ulong PanelName { get; protected set; }
     }
 }

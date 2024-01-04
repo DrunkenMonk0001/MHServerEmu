@@ -25,52 +25,52 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
     public class AgentPrototype : WorldEntityPrototype
     {
-        public Allegiance Allegiance { get; set; }
-        public LocomotorPrototype Locomotion { get; set; }
-        public ulong HitReactCondition { get; set; }
-        public BehaviorProfilePrototype BehaviorProfile { get; set; }
-        public PopulationInfoPrototype PopulationInfo { get; set; }
-        public int WakeDelayMS { get; set; }
-        public int WakeRandomStartMS { get; set; }
-        public float WakeRange { get; set; }
-        public float ReturnToDormantRange { get; set; }
-        public bool TriggersOcclusion { get; set; }
-        public int HitReactCooldownMS { get; set; }
-        public ulong BriefDescription { get; set; }
-        public float HealthBarRadius { get; set; }
-        public ulong OnResurrectedPower { get; set; }
-        public bool WakeStartsVisible { get; set; }
-        public VOStoryNotificationPrototype[] VOStoryNotifications { get; set; }
-        public bool HitReactOnClient { get; set; }
-        public ulong CCReactCondition { get; set; }
-        public int InCombatTimerMS { get; set; }
-        public DramaticEntranceType PlayDramaticEntrance { get; set; }
-        public ulong StealablePower { get; set; }
-        public ulong BossRewardIconPath { get; set; }
-        public bool SpawnLootForMissionContributors { get; set; }
-        public int InteractRangeThrow { get; set; }
-        public bool DamageMeterEnabled { get; set; }
-        public ulong MobHealthBaseCurveDCL { get; set; }
+        public Allegiance Allegiance { get; protected set; }
+        public LocomotorPrototype Locomotion { get; protected set; }
+        public ulong HitReactCondition { get; protected set; }
+        public BehaviorProfilePrototype BehaviorProfile { get; protected set; }
+        public PopulationInfoPrototype PopulationInfo { get; protected set; }
+        public int WakeDelayMS { get; protected set; }
+        public int WakeRandomStartMS { get; protected set; }
+        public float WakeRange { get; protected set; }
+        public float ReturnToDormantRange { get; protected set; }
+        public bool TriggersOcclusion { get; protected set; }
+        public int HitReactCooldownMS { get; protected set; }
+        public ulong BriefDescription { get; protected set; }
+        public float HealthBarRadius { get; protected set; }
+        public ulong OnResurrectedPower { get; protected set; }
+        public bool WakeStartsVisible { get; protected set; }
+        public VOStoryNotificationPrototype[] VOStoryNotifications { get; protected set; }
+        public bool HitReactOnClient { get; protected set; }
+        public ulong CCReactCondition { get; protected set; }
+        public int InCombatTimerMS { get; protected set; }
+        public DramaticEntranceType PlayDramaticEntrance { get; protected set; }
+        public ulong StealablePower { get; protected set; }
+        public ulong BossRewardIconPath { get; protected set; }
+        public bool SpawnLootForMissionContributors { get; protected set; }
+        public int InteractRangeThrow { get; protected set; }
+        public bool DamageMeterEnabled { get; protected set; }
+        public ulong MobHealthBaseCurveDCL { get; protected set; }
     }
 
     public class OrbPrototype : AgentPrototype
     {
-        public bool IgnoreRegionDifficultyForXPCalc { get; set; }
-        public bool XPAwardRestrictedToAvatar { get; set; }
+        public bool IgnoreRegionDifficultyForXPCalc { get; protected set; }
+        public bool XPAwardRestrictedToAvatar { get; protected set; }
     }
 
     public class TeamUpCostumeOverridePrototype : Prototype
     {
-        public ulong AvatarCostumeUnrealClass { get; set; }
-        public ulong TeamUpCostumeUnrealClass { get; set; }
+        public ulong AvatarCostumeUnrealClass { get; protected set; }
+        public ulong TeamUpCostumeUnrealClass { get; protected set; }
     }
 
     public class TeamUpStylePrototype : Prototype
     {
-        public ulong Power { get; set; }
-        public bool PowerIsOnAvatarWhileAway { get; set; }
-        public bool PowerIsOnAvatarWhileSummoned { get; set; }
-        public bool IsPermanent { get; set; }
+        public ulong Power { get; protected set; }
+        public bool PowerIsOnAvatarWhileAway { get; protected set; }
+        public bool PowerIsOnAvatarWhileSummoned { get; protected set; }
+        public bool IsPermanent { get; protected set; }
     }
 
     public class ProgressionEntryPrototype : Prototype
@@ -79,31 +79,31 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
     public class TeamUpPowerProgressionEntryPrototype : ProgressionEntryPrototype
     {
-        public ulong Power { get; set; }
-        public bool IsPassiveOnAvatarWhileAway { get; set; }
-        public bool IsPassiveOnAvatarWhileSummoned { get; set; }
-        public ulong[] Antirequisites { get; set; }
-        public ulong[] Prerequisites { get; set; }
-        public ulong MaxRankForPowerAtCharacterLevel { get; set; }
-        public int RequiredLevel { get; set; }
-        public int StartingRank { get; set; }
-        public float UIPositionPctX { get; set; }
-        public float UIPositionPctY { get; set; }
+        public ulong Power { get; protected set; }
+        public bool IsPassiveOnAvatarWhileAway { get; protected set; }
+        public bool IsPassiveOnAvatarWhileSummoned { get; protected set; }
+        public ulong[] Antirequisites { get; protected set; }
+        public ulong[] Prerequisites { get; protected set; }
+        public ulong MaxRankForPowerAtCharacterLevel { get; protected set; }
+        public int RequiredLevel { get; protected set; }
+        public int StartingRank { get; protected set; }
+        public float UIPositionPctX { get; protected set; }
+        public float UIPositionPctY { get; protected set; }
     }
 
     public class AgentTeamUpPrototype : AgentPrototype
     {
-        public AvatarEquipInventoryAssignmentPrototype[] EquipmentInventories { get; set; }
-        public ulong PortraitPath { get; set; }
-        public ulong TooltipDescription { get; set; }
-        public TeamUpCostumeOverridePrototype[] CostumeUnrealOverrides { get; set; }
-        public ulong UnlockDialogImage { get; set; }
-        public ulong UnlockDialogText { get; set; }
-        public ulong FulfillmentName { get; set; }
-        public bool ShowInRosterIfLocked { get; set; }
-        public TeamUpStylePrototype[] Styles { get; set; }
-        public TeamUpPowerProgressionEntryPrototype[] PowerProgression { get; set; }
-        public int PowerProgressionVersion { get; set; }
-        public ulong PowerUIDefault { get; set; }
+        public AvatarEquipInventoryAssignmentPrototype[] EquipmentInventories { get; protected set; }
+        public ulong PortraitPath { get; protected set; }
+        public ulong TooltipDescription { get; protected set; }
+        public TeamUpCostumeOverridePrototype[] CostumeUnrealOverrides { get; protected set; }
+        public ulong UnlockDialogImage { get; protected set; }
+        public ulong UnlockDialogText { get; protected set; }
+        public ulong FulfillmentName { get; protected set; }
+        public bool ShowInRosterIfLocked { get; protected set; }
+        public TeamUpStylePrototype[] Styles { get; protected set; }
+        public TeamUpPowerProgressionEntryPrototype[] PowerProgression { get; protected set; }
+        public int PowerProgressionVersion { get; protected set; }
+        public ulong PowerUIDefault { get; protected set; }
     }
 }

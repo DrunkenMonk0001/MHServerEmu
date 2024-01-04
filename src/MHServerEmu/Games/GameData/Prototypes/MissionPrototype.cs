@@ -73,265 +73,265 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
     public class MissionGlobalsPrototype : Prototype
     {
-        public int MissionLevelLowerBoundsOffset { get; set; }
-        public int MissionLevelUpperBoundsOffset { get; set; }
-        public ulong OpenMissionContributionReward { get; set; }
-        public ulong InitialChapter { get; set; }
-        public BannerMessagePrototype InventoryFullMessage { get; set; }
-        public ulong InitialStoryWarp { get; set; }
-        public ulong MigrationStoryEndMission { get; set; }
-        public int LegendaryMissionLevelUnlock { get; set; }
-        public ulong LegendaryChapter { get; set; }
-        public ulong LegendaryMissionPlaceholder { get; set; }
-        public EvalPrototype LegendaryRerollCost { get; set; }
-        public ulong LegendaryMissionLogTooltip { get; set; }
-        public ulong LoreChapter { get; set; }
-        public DailyMissionBannerImageType DailyMissionBannerFriday { get; set; }
-        public DailyMissionBannerImageType DailyMissionBannerMonday { get; set; }
-        public DailyMissionBannerImageType DailyMissionBannerSaturday { get; set; }
-        public DailyMissionBannerImageType DailyMissionBannerSunday { get; set; }
-        public DailyMissionBannerImageType DailyMissionBannerThursday { get; set; }
-        public DailyMissionBannerImageType DailyMissionBannerTuesday { get; set; }
-        public DailyMissionBannerImageType DailyMissionBannerWednesday { get; set; }
-        public ulong EventMissionsChapter { get; set; }
-        public ulong AccountMissionsChapter { get; set; }
+        public int MissionLevelLowerBoundsOffset { get; protected set; }
+        public int MissionLevelUpperBoundsOffset { get; protected set; }
+        public ulong OpenMissionContributionReward { get; protected set; }
+        public ulong InitialChapter { get; protected set; }
+        public BannerMessagePrototype InventoryFullMessage { get; protected set; }
+        public ulong InitialStoryWarp { get; protected set; }
+        public ulong MigrationStoryEndMission { get; protected set; }
+        public int LegendaryMissionLevelUnlock { get; protected set; }
+        public ulong LegendaryChapter { get; protected set; }
+        public ulong LegendaryMissionPlaceholder { get; protected set; }
+        public EvalPrototype LegendaryRerollCost { get; protected set; }
+        public ulong LegendaryMissionLogTooltip { get; protected set; }
+        public ulong LoreChapter { get; protected set; }
+        public DailyMissionBannerImageType DailyMissionBannerFriday { get; protected set; }
+        public DailyMissionBannerImageType DailyMissionBannerMonday { get; protected set; }
+        public DailyMissionBannerImageType DailyMissionBannerSaturday { get; protected set; }
+        public DailyMissionBannerImageType DailyMissionBannerSunday { get; protected set; }
+        public DailyMissionBannerImageType DailyMissionBannerThursday { get; protected set; }
+        public DailyMissionBannerImageType DailyMissionBannerTuesday { get; protected set; }
+        public DailyMissionBannerImageType DailyMissionBannerWednesday { get; protected set; }
+        public ulong EventMissionsChapter { get; protected set; }
+        public ulong AccountMissionsChapter { get; protected set; }
     }
 
     public class MissionTypePrototype : Prototype
     {
-        public ulong Name { get; set; }
-        public int Priority { get; set; }
-        public ulong EdgeIcon { get; set; }
-        public ulong MapIcon { get; set; }
+        public ulong Name { get; protected set; }
+        public int Priority { get; protected set; }
+        public ulong EdgeIcon { get; protected set; }
+        public ulong MapIcon { get; protected set; }
     }
 
     public class MissionItemDropEntryPrototype : Prototype
     {
-        public EntityFilterPrototype EntityFilter { get; set; }
-        public ulong LootTablePrototype { get; set; }
+        public EntityFilterPrototype EntityFilter { get; protected set; }
+        public ulong LootTablePrototype { get; protected set; }
     }
 
     public class MissionPopulationEntryPrototype : Prototype
     {
-        public long Count { get; set; }
-        public PopulationObjectPrototype Population { get; set; }
-        public ulong[] RestrictToAreas { get; set; }
-        public RegionPrototype RestrictToRegions { get; set; }
-        public RegionPrototype RestrictToRegionsExclude { get; set; }
-        public bool RestrictToRegionsIncludeChildren { get; set; }
-        public ulong[] RestrictToCells { get; set; }
-        public ulong RestrictToDifficultyMin { get; set; }
-        public ulong RestrictToDifficultyMax { get; set; }
+        public long Count { get; protected set; }
+        public PopulationObjectPrototype Population { get; protected set; }
+        public ulong[] RestrictToAreas { get; protected set; }
+        public RegionPrototype RestrictToRegions { get; protected set; }
+        public RegionPrototype RestrictToRegionsExclude { get; protected set; }
+        public bool RestrictToRegionsIncludeChildren { get; protected set; }
+        public ulong[] RestrictToCells { get; protected set; }
+        public ulong RestrictToDifficultyMin { get; protected set; }
+        public ulong RestrictToDifficultyMax { get; protected set; }
     }
 
     public class MissionDialogTextPrototype : Prototype
     {
-        public ulong Text { get; set; }
-        public EntityFilterPrototype EntityFilter { get; set; }
-        public DialogStyle DialogStyle { get; set; }
+        public ulong Text { get; protected set; }
+        public EntityFilterPrototype EntityFilter { get; protected set; }
+        public DialogStyle DialogStyle { get; protected set; }
     }
 
     public class MissionObjectiveHintPrototype : Prototype
     {
-        public EntityFilterPrototype PlayerStateFilter { get; set; }
-        public EntityFilterPrototype TargetEntity { get; set; }
-        public ulong TargetArea { get; set; }
-        public ulong TargetRegion { get; set; }
+        public EntityFilterPrototype PlayerStateFilter { get; protected set; }
+        public EntityFilterPrototype TargetEntity { get; protected set; }
+        public ulong TargetArea { get; protected set; }
+        public ulong TargetRegion { get; protected set; }
     }
 
     public class MissionObjectivePrototype : Prototype
     {
-        public MissionDialogTextPrototype[] DialogText { get; set; }
-        public MissionConditionListPrototype FailureConditions { get; set; }
-        public MissionItemDropEntryPrototype[] ItemDrops { get; set; }
-        public bool ItemDropsCleanupRemaining { get; set; }
-        public ulong Name { get; set; }
-        public MissionActionPrototype[] OnFailActions { get; set; }
-        public MissionActionPrototype[] OnStartActions { get; set; }
-        public MissionActionPrototype[] OnSuccessActions { get; set; }
-        public MissionConditionListPrototype ActivateConditions { get; set; }
-        public MissionConditionListPrototype SuccessConditions { get; set; }
-        public MissionTimeExpiredResult TimeExpiredResult { get; set; }
-        public long TimeLimitSeconds { get; set; }
-        public InteractionSpecPrototype[] InteractionsWhenActive { get; set; }
-        public InteractionSpecPrototype[] InteractionsWhenComplete { get; set; }
-        public ulong TextWhenCompleted { get; set; }
-        public ulong TextWhenUpdated { get; set; }
-        public bool ShowInMissionLog { get; set; }
-        public bool Required { get; set; }
-        public bool ShowNotificationIcon { get; set; }
-        public bool Checkpoint { get; set; }
-        public bool ShowInMissionTracker { get; set; }
-        public ulong MissionLogAppendWhenActive { get; set; }
-        public bool PlayerHUDShowObjsOnMap { get; set; }
-        public bool PlayerHUDShowObjsOnMapNoPing { get; set; }
-        public bool PlayerHUDShowObjsOnScreenEdge { get; set; }
-        public bool PlayerHUDShowObjsOnEntityFloor { get; set; }
-        public int PlayerHUDObjectiveArrowDistOvrde { get; set; }
-        public MissionObjectiveHintPrototype[] ObjectiveHints { get; set; }
-        public bool ShowCountInUI { get; set; }
-        public bool ShowTimerInUI { get; set; }
-        public float Order { get; set; }
-        public ulong MetaGameWidget { get; set; }
-        public ulong MetaGameWidgetFail { get; set; }
-        public bool FailureFailsMission { get; set; }
-        public bool ShowFailCountInUI { get; set; }
-        public ulong TextWhenFailed { get; set; }
-        public ulong TextWhenFailUpdated { get; set; }
-        public EvalPrototype TimeLimitSecondsEval { get; set; }
-        public LootTablePrototype[] Rewards { get; set; }
-        public int CounterType { get; set; }
-        public ulong MetaGameDetails { get; set; }
-        public int MetaGameDetailsDelayMS { get; set; }
-        public ulong MetaGameDetailsNPCIconPath { get; set; }
-        public ulong LogoffEntryDisplayIfNotComplete { get; set; }
-        public ulong MissionLogObjectiveHint { get; set; }
-        public ulong MusicState { get; set; }
-        public MissionDialogTextPrototype[] DialogTextWhenCompleted { get; set; }
-        public MissionDialogTextPrototype[] DialogTextWhenFailed { get; set; }
-        public InteractionSpecPrototype[] InteractionsWhenFailed { get; set; }
-        public bool PlayerHUDShowObjsOnEntityAbove { get; set; }
-        public MissionActionPrototype[] OnAvailableActions { get; set; }
+        public MissionDialogTextPrototype[] DialogText { get; protected set; }
+        public MissionConditionListPrototype FailureConditions { get; protected set; }
+        public MissionItemDropEntryPrototype[] ItemDrops { get; protected set; }
+        public bool ItemDropsCleanupRemaining { get; protected set; }
+        public ulong Name { get; protected set; }
+        public MissionActionPrototype[] OnFailActions { get; protected set; }
+        public MissionActionPrototype[] OnStartActions { get; protected set; }
+        public MissionActionPrototype[] OnSuccessActions { get; protected set; }
+        public MissionConditionListPrototype ActivateConditions { get; protected set; }
+        public MissionConditionListPrototype SuccessConditions { get; protected set; }
+        public MissionTimeExpiredResult TimeExpiredResult { get; protected set; }
+        public long TimeLimitSeconds { get; protected set; }
+        public InteractionSpecPrototype[] InteractionsWhenActive { get; protected set; }
+        public InteractionSpecPrototype[] InteractionsWhenComplete { get; protected set; }
+        public ulong TextWhenCompleted { get; protected set; }
+        public ulong TextWhenUpdated { get; protected set; }
+        public bool ShowInMissionLog { get; protected set; }
+        public bool Required { get; protected set; }
+        public bool ShowNotificationIcon { get; protected set; }
+        public bool Checkpoint { get; protected set; }
+        public bool ShowInMissionTracker { get; protected set; }
+        public ulong MissionLogAppendWhenActive { get; protected set; }
+        public bool PlayerHUDShowObjsOnMap { get; protected set; }
+        public bool PlayerHUDShowObjsOnMapNoPing { get; protected set; }
+        public bool PlayerHUDShowObjsOnScreenEdge { get; protected set; }
+        public bool PlayerHUDShowObjsOnEntityFloor { get; protected set; }
+        public int PlayerHUDObjectiveArrowDistOvrde { get; protected set; }
+        public MissionObjectiveHintPrototype[] ObjectiveHints { get; protected set; }
+        public bool ShowCountInUI { get; protected set; }
+        public bool ShowTimerInUI { get; protected set; }
+        public float Order { get; protected set; }
+        public ulong MetaGameWidget { get; protected set; }
+        public ulong MetaGameWidgetFail { get; protected set; }
+        public bool FailureFailsMission { get; protected set; }
+        public bool ShowFailCountInUI { get; protected set; }
+        public ulong TextWhenFailed { get; protected set; }
+        public ulong TextWhenFailUpdated { get; protected set; }
+        public EvalPrototype TimeLimitSecondsEval { get; protected set; }
+        public LootTablePrototype[] Rewards { get; protected set; }
+        public int CounterType { get; protected set; }
+        public ulong MetaGameDetails { get; protected set; }
+        public int MetaGameDetailsDelayMS { get; protected set; }
+        public ulong MetaGameDetailsNPCIconPath { get; protected set; }
+        public ulong LogoffEntryDisplayIfNotComplete { get; protected set; }
+        public ulong MissionLogObjectiveHint { get; protected set; }
+        public ulong MusicState { get; protected set; }
+        public MissionDialogTextPrototype[] DialogTextWhenCompleted { get; protected set; }
+        public MissionDialogTextPrototype[] DialogTextWhenFailed { get; protected set; }
+        public InteractionSpecPrototype[] InteractionsWhenFailed { get; protected set; }
+        public bool PlayerHUDShowObjsOnEntityAbove { get; protected set; }
+        public MissionActionPrototype[] OnAvailableActions { get; protected set; }
     }
 
     public class MissionNamedObjectivePrototype : MissionObjectivePrototype
     {
-        public long ObjectiveID { get; set; }
-        public bool SendMetricEvents { get; set; }
+        public long ObjectiveID { get; protected set; }
+        public bool SendMetricEvents { get; protected set; }
     }
 
     public class OpenMissionRewardEntryPrototype : Prototype
     {
-        public ulong ChestEntity { get; set; }
-        public double ContributionPercentage { get; set; }
-        public ulong[] Rewards { get; set; }
+        public ulong ChestEntity { get; protected set; }
+        public double ContributionPercentage { get; protected set; }
+        public ulong[] Rewards { get; protected set; }
     }
 
     public class MissionPrototype : Prototype
     {
-        public MissionConditionListPrototype ActivateConditions { get; set; }
-        public ulong Chapter { get; set; }
-        public MissionDialogTextPrototype[] DialogText { get; set; }
-        public MissionConditionListPrototype FailureConditions { get; set; }
-        public long Level { get; set; }
-        public ulong MissionLogDescription { get; set; }
-        public ulong Name { get; set; }
-        public MissionObjectivePrototype[] Objectives { get; set; }
-        public MissionActionPrototype[] OnFailActions { get; set; }
-        public MissionActionPrototype[] OnStartActions { get; set; }
-        public MissionActionPrototype[] OnSuccessActions { get; set; }
-        public MissionPopulationEntryPrototype[] PopulationSpawns { get; set; }
-        public MissionConditionListPrototype PrereqConditions { get; set; }
-        public bool Repeatable { get; set; }
-        public LootTablePrototype[] Rewards { get; set; }
-        public MissionTimeExpiredResult TimeExpiredResult { get; set; }
-        public long TimeLimitSeconds { get; set; }
-        public InteractionSpecPrototype[] InteractionsWhenActive { get; set; }
-        public InteractionSpecPrototype[] InteractionsWhenComplete { get; set; }
-        public ulong TextWhenActivated { get; set; }
-        public ulong TextWhenCompleted { get; set; }
-        public ulong TextWhenFailed { get; set; }
-        public bool ShowInteractIndicators { get; set; }
-        public bool ShowBannerMessages { get; set; }
-        public bool ShowInMissionLogDEPRECATED { get; set; }
-        public bool ShowNotificationIcon { get; set; }
-        public int SortOrder { get; set; }
-        public MissionConditionListPrototype ActivateNowConditions { get; set; }
-        public MissionShowInTracker ShowInMissionTracker { get; set; }
-        public ulong ResetsWithRegion { get; set; }
-        public ulong MissionLogDescriptionComplete { get; set; }
-        public bool PlayerHUDShowObjs { get; set; }
-        public bool PlayerHUDShowObjsOnMap { get; set; }
-        public bool PlayerHUDShowObjsOnMapNoPing { get; set; }
-        public bool PlayerHUDShowObjsOnScreenEdge { get; set; }
-        public bool PlayerHUDShowObjsOnEntityFloor { get; set; }
-        public bool PlayerHUDShowObjsNoActivateCond { get; set; }
-        public DesignWorkflowState DesignState { get; set; }
-        public long ResetTimeSeconds { get; set; }
-        public bool ShowInMissionTrackerFilterByChap { get; set; }
-        public bool ShowMapPingOnPortals { get; set; }
-        public bool PopulationRequired { get; set; }
-        public bool SaveStatePerAvatar { get; set; }
-        public MissionTrackerFilterType ShowInMissionTrackerFilterType { get; set; }
-        public int Version { get; set; }
-        public bool DEPRewardLevelBasedOnAvatarLevel { get; set; }
-        public ulong MissionLogHint { get; set; }
-        public ulong LootCooldownChannel { get; set; }
-        public ulong MetaGameDetails { get; set; }
-        public int MetaGameDetailsDelayMS { get; set; }
-        public bool ShowTimerInUI { get; set; }
-        public ulong MetaGameDetailsNPCIconPath { get; set; }
-        public bool DropLootOnGround { get; set; }
-        public ulong[] Keywords { get; set; }
-        public ulong[] RegionRestrictionKeywords { get; set; }
-        public bool ForceTrackerPageOnStart { get; set; }
-        public ulong MusicState { get; set; }
-        public MissionDialogTextPrototype[] DialogTextWhenCompleted { get; set; }
-        public MissionDialogTextPrototype[] DialogTextWhenFailed { get; set; }
-        public InteractionSpecPrototype[] InteractionsWhenFailed { get; set; }
-        public bool PlayerHUDShowObjsOnEntityAbove { get; set; }
-        public ulong MissionType { get; set; }
-        public MissionShowInLog ShowInMissionLog { get; set; }
-        public bool SuspendIfNoMatchingKeyword { get; set; }
-        public MissionActionPrototype[] OnAvailableActions { get; set; }
-        public MissionConditionListPrototype CompleteNowConditions { get; set; }
-        public LootTablePrototype[] CompleteNowRewards { get; set; }
-        public DesignWorkflowState DesignStatePS4 { get; set; }
-        public DesignWorkflowState DesignStateXboxOne { get; set; }
+        public MissionConditionListPrototype ActivateConditions { get; protected set; }
+        public ulong Chapter { get; protected set; }
+        public MissionDialogTextPrototype[] DialogText { get; protected set; }
+        public MissionConditionListPrototype FailureConditions { get; protected set; }
+        public long Level { get; protected set; }
+        public ulong MissionLogDescription { get; protected set; }
+        public ulong Name { get; protected set; }
+        public MissionObjectivePrototype[] Objectives { get; protected set; }
+        public MissionActionPrototype[] OnFailActions { get; protected set; }
+        public MissionActionPrototype[] OnStartActions { get; protected set; }
+        public MissionActionPrototype[] OnSuccessActions { get; protected set; }
+        public MissionPopulationEntryPrototype[] PopulationSpawns { get; protected set; }
+        public MissionConditionListPrototype PrereqConditions { get; protected set; }
+        public bool Repeatable { get; protected set; }
+        public LootTablePrototype[] Rewards { get; protected set; }
+        public MissionTimeExpiredResult TimeExpiredResult { get; protected set; }
+        public long TimeLimitSeconds { get; protected set; }
+        public InteractionSpecPrototype[] InteractionsWhenActive { get; protected set; }
+        public InteractionSpecPrototype[] InteractionsWhenComplete { get; protected set; }
+        public ulong TextWhenActivated { get; protected set; }
+        public ulong TextWhenCompleted { get; protected set; }
+        public ulong TextWhenFailed { get; protected set; }
+        public bool ShowInteractIndicators { get; protected set; }
+        public bool ShowBannerMessages { get; protected set; }
+        public bool ShowInMissionLogDEPRECATED { get; protected set; }
+        public bool ShowNotificationIcon { get; protected set; }
+        public int SortOrder { get; protected set; }
+        public MissionConditionListPrototype ActivateNowConditions { get; protected set; }
+        public MissionShowInTracker ShowInMissionTracker { get; protected set; }
+        public ulong ResetsWithRegion { get; protected set; }
+        public ulong MissionLogDescriptionComplete { get; protected set; }
+        public bool PlayerHUDShowObjs { get; protected set; }
+        public bool PlayerHUDShowObjsOnMap { get; protected set; }
+        public bool PlayerHUDShowObjsOnMapNoPing { get; protected set; }
+        public bool PlayerHUDShowObjsOnScreenEdge { get; protected set; }
+        public bool PlayerHUDShowObjsOnEntityFloor { get; protected set; }
+        public bool PlayerHUDShowObjsNoActivateCond { get; protected set; }
+        public DesignWorkflowState DesignState { get; protected set; }
+        public long ResetTimeSeconds { get; protected set; }
+        public bool ShowInMissionTrackerFilterByChap { get; protected set; }
+        public bool ShowMapPingOnPortals { get; protected set; }
+        public bool PopulationRequired { get; protected set; }
+        public bool SaveStatePerAvatar { get; protected set; }
+        public MissionTrackerFilterType ShowInMissionTrackerFilterType { get; protected set; }
+        public int Version { get; protected set; }
+        public bool DEPRewardLevelBasedOnAvatarLevel { get; protected set; }
+        public ulong MissionLogHint { get; protected set; }
+        public ulong LootCooldownChannel { get; protected set; }
+        public ulong MetaGameDetails { get; protected set; }
+        public int MetaGameDetailsDelayMS { get; protected set; }
+        public bool ShowTimerInUI { get; protected set; }
+        public ulong MetaGameDetailsNPCIconPath { get; protected set; }
+        public bool DropLootOnGround { get; protected set; }
+        public ulong[] Keywords { get; protected set; }
+        public ulong[] RegionRestrictionKeywords { get; protected set; }
+        public bool ForceTrackerPageOnStart { get; protected set; }
+        public ulong MusicState { get; protected set; }
+        public MissionDialogTextPrototype[] DialogTextWhenCompleted { get; protected set; }
+        public MissionDialogTextPrototype[] DialogTextWhenFailed { get; protected set; }
+        public InteractionSpecPrototype[] InteractionsWhenFailed { get; protected set; }
+        public bool PlayerHUDShowObjsOnEntityAbove { get; protected set; }
+        public ulong MissionType { get; protected set; }
+        public MissionShowInLog ShowInMissionLog { get; protected set; }
+        public bool SuspendIfNoMatchingKeyword { get; protected set; }
+        public MissionActionPrototype[] OnAvailableActions { get; protected set; }
+        public MissionConditionListPrototype CompleteNowConditions { get; protected set; }
+        public LootTablePrototype[] CompleteNowRewards { get; protected set; }
+        public DesignWorkflowState DesignStatePS4 { get; protected set; }
+        public DesignWorkflowState DesignStateXboxOne { get; protected set; }
     }
 
     public class OpenMissionPrototype : MissionPrototype
     {
-        public bool ParticipationBasedOnAreaCell { get; set; }
-        public OpenMissionRewardEntryPrototype[] RewardsByContribution { get; set; }
-        public StoryNotificationPrototype StoryNotification { get; set; }
-        public RegionPrototype ActiveInRegions { get; set; }
-        public bool ActiveInRegionsIncludeChildren { get; set; }
-        public RegionPrototype ActiveInRegionsExclude { get; set; }
-        public ulong[] ActiveInAreas { get; set; }
-        public ulong[] ActiveInCells { get; set; }
-        public bool ResetWhenUnsimulated { get; set; }
-        public double MinimumContributionForCredit { get; set; }
-        public bool RespawnInPlace { get; set; }
-        public double ParticipantTimeoutInSeconds { get; set; }
-        public bool RespawnOnRestart { get; set; }
-        public int IdleTimeoutSeconds { get; set; }
-        public double ParticipationContributionValue { get; set; }
-        public long AchievementTimeLimitSeconds { get; set; }
-        public bool ShowToastMessages { get; set; }
+        public bool ParticipationBasedOnAreaCell { get; protected set; }
+        public OpenMissionRewardEntryPrototype[] RewardsByContribution { get; protected set; }
+        public StoryNotificationPrototype StoryNotification { get; protected set; }
+        public RegionPrototype ActiveInRegions { get; protected set; }
+        public bool ActiveInRegionsIncludeChildren { get; protected set; }
+        public RegionPrototype ActiveInRegionsExclude { get; protected set; }
+        public ulong[] ActiveInAreas { get; protected set; }
+        public ulong[] ActiveInCells { get; protected set; }
+        public bool ResetWhenUnsimulated { get; protected set; }
+        public double MinimumContributionForCredit { get; protected set; }
+        public bool RespawnInPlace { get; protected set; }
+        public double ParticipantTimeoutInSeconds { get; protected set; }
+        public bool RespawnOnRestart { get; protected set; }
+        public int IdleTimeoutSeconds { get; protected set; }
+        public double ParticipationContributionValue { get; protected set; }
+        public long AchievementTimeLimitSeconds { get; protected set; }
+        public bool ShowToastMessages { get; protected set; }
     }
 
     public class LegendaryMissionCategoryPrototype : Prototype
     {
-        public ulong Name { get; set; }
-        public int Weight { get; set; }
-        public int BlacklistLength { get; set; }
+        public ulong Name { get; protected set; }
+        public int Weight { get; protected set; }
+        public int BlacklistLength { get; protected set; }
     }
 
     public class LegendaryMissionPrototype : MissionPrototype
     {
-        public EvalPrototype EvalCanStart { get; set; }
-        public ulong Category { get; set; }
+        public EvalPrototype EvalCanStart { get; protected set; }
+        public ulong Category { get; protected set; }
     }
 
     public class DailyMissionPrototype : MissionPrototype
     {
-        public Weekday Day { get; set; }
-        public DailyMissionType Type { get; set; }
-        public ulong Image { get; set; }
-        public DailyMissionResetFrequency ResetFrequency { get; set; }
+        public Weekday Day { get; protected set; }
+        public DailyMissionType Type { get; protected set; }
+        public ulong Image { get; protected set; }
+        public DailyMissionResetFrequency ResetFrequency { get; protected set; }
     }
 
     public class AdvancedMissionCategoryPrototype : LegendaryMissionCategoryPrototype
     {
-        public Weekday WeeklyResetDay { get; set; }
-        public AdvancedMissionFrequencyType MissionType { get; set; }
-        public ulong CategoryLabel { get; set; }
+        public Weekday WeeklyResetDay { get; protected set; }
+        public AdvancedMissionFrequencyType MissionType { get; protected set; }
+        public ulong CategoryLabel { get; protected set; }
     }
 
     public class AdvancedMissionPrototype : MissionPrototype
     {
-        public ulong CategoryType { get; set; }
-        public ulong ReputationExperienceType { get; set; }
+        public ulong CategoryType { get; protected set; }
+        public ulong ReputationExperienceType { get; protected set; }
     }
 }

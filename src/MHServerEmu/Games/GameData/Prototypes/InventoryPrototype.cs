@@ -35,69 +35,69 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
     public class InventoryPrototype : Prototype
     {
-        public short Capacity { get; set; }
-        public ulong EntityTypeFilter { get; set; }
-        public bool ExitWorldOnAdd { get; set; }
-        public bool ExitWorldOnRemove { get; set; }
-        public bool PersistedToDatabase { get; set; }
-        public bool OnPersonLocation { get; set; }
-        public bool NotifyUI { get; set; }
-        public short CollectionSortOrder { get; set; }
-        public bool VisibleToOwner { get; set; }
-        public bool VisibleToTrader { get; set; }
-        public bool VisibleToParty { get; set; }
-        public bool VisibleToProximity { get; set; }
-        public bool AvatarTeam { get; set; }
-        public ConvenienceLabel ConvenienceLabel { get; set; }
-        public bool PlaySoundOnAdd { get; set; }
-        public bool CapacityUnlimited { get; set; }
-        public bool VendorInvContentsCanBeBought { get; set; }
-        public bool ContentsRecoverFromError { get; set; }
-        public int DestroyContainedAfterSecs { get; set; }
-        public InventoryEvent DestroyContainedOnEvent { get; set; }
-        public InventoryCategory Category { get; set; }
-        public OfferingInventoryUIDataPrototype OfferingInventoryUIData { get; set; }
-        public bool LockedByDefault { get; set; }
-        public bool ReplicateForTransfer { get; set; }
-        public ulong ItemSortPreferences { get; set; }
-        public InventoryUIDataPrototype UIData { get; set; }
-        public InventoryExtraSlotsGroupPrototype SoftCapacitySlotGroupsPC { get; set; }
-        public int SoftCapacityDefaultSlotsPC { get; set; }
-        public InventoryExtraSlotsGroupPrototype SoftCapacitySlotGroupsConsole { get; set; }
-        public int SoftCapacityDefaultSlotsConsole { get; set; }
-        public ulong DisplayName { get; set; }
+        public short Capacity { get; protected set; }
+        public ulong EntityTypeFilter { get; protected set; }
+        public bool ExitWorldOnAdd { get; protected set; }
+        public bool ExitWorldOnRemove { get; protected set; }
+        public bool PersistedToDatabase { get; protected set; }
+        public bool OnPersonLocation { get; protected set; }
+        public bool NotifyUI { get; protected set; }
+        public short CollectionSortOrder { get; protected set; }
+        public bool VisibleToOwner { get; protected set; }
+        public bool VisibleToTrader { get; protected set; }
+        public bool VisibleToParty { get; protected set; }
+        public bool VisibleToProximity { get; protected set; }
+        public bool AvatarTeam { get; protected set; }
+        public ConvenienceLabel ConvenienceLabel { get; protected set; }
+        public bool PlaySoundOnAdd { get; protected set; }
+        public bool CapacityUnlimited { get; protected set; }
+        public bool VendorInvContentsCanBeBought { get; protected set; }
+        public bool ContentsRecoverFromError { get; protected set; }
+        public int DestroyContainedAfterSecs { get; protected set; }
+        public InventoryEvent DestroyContainedOnEvent { get; protected set; }
+        public InventoryCategory Category { get; protected set; }
+        public OfferingInventoryUIDataPrototype OfferingInventoryUIData { get; protected set; }
+        public bool LockedByDefault { get; protected set; }
+        public bool ReplicateForTransfer { get; protected set; }
+        public ulong ItemSortPreferences { get; protected set; }
+        public InventoryUIDataPrototype UIData { get; protected set; }
+        public InventoryExtraSlotsGroupPrototype SoftCapacitySlotGroupsPC { get; protected set; }
+        public int SoftCapacityDefaultSlotsPC { get; protected set; }
+        public InventoryExtraSlotsGroupPrototype SoftCapacitySlotGroupsConsole { get; protected set; }
+        public int SoftCapacityDefaultSlotsConsole { get; protected set; }
+        public ulong DisplayName { get; protected set; }
     }
 
     public class InventoryExtraSlotsGroupPrototype : Prototype
     {
-        public int MaxExtraSlotCount { get; set; }
+        public int MaxExtraSlotCount { get; protected set; }
     }
 
     public class PlayerStashInventoryPrototype : InventoryPrototype
     {
-        public ulong ForAvatar { get; set; }
-        public ulong IconPath { get; set; }
-        public ulong FulfillmentName { get; set; }
-        public ulong[] StashTabCustomIcons { get; set; }
+        public ulong ForAvatar { get; protected set; }
+        public ulong IconPath { get; protected set; }
+        public ulong FulfillmentName { get; protected set; }
+        public ulong[] StashTabCustomIcons { get; protected set; }
     }
 
     public class EntityInventoryAssignmentPrototype : Prototype
     {
-        public ulong Inventory { get; set; }
-        public ulong LootTable { get; set; }
+        public ulong Inventory { get; protected set; }
+        public ulong LootTable { get; protected set; }
     }
 
     public class AvatarEquipInventoryAssignmentPrototype : EntityInventoryAssignmentPrototype
     {
-        public EquipmentInvUISlot UISlot { get; set; }
-        public int UnlocksAtCharacterLevel { get; set; }
-        public ulong UIData { get; set; }
+        public EquipmentInvUISlot UISlot { get; protected set; }
+        public int UnlocksAtCharacterLevel { get; protected set; }
+        public ulong UIData { get; protected set; }
     }
 
     public class InventoryExtraSlotsGrantPrototype : Prototype
     {
-        public ulong DisplayName { get; set; }
-        public int GrantSlotCount { get; set; }
-        public ulong SlotGroup { get; set; }
+        public ulong DisplayName { get; protected set; }
+        public int GrantSlotCount { get; protected set; }
+        public ulong SlotGroup { get; protected set; }
     }
 }

@@ -81,235 +81,235 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
     public class AssignPropPrototype : EvalPrototype
     {
-        public EvalContext Context { get; set; }
-        public ulong Prop { get; set; }
-        public EvalPrototype Eval { get; set; }
+        public EvalContext Context { get; protected set; }
+        public ulong Prop { get; protected set; }
+        public EvalPrototype Eval { get; protected set; }
     }
 
     public class SwapPropPrototype : EvalPrototype
     {
-        public EvalContext LeftContext { get; set; }
-        public ulong Prop { get; set; }
-        public EvalContext RightContext { get; set; }
+        public EvalContext LeftContext { get; protected set; }
+        public ulong Prop { get; protected set; }
+        public EvalContext RightContext { get; protected set; }
     }
 
     public class AssignPropEvalParamsPrototype : EvalPrototype
     {
-        public EvalContext Context { get; set; }
-        public EvalPrototype Param0 { get; set; }
-        public EvalPrototype Param1 { get; set; }
-        public EvalPrototype Param2 { get; set; }
-        public EvalPrototype Param3 { get; set; }
-        public ulong Prop { get; set; }
-        public EvalPrototype Eval { get; set; }
+        public EvalContext Context { get; protected set; }
+        public EvalPrototype Param0 { get; protected set; }
+        public EvalPrototype Param1 { get; protected set; }
+        public EvalPrototype Param2 { get; protected set; }
+        public EvalPrototype Param3 { get; protected set; }
+        public ulong Prop { get; protected set; }
+        public EvalPrototype Eval { get; protected set; }
     }
 
     public class HasPropPrototype : EvalPrototype
     {
-        public EvalContext Context { get; set; }
-        public ulong Prop { get; set; }
+        public EvalContext Context { get; protected set; }
+        public ulong Prop { get; protected set; }
     }
 
     public class LoadPropPrototype : EvalPrototype
     {
-        public EvalContext Context { get; set; }
-        public ulong Prop { get; set; }
+        public EvalContext Context { get; protected set; }
+        public ulong Prop { get; protected set; }
     }
 
     public class LoadPropContextParamsPrototype : EvalPrototype
     {
-        public EvalContext PropertyCollectionContext { get; set; }
-        public ulong Prop { get; set; }
-        public EvalContext PropertyIdContext { get; set; }
+        public EvalContext PropertyCollectionContext { get; protected set; }
+        public ulong Prop { get; protected set; }
+        public EvalContext PropertyIdContext { get; protected set; }
     }
 
     public class LoadPropEvalParamsPrototype : EvalPrototype
     {
-        public EvalContext Context { get; set; }
-        public EvalPrototype Param0 { get; set; }
-        public EvalPrototype Param1 { get; set; }
-        public EvalPrototype Param2 { get; set; }
-        public EvalPrototype Param3 { get; set; }
-        public ulong Prop { get; set; }
+        public EvalContext Context { get; protected set; }
+        public EvalPrototype Param0 { get; protected set; }
+        public EvalPrototype Param1 { get; protected set; }
+        public EvalPrototype Param2 { get; protected set; }
+        public EvalPrototype Param3 { get; protected set; }
+        public ulong Prop { get; protected set; }
     }
 
     public class LoadBoolPrototype : EvalPrototype
     {
-        public bool Value { get; set; }
+        public bool Value { get; protected set; }
     }
 
     public class LoadIntPrototype : EvalPrototype
     {
-        public int Value { get; set; }
+        public int Value { get; protected set; }
     }
 
     public class LoadFloatPrototype : EvalPrototype
     {
-        public float Value { get; set; }
+        public float Value { get; protected set; }
     }
 
     public class LoadCurvePrototype : EvalPrototype
     {
-        public ulong Curve { get; set; }
-        public EvalPrototype Index { get; set; }
+        public ulong Curve { get; protected set; }
+        public EvalPrototype Index { get; protected set; }
     }
 
     public class LoadAssetRefPrototype : EvalPrototype
     {
-        public ulong Value { get; set; }
+        public ulong Value { get; protected set; }
     }
 
     public class LoadProtoRefPrototype : EvalPrototype
     {
-        public ulong Value { get; set; }
+        public ulong Value { get; protected set; }
     }
 
     public class LoadContextIntPrototype : EvalPrototype
     {
-        public EvalContext Context { get; set; }
+        public EvalContext Context { get; protected set; }
     }
 
     public class LoadContextProtoRefPrototype : EvalPrototype
     {
-        public EvalContext Context { get; set; }
+        public EvalContext Context { get; protected set; }
     }
 
     public class AddPrototype : EvalPrototype
     {
-        public EvalPrototype Arg1 { get; set; }
-        public EvalPrototype Arg2 { get; set; }
+        public EvalPrototype Arg1 { get; protected set; }
+        public EvalPrototype Arg2 { get; protected set; }
     }
 
     public class SubPrototype : EvalPrototype
     {
-        public EvalPrototype Arg1 { get; set; }
-        public EvalPrototype Arg2 { get; set; }
+        public EvalPrototype Arg1 { get; protected set; }
+        public EvalPrototype Arg2 { get; protected set; }
     }
 
     public class MultPrototype : EvalPrototype
     {
-        public EvalPrototype Arg1 { get; set; }
-        public EvalPrototype Arg2 { get; set; }
+        public EvalPrototype Arg1 { get; protected set; }
+        public EvalPrototype Arg2 { get; protected set; }
     }
 
     public class DivPrototype : EvalPrototype
     {
-        public EvalPrototype Arg1 { get; set; }
-        public EvalPrototype Arg2 { get; set; }
+        public EvalPrototype Arg1 { get; protected set; }
+        public EvalPrototype Arg2 { get; protected set; }
     }
 
     public class ExponentPrototype : EvalPrototype
     {
-        public EvalPrototype BaseArg { get; set; }
-        public EvalPrototype ExpArg { get; set; }
+        public EvalPrototype BaseArg { get; protected set; }
+        public EvalPrototype ExpArg { get; protected set; }
     }
 
     public class ScopePrototype : EvalPrototype
     {
-        public EvalPrototype[] Scope { get; set; }
+        public EvalPrototype[] Scope { get; protected set; }
     }
 
     public class GreaterThanPrototype : EvalPrototype
     {
-        public EvalPrototype Arg1 { get; set; }
-        public EvalPrototype Arg2 { get; set; }
+        public EvalPrototype Arg1 { get; protected set; }
+        public EvalPrototype Arg2 { get; protected set; }
     }
 
     public class LessThanPrototype : EvalPrototype
     {
-        public EvalPrototype Arg1 { get; set; }
-        public EvalPrototype Arg2 { get; set; }
+        public EvalPrototype Arg1 { get; protected set; }
+        public EvalPrototype Arg2 { get; protected set; }
     }
 
     public class EqualsPrototype : EvalPrototype
     {
-        public EvalPrototype Arg1 { get; set; }
-        public EvalPrototype Arg2 { get; set; }
-        public float Epsilon { get; set; }
+        public EvalPrototype Arg1 { get; protected set; }
+        public EvalPrototype Arg2 { get; protected set; }
+        public float Epsilon { get; protected set; }
     }
 
     public class AndPrototype : EvalPrototype
     {
-        public EvalPrototype Arg1 { get; set; }
-        public EvalPrototype Arg2 { get; set; }
+        public EvalPrototype Arg1 { get; protected set; }
+        public EvalPrototype Arg2 { get; protected set; }
     }
 
     public class OrPrototype : EvalPrototype
     {
-        public EvalPrototype Arg1 { get; set; }
-        public EvalPrototype Arg2 { get; set; }
+        public EvalPrototype Arg1 { get; protected set; }
+        public EvalPrototype Arg2 { get; protected set; }
     }
 
     public class NotPrototype : EvalPrototype
     {
-        public EvalPrototype Arg { get; set; }
+        public EvalPrototype Arg { get; protected set; }
     }
 
     public class IsContextDataNullPrototype : EvalPrototype
     {
-        public EvalContext Context { get; set; }
+        public EvalContext Context { get; protected set; }
     }
 
     public class IfElsePrototype : EvalPrototype
     {
-        public EvalPrototype Conditional { get; set; }
-        public EvalPrototype EvalIf { get; set; }
-        public EvalPrototype EvalElse { get; set; }
+        public EvalPrototype Conditional { get; protected set; }
+        public EvalPrototype EvalIf { get; protected set; }
+        public EvalPrototype EvalElse { get; protected set; }
     }
 
     public class DifficultyTierRangePrototype : EvalPrototype
     {
-        public EvalContext Context { get; set; }
-        public ulong Min { get; set; }
-        public ulong Max { get; set; }
+        public EvalContext Context { get; protected set; }
+        public ulong Min { get; protected set; }
+        public ulong Max { get; protected set; }
     }
 
     public class MissionIsActivePrototype : EvalPrototype
     {
-        public EvalContext Context { get; set; }
-        public ulong Mission { get; set; }
+        public EvalContext Context { get; protected set; }
+        public ulong Mission { get; protected set; }
     }
 
     public class GetCombatLevelPrototype : EvalPrototype
     {
-        public EvalContext Context { get; set; }
+        public EvalContext Context { get; protected set; }
     }
 
     public class GetPowerRankPrototype : EvalPrototype
     {
-        public EvalContext Context { get; set; }
-        public ulong Power { get; set; }
+        public EvalContext Context { get; protected set; }
+        public ulong Power { get; protected set; }
     }
 
     public class CalcPowerRankPrototype : EvalPrototype
     {
-        public EvalContext Context { get; set; }
-        public ulong Power { get; set; }
+        public EvalContext Context { get; protected set; }
+        public ulong Power { get; protected set; }
     }
 
     public class GetDamageReductionPctPrototype : EvalPrototype
     {
-        public EvalContext Context { get; set; }
-        public DamageType VsDamageType { get; set; }
+        public EvalContext Context { get; protected set; }
+        public DamageType VsDamageType { get; protected set; }
     }
 
     public class GetDistanceToEntityPrototype : EvalPrototype
     {
-        public EvalContext SourceEntity { get; set; }
-        public EvalContext TargetEntity { get; set; }
-        public bool EdgeToEdge { get; set; }
+        public EvalContext SourceEntity { get; protected set; }
+        public EvalContext TargetEntity { get; protected set; }
+        public bool EdgeToEdge { get; protected set; }
     }
 
     public class HasEntityInInventoryPrototype : EvalPrototype
     {
-        public EvalContext Context { get; set; }
-        public ulong Entity { get; set; }
-        public ConvenienceLabel Inventory { get; set; }
+        public EvalContext Context { get; protected set; }
+        public ulong Entity { get; protected set; }
+        public ConvenienceLabel Inventory { get; protected set; }
     }
 
     public class IsInPartyPrototype : EvalPrototype
     {
-        public EvalContext Context { get; set; }
+        public EvalContext Context { get; protected set; }
     }
 
     public class IsDynamicCombatLevelEnabledPrototype : EvalPrototype
@@ -318,91 +318,91 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
     public class MissionIsCompletePrototype : EvalPrototype
     {
-        public EvalContext Context { get; set; }
-        public ulong Mission { get; set; }
+        public EvalContext Context { get; protected set; }
+        public ulong Mission { get; protected set; }
     }
 
     public class MaxPrototype : EvalPrototype
     {
-        public EvalPrototype Arg1 { get; set; }
-        public EvalPrototype Arg2 { get; set; }
+        public EvalPrototype Arg1 { get; protected set; }
+        public EvalPrototype Arg2 { get; protected set; }
     }
 
     public class MinPrototype : EvalPrototype
     {
-        public EvalPrototype Arg1 { get; set; }
-        public EvalPrototype Arg2 { get; set; }
+        public EvalPrototype Arg1 { get; protected set; }
+        public EvalPrototype Arg2 { get; protected set; }
     }
 
     public class ModulusPrototype : EvalPrototype
     {
-        public EvalPrototype Arg1 { get; set; }
-        public EvalPrototype Arg2 { get; set; }
+        public EvalPrototype Arg1 { get; protected set; }
+        public EvalPrototype Arg2 { get; protected set; }
     }
 
     public class RandomFloatPrototype : EvalPrototype
     {
-        public float Max { get; set; }
-        public float Min { get; set; }
+        public float Max { get; protected set; }
+        public float Min { get; protected set; }
     }
 
     public class RandomIntPrototype : EvalPrototype
     {
-        public int Max { get; set; }
-        public int Min { get; set; }
+        public int Max { get; protected set; }
+        public int Min { get; protected set; }
     }
 
     public class ForPrototype : EvalPrototype
     {
-        public EvalPrototype LoopAdvance { get; set; }
-        public EvalPrototype LoopCondition { get; set; }
-        public EvalPrototype LoopVarInit { get; set; }
-        public EvalPrototype PostLoop { get; set; }
-        public EvalPrototype PreLoop { get; set; }
-        public EvalPrototype[] ScopeLoopBody { get; set; }
+        public EvalPrototype LoopAdvance { get; protected set; }
+        public EvalPrototype LoopCondition { get; protected set; }
+        public EvalPrototype LoopVarInit { get; protected set; }
+        public EvalPrototype PostLoop { get; protected set; }
+        public EvalPrototype PreLoop { get; protected set; }
+        public EvalPrototype[] ScopeLoopBody { get; protected set; }
     }
 
     public class ForEachConditionInContextPrototype : EvalPrototype
     {
-        public EvalPrototype PostLoop { get; set; }
-        public EvalPrototype PreLoop { get; set; }
-        public EvalPrototype[] ScopeLoopBody { get; set; }
-        public EvalPrototype LoopConditionPreScope { get; set; }
-        public EvalPrototype LoopConditionPostScope { get; set; }
-        public EvalContext ConditionCollectionContext { get; set; }
+        public EvalPrototype PostLoop { get; protected set; }
+        public EvalPrototype PreLoop { get; protected set; }
+        public EvalPrototype[] ScopeLoopBody { get; protected set; }
+        public EvalPrototype LoopConditionPreScope { get; protected set; }
+        public EvalPrototype LoopConditionPostScope { get; protected set; }
+        public EvalContext ConditionCollectionContext { get; protected set; }
     }
 
     public class ForEachProtoRefInContextRefListPrototype : EvalPrototype
     {
-        public EvalPrototype PostLoop { get; set; }
-        public EvalPrototype PreLoop { get; set; }
-        public EvalPrototype[] ScopeLoopBody { get; set; }
-        public EvalPrototype LoopCondition { get; set; }
-        public EvalContext ProtoRefListContext { get; set; }
+        public EvalPrototype PostLoop { get; protected set; }
+        public EvalPrototype PreLoop { get; protected set; }
+        public EvalPrototype[] ScopeLoopBody { get; protected set; }
+        public EvalPrototype LoopCondition { get; protected set; }
+        public EvalContext ProtoRefListContext { get; protected set; }
     }
 
     public class LoadEntityToContextVarPrototype : EvalPrototype
     {
-        public EvalContext Context { get; set; }
-        public EvalPrototype EntityId { get; set; }
+        public EvalContext Context { get; protected set; }
+        public EvalPrototype EntityId { get; protected set; }
     }
 
     public class LoadConditionCollectionToContextPrototype : EvalPrototype
     {
-        public EvalContext Context { get; set; }
-        public EvalPrototype EntityId { get; set; }
+        public EvalContext Context { get; protected set; }
+        public EvalPrototype EntityId { get; protected set; }
     }
 
     public class EntityHasKeywordPrototype : EvalPrototype
     {
-        public EvalContext Context { get; set; }
-        public ulong Keyword { get; set; }
-        public bool ConditionKeywordOnly { get; set; }
+        public EvalContext Context { get; protected set; }
+        public ulong Keyword { get; protected set; }
+        public bool ConditionKeywordOnly { get; protected set; }
     }
 
     public class EntityHasTalentPrototype : EvalPrototype
     {
-        public EvalContext Context { get; set; }
-        public ulong Talent { get; set; }
+        public EvalContext Context { get; protected set; }
+        public ulong Talent { get; protected set; }
     }
 }

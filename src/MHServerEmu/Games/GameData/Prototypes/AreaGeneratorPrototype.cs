@@ -8,7 +8,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
     public class DistrictAreaGeneratorPrototype : GeneratorPrototype
     {
-        public ulong District { get; set; }
+        public ulong District { get; protected set; }
     }
 
     public class AreaGenerationInterfacePrototype : GeneratorPrototype
@@ -17,79 +17,79 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
     public class SingleCellAreaGeneratorPrototype : GeneratorPrototype
     {
-        public ulong Cell { get; set; }
-        public int BorderWidth { get; set; }
-        public CellSetEntryPrototype[] BorderCellSets { get; set; }
+        public ulong Cell { get; protected set; }
+        public int BorderWidth { get; protected set; }
+        public CellSetEntryPrototype[] BorderCellSets { get; protected set; }
     }
 
     public class CellSetEntryPrototype : Prototype
     {
-        public ulong CellSet { get; set; }
-        public int Weight { get; set; }
-        public bool Unique { get; set; }
-        public IgnoreOfTypeEntryPrototype[] IgnoreOfType { get; set; }
+        public ulong CellSet { get; protected set; }
+        public int Weight { get; protected set; }
+        public bool Unique { get; protected set; }
+        public IgnoreOfTypeEntryPrototype[] IgnoreOfType { get; protected set; }
     }
 
     public class IgnoreOfTypeEntryPrototype : Prototype
     {
-        public Cell.WallGroup Ignore { get; set; }
+        public Cell.WallGroup Ignore { get; protected set; }
     }
 
     public class RequiredPOIAreaEntryPrototype : Prototype
     {
-        public ulong Area { get; set; }
-        public int Picks { get; set; }
+        public ulong Area { get; protected set; }
+        public int Picks { get; protected set; }
     }
 
     public class RequiredPOIGroupPrototype : Prototype
     {
-        public RequiredPOIAreaEntryPrototype[] Areas { get; set; }
-        public RequiredCellBasePrototype[] RequiredCells { get; set; }
+        public RequiredPOIAreaEntryPrototype[] Areas { get; protected set; }
+        public RequiredCellBasePrototype[] RequiredCells { get; protected set; }
     }
 
     #region CellGridBehaviorPrototype
 
     public class CellGridBehaviorPrototype : Prototype
     {
-        public ulong BehaviorId { get; set; }
+        public ulong BehaviorId { get; protected set; }
     }
 
     public class BlacklistCellPrototype : Prototype
     {
-        public int X { get; set; }
-        public int Y { get; set; }
+        public int X { get; protected set; }
+        public int Y { get; protected set; }
     }
 
     public class CellGridBlacklistBehaviorPrototype : CellGridBehaviorPrototype
     {
-        public BlacklistCellPrototype[] Blacklist { get; set; }
+        public BlacklistCellPrototype[] Blacklist { get; protected set; }
     }
 
     public class CellGridBorderBehaviorPrototype : CellGridBehaviorPrototype
     {
-        public bool DoBorder { get; set; }
-        public int BorderWidth { get; set; }
+        public bool DoBorder { get; protected set; }
+        public int BorderWidth { get; protected set; }
     }
 
     public class CellGridRampBehaviorPrototype : CellGridBehaviorPrototype
     {
-        public ulong EdgeStart { get; set; }
-        public ulong EdgeEnd { get; set; }
-        public float Increment { get; set; }
+        public ulong EdgeStart { get; protected set; }
+        public ulong EdgeEnd { get; protected set; }
+        public float Increment { get; protected set; }
     }
 
     #endregion
 
     public class SuperCellEntryPrototype : Prototype
     {
-        public sbyte X { get; set; }
-        public sbyte Y { get; set; }
-        public ulong Cell { get; set; }
-        public ulong[] Alts { get; set; }
+        public sbyte X { get; protected set; }
+        public sbyte Y { get; protected set; }
+        public ulong Cell { get; protected set; }
+        public ulong[] Alts { get; protected set; }
     }
 
     public class SuperCellPrototype : Prototype
     {
-        public SuperCellEntryPrototype[] Entries { get; set; }
+        public SuperCellEntryPrototype[] Entries { get; protected set; }
     }
 }
