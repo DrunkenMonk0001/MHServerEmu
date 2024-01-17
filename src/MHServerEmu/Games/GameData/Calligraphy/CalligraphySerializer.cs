@@ -7,7 +7,7 @@ namespace MHServerEmu.Games.GameData.Calligraphy
     /// <summary>
     /// An implementation of <see cref="GameDataSerializer"/> for Calligraphy prototypes.
     /// </summary>
-    public class CalligraphySerializer : GameDataSerializer
+    public partial class CalligraphySerializer : GameDataSerializer
     {
         private static readonly Logger Logger = LogManager.CreateLogger();
 
@@ -163,8 +163,7 @@ namespace MHServerEmu.Games.GameData.Calligraphy
                     else
                     {
                         // Look for a list mixin
-                        // temp hack: use typeof(List<PrototypeMixinListItem>) instead of mixinType
-                        mixinFieldInfo = classManager.GetMixinFieldInfo(classType, typeof(List<PrototypeMixinListItem>), typeof(ListMixinAttribute));
+                        mixinFieldInfo = classManager.GetMixinFieldInfo(classType, mixinType, typeof(ListMixinAttribute));
                         if (mixinFieldInfo != null)
                         {
                             List<PrototypeMixinListItem> list = AcquireOwnedMixinList(prototype, mixinFieldInfo, false);
@@ -176,18 +175,21 @@ namespace MHServerEmu.Games.GameData.Calligraphy
 
                             fieldOwnerPrototype = element;
                             fieldInfo = classManager.GetFieldInfo(mixinType, blueprintMemberInfo, false);
+                            Logger.Debug($"Found field info for list mixin {mixinType.Name}, field name {blueprintMemberInfo.Member.FieldName}");
                         }
                         else
                         {
                             // Nowhere to put this field, something went very wrong, time to reevaluate life choices
-                            Logger.WarnReturn(false, $"Failed to find field info for mixin {mixinType.Name}, field name {blueprintMemberInfo.Member.FieldName}");
+                            return Logger.WarnReturn(false, $"Failed to find field info for mixin {mixinType.Name}, field name {blueprintMemberInfo.Member.FieldName}");
                         }
                     }
                 }
 
                 // Test parsing
                 var parser = GetParser(fieldBaseType, blueprintMemberInfo.Member.StructureType);
-                var value = parser(reader);
+                FieldParserParams @params = new(reader, fieldInfo, fieldOwnerPrototype, fieldOwnerBlueprint, blueprintMemberInfo);
+
+                var value = parser(@params);
             }
 
             return true;
@@ -394,50 +396,6 @@ namespace MHServerEmu.Games.GameData.Calligraphy
             }
 
             return prototype;
-        }
-
-        #endregion
-
-        #region Parsers
-
-        // Rough early experiments implementing field parsers
-
-        private static Func<BinaryReader, object> GetParser(CalligraphyBaseType baseType, CalligraphyStructureType structureType)
-        {
-            // We're currently using Calligraphy types here as a temporary solution
-            // Probably need some kind of lookup dictionary to avoid unnecessary branching here
-            switch (baseType)
-            {
-                case CalligraphyBaseType.Boolean:   return structureType == CalligraphyStructureType.Simple ? ParseBool     : ParseListBool;
-                case CalligraphyBaseType.Double:    return structureType == CalligraphyStructureType.Simple ? ParseDouble   : ParseListDouble;
-                case CalligraphyBaseType.Long:      return structureType == CalligraphyStructureType.Simple ? ParseInt64    : ParseListInt64;
-                case CalligraphyBaseType.RHStruct:  return structureType == CalligraphyStructureType.Simple ? ParseRHStruct : ParseListRHStruct;
-                default:                            return structureType == CalligraphyStructureType.Simple ? ParseUInt64   : ParseListUInt64;
-            }
-        }
-
-        // TODO: FieldParserParams
-        // TODO: parseValue()
-        // TODO: Maybe move this to a helper static class?
-
-        private static object ParseBool(BinaryReader reader) => Convert.ToBoolean(reader.ReadUInt64());
-        private static object ParseInt64(BinaryReader reader) => reader.ReadInt64();
-        private static object ParseUInt64(BinaryReader reader) => reader.ReadUInt64();
-        private static object ParseDouble(BinaryReader reader) => reader.ReadDouble();
-        private static object ParseRHStruct(BinaryReader reader) => new Prototype(reader);
-
-        private static object ParseListBool(BinaryReader reader) => ParseCollection(reader, ParseBool);
-        private static object ParseListInt64(BinaryReader reader) => ParseCollection(reader, ParseInt64);
-        private static object ParseListUInt64(BinaryReader reader) => ParseCollection(reader, ParseUInt64);
-        private static object ParseListDouble(BinaryReader reader) => ParseCollection(reader, ParseDouble);
-        private static object ParseListRHStruct(BinaryReader reader) => ParseCollection(reader, ParseRHStruct);
-
-        private static object ParseCollection(BinaryReader reader, Func<BinaryReader, object> itemParser)
-        {
-            var values = new object[reader.ReadInt16()];
-            for (int i = 0; i < values.Length; i++)
-                values[i] = itemParser(reader);
-            return values;
         }
 
         #endregion
