@@ -4,7 +4,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
 {
     #region Enums
 
-    [AssetEnum]
+    [AssetEnum((int)None)]
     public enum EntitySelectorAttributeActions
     {
         None,
@@ -12,7 +12,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         EnableInteractions,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)None)]
     [Flags]
     public enum EntitySelectorActionEventType
     {
@@ -44,7 +44,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         OnMissionBroadcast = 16777216,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)Invalid)]
     public enum ScriptRoleKeyEnum
     {
         Invalid = 0,
@@ -62,9 +62,10 @@ namespace MHServerEmu.Games.GameData.Prototypes
         HostileCombatant04 = 12,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)None)]
     public enum LocomotorMethod
     {
+        None = 0,
         Ground = 1,
         Airborne = 2,
         TallGround = 3,
@@ -73,15 +74,16 @@ namespace MHServerEmu.Games.GameData.Prototypes
         HighFlying = 6,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)None)]
     public enum DialogStyle
     {
+        None = 0,
         ComputerTerminal = 1,
         NPCDialog = 2,
         OverheadText = 3,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)Transition)]
     public enum RegionTransitionType
     {
         Transition,
@@ -97,9 +99,10 @@ namespace MHServerEmu.Games.GameData.Prototypes
         EndlessDown,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)Invalid)]
     public enum EntityAppearanceEnum    // Entity/Types/AppearanceEnum.type
     {
+        Invalid = -1,
         None = 0,
         Closed = 1,
         Destroyed = 2,
@@ -110,7 +113,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         Dead = 7,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)None)]
     public enum HotspotOverlapEventTriggerType
     {
         None = 0,
@@ -119,7 +122,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         All = 3,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)None)]
     public enum HotspotNegateByAllianceType
     {
         None = 0,
@@ -128,14 +131,14 @@ namespace MHServerEmu.Games.GameData.Prototypes
         All = 3,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)Never)]
     public enum SpawnerDefeatCriteria
     {
         Never = 0,
         MaxReachedAndNoHostileMobs = 1,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)None)]
     public enum FormationFacing // Populations/Blueprints/FacingEnum.type
     {
         None = 0,
@@ -145,7 +148,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         FaceOriginInverse = 3,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)Fail)]
     public enum SpawnFailBehavior
     {
         Fail = 0,
@@ -153,7 +156,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         RetryForce = 2,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)Default)]
     public enum FactionColor
     {
         Default = 0,
@@ -396,7 +399,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
     public class EntityStatePrototype : Prototype
     {
         public ulong Appearance { get; protected set; }
-        public ulong OnActivatePowers { get; protected set; }
+        public ulong[] OnActivatePowers { get; protected set; }
     }
 
     public class DoorEntityStatePrototype : EntityStatePrototype
@@ -442,8 +445,8 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
     public class HotspotPrototype : WorldEntityPrototype
     {
-        public PowerPrototype AppliesPowers { get; protected set; }
-        public PowerPrototype AppliesIntervalPowers { get; protected set; }
+        public ulong[] AppliesPowers { get; protected set; }             // VectorPrototypeRefPtr PowerPrototype
+        public ulong[] AppliesIntervalPowers { get; protected set; }     // VectorPrototypeRefPtr PowerPrototype
         public int IntervalPowersTimeDelayMS { get; protected set; }
         public bool IntervalPowersRandomTarget { get; protected set; }
         public int IntervalPowersNumRandomTargets { get; protected set; }
@@ -517,18 +520,18 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public bool SupressBannerMessage { get; protected set; }
         public bool IsCheckpoint { get; protected set; }
         public ulong WaypointGraph { get; protected set; }
-        public ulong WaypointGraphList { get; protected set; }
+        public ulong[] WaypointGraphList { get; protected set; }
         public ulong RequiresItem { get; protected set; }
         public EvalPrototype EvalShouldDisplay { get; protected set; }
         public ulong Tooltip { get; protected set; }
         public bool IncludeWaypointPrefixInName { get; protected set; }
         public bool StartLocked { get; protected set; }
-        public ulong DestinationBossEntities { get; protected set; }
+        public ulong[] DestinationBossEntities { get; protected set; }
         public bool IsAccountWaypoint { get; protected set; }
         public int MigrationUnlockedByLevel { get; protected set; }
-        public ulong MigrationUnlockedByChapters { get; protected set; }
+        public ulong[] MigrationUnlockedByChapters { get; protected set; }
         public WaypointPOIType MapPOIType { get; protected set; }
-        public ulong MapConnectTo { get; protected set; }
+        public ulong[] MapConnectTo { get; protected set; }
         public ulong MapDescription { get; protected set; }
         public float MapPOIXCoord { get; protected set; }
         public float MapPOIYCoord { get; protected set; }
@@ -541,7 +544,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public ulong ConsoleRegionType { get; protected set; }
         public ulong ConsoleLevelRange { get; protected set; }
         public LocalizedTextAndImagePrototype[] ConsoleRegionItems { get; protected set; }
-        public ulong ConsoleWaypointGraphList { get; protected set; }
+        public ulong[] ConsoleWaypointGraphList { get; protected set; }
     }
 
     public class WaypointChapterPrototype : Prototype

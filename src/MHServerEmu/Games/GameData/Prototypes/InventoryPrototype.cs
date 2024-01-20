@@ -5,7 +5,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
 {
     #region Enums
 
-    [AssetEnum]
+    [AssetEnum((int)None)]
     public enum InventoryCategory   // Entity/Inventory/Category.type
     {
         None = 0,
@@ -24,7 +24,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         PlayerStashTeamUpGear = 9,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)Invalid)]
     public enum InventoryEvent
     {
         Invalid,
@@ -36,7 +36,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
     public class InventoryPrototype : Prototype
     {
         public short Capacity { get; protected set; }
-        public ulong EntityTypeFilter { get; protected set; }
+        public ulong[] EntityTypeFilter { get; protected set; }
         public bool ExitWorldOnAdd { get; protected set; }
         public bool ExitWorldOnRemove { get; protected set; }
         public bool PersistedToDatabase { get; protected set; }
@@ -59,11 +59,11 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public OfferingInventoryUIDataPrototype OfferingInventoryUIData { get; protected set; }
         public bool LockedByDefault { get; protected set; }
         public bool ReplicateForTransfer { get; protected set; }
-        public ulong ItemSortPreferences { get; protected set; }
+        public ulong[] ItemSortPreferences { get; protected set; }
         public InventoryUIDataPrototype UIData { get; protected set; }
-        public InventoryExtraSlotsGroupPrototype SoftCapacitySlotGroupsPC { get; protected set; }
+        public ulong[] SoftCapacitySlotGroupsPC { get; protected set; }       // VectorPrototypeRefPtr InventoryExtraSlotsGroupPrototype
         public int SoftCapacityDefaultSlotsPC { get; protected set; }
-        public InventoryExtraSlotsGroupPrototype SoftCapacitySlotGroupsConsole { get; protected set; }
+        public ulong[] SoftCapacitySlotGroupsConsole { get; protected set; }  // VectorPrototypeRefPtr InventoryExtraSlotsGroupPrototype
         public int SoftCapacityDefaultSlotsConsole { get; protected set; }
         public ulong DisplayName { get; protected set; }
     }

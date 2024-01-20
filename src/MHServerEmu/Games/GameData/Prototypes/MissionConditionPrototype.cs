@@ -19,14 +19,15 @@ namespace MHServerEmu.Games.GameData.Prototypes
         VendorError = 9,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)None)]
     public enum OnInteractAction
     {
+        None = 0,
         Despawn = 1,
         Disable = 2,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)Success)]
     public enum MetaGameCompleteType
     {
         Success = 0,
@@ -34,9 +35,10 @@ namespace MHServerEmu.Games.GameData.Prototypes
         DidNotParticipate = 2,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)Invalid)]
     public enum MissionShowObjsSettings // Missions/Types/ShowObjsSettings.type
     {
+        Invalid = -1,
         FromTargetMission = 0,
         FromThisMission = 1,
         SuppressAllObjs = 2,
@@ -281,10 +283,10 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public long Count { get; protected set; }
         public DistributionType CreditTo { get; protected set; }
         public ulong MissionKeyword { get; protected set; }
-        public RegionPrototype WithinRegions { get; protected set; }
+        public ulong[] WithinRegions { get; protected set; }        // VectorPrototypeRefPtr RegionPrototype
         public bool EvaluateOnRegionEnter { get; protected set; }
         public bool EvaluateOnReset { get; protected set; }
-        public AreaPrototype WithinAreas { get; protected set; }
+        public ulong[] WithinAreas { get; protected set; }          // VectorPrototypeRefPtr AreaPrototype
         public MissionShowObjsSettings ShowObjs { get; protected set; }
     }
 
@@ -294,7 +296,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public long Count { get; protected set; }
         public DistributionType CreditTo { get; protected set; }
         public ulong MissionKeyword { get; protected set; }
-        public RegionPrototype WithinRegions { get; protected set; }
+        public ulong[] WithinRegions { get; protected set; }    // VectorPrototypeRefPtr RegionPrototype
         public bool EvaluateOnRegionEnter { get; protected set; }
         public bool EvaluateOnReset { get; protected set; }
     }
@@ -401,14 +403,14 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public ulong Region { get; protected set; }
         public EntityFilterPrototype TargetFilter { get; protected set; }
         public bool RegionIncludeChildren { get; protected set; }
-        public RegionPrototype RegionsExclude { get; protected set; }
+        public ulong[] RegionsExclude { get; protected set; }   // VectorPrototypeRefPtr RegionPrototype
     }
 
     public class MissionConditionRegionEnterPrototype : MissionPlayerConditionPrototype
     {
         public ulong RegionPrototype { get; protected set; }
         public bool WaitForCinematicFinished { get; protected set; }
-        public RegionKeywordPrototype Keywords { get; protected set; }
+        public ulong[] Keywords { get; protected set; }  // VectorPrototypeRefPtr RegionKeywordPrototype
         public bool RegionIncludeChildren { get; protected set; }
     }
 
@@ -470,8 +472,8 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public bool OnlyCountMissionClusters { get; protected set; }
         public ulong[] SpawnedByMission { get; protected set; }
         public ulong[] SpecificClusters { get; protected set; }
-        public RegionPrototype WithinRegions { get; protected set; }
-        public AreaPrototype WithinAreas { get; protected set; }
+        public ulong[] WithinRegions { get; protected set; }    // VectorPrototypeRefPtr RegionPrototype
+        public ulong[] WithinAreas { get; protected set; }      // VectorPrototypeRefPtr AreaPrototype
         public bool PlayerKillerRequired { get; protected set; }
     }
 }

@@ -4,9 +4,10 @@ namespace MHServerEmu.Games.GameData.Prototypes
 {
     #region Enums
 
-    [AssetEnum]
+    [AssetEnum((int)Invalid)]
     public enum MarkerType  // SpawnMarkers/PopulationType.type? Doesn't match exactly
     {
+        Invalid = 0,
         Enemies = 1,    // Officer / Trash
         Encounter = 2,
         QuestGiver = 3,
@@ -14,7 +15,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         Prop = 5,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)Default)]
     public enum SpawnOrientationTweak
     {
         Default,
@@ -67,7 +68,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
     public class PopulationInfoPrototype : PopulatablePrototype
     {
-        public ulong Ranks { get; protected set; }
+        public ulong[] Ranks { get; protected set; }
         public bool Unique { get; protected set; }
     }
 

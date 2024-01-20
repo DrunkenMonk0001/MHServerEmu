@@ -4,7 +4,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
 {
     #region Enums
 
-    [AssetEnum]
+    [AssetEnum((int)None)]
     public enum MissionTrackerFilterType
     {
         None = -1,
@@ -15,7 +15,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         Challenge = 4,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)Invalid)]
     public enum RegionBehaviorAsset     // Regions/RegionBehavior.type
     {
         Invalid = -1,
@@ -27,7 +27,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         MatchPlay = 4,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)None)]
     public enum RegionMusicBehaviorAsset
     {
         None,
@@ -35,7 +35,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         Mission,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)None)]
     public enum FootstepTraceBehaviorAsset
     {
         None,
@@ -43,7 +43,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         Disable,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)None)]
     public enum RegionQueueMethod
     {
         None = 0,
@@ -51,7 +51,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         DailyQueue = 5,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)Off)]
     public enum ObjectiveGraphModeAsset         // Regions/EnumObjectiveGraphMode.type
     {
         Off,
@@ -59,7 +59,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         PathNavi,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)BiDirectional)]
     public enum RegionTransitionDirectionality  // Regions/RegionConnectionType.type
     {
         BiDirectional = 0,
@@ -78,9 +78,9 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public RegionGeneratorPrototype RegionGenerator { get; protected set; }
         public RegionBehaviorAsset Behavior { get; protected set; }
         public ulong RegionName { get; protected set; }
-        public ulong MetaGames { get; protected set; }
+        public ulong[] MetaGames { get; protected set; }
         public bool ForceSimulation { get; protected set; }
-        public ulong LoadingScreens { get; protected set; }
+        public ulong[] LoadingScreens { get; protected set; }
         public bool AlwaysRevealFullMap { get; protected set; }
         public ulong Chapter { get; protected set; }
         public int PlayerLimit { get; protected set; }
@@ -103,7 +103,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public ulong PlayerCameraSettings { get; protected set; }
         public RegionQueueMethod RegionQueueMethod { get; protected set; }
         public EvalPrototype EvalAccessRestriction { get; protected set; }
-        public ulong WaypointAutoUnlockList { get; protected set; }
+        public ulong[] WaypointAutoUnlockList { get; protected set; }
         public bool AlwaysShutdownWhenVacant { get; protected set; }
         public bool SynergyEditAllowed { get; protected set; }
         public ulong[] Keywords { get; protected set; }
@@ -144,7 +144,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public ulong Tuning { get; protected set; }
         public int BonusItemFindMultiplier { get; protected set; }
         public ulong PlayerCameraSettingsOrbis { get; protected set; }
-        public ulong LoadingScreensConsole { get; protected set; }
+        public ulong[] LoadingScreensConsole { get; protected set; }
         public bool AllowLocalCoopMode { get; protected set; }
     }
 

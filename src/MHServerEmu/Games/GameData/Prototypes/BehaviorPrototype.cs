@@ -4,7 +4,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
 {
     #region Enums
 
-    [AssetEnum]
+    [AssetEnum((int)Force)]
     public enum ResourceType
     {
         Force = 0,
@@ -14,7 +14,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         Secondary_Gauge = 4,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)None)]
     public enum ComparisonOperatorType
     {
         EqualTo = 0,
@@ -26,7 +26,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         None = 6,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)DontRefresh)]
     public enum StackingApplicationStyleType
     {
         DontRefresh = 0,
@@ -37,7 +37,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         MultiStackAddDuration = 5,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)None)]
     public enum TeleportType
     {
         None = 0,
@@ -45,7 +45,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         SpawnPosition = 2,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)None)]
     public enum SelectEntityType
     {
         None = 0,
@@ -55,7 +55,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         SelectTargetByAssistedEntitiesLastTarget = 4,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)None)]
     public enum SelectEntityPoolType
     {
         None = 0,
@@ -65,7 +65,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         PotentialEnemiesOfAgent = 4,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)None)]
     public enum SelectEntityMethodType
     {
         None = 0,
@@ -79,7 +79,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         Self = 9,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)Target)]
     public enum FlankToType
     {
         AssistedEntity = 1,
@@ -87,7 +87,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         Target = 3,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)None)]
     public enum WanderBasePointType
     {
         CurrentPosition = 0,
@@ -96,7 +96,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         None = 3,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)Target)]
     public enum MoveToType
     {
         AssistedEntity = 0,
@@ -107,7 +107,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         Target = 5,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)Default)]
     public enum MovementSpeedOverride
     {
         Default,
@@ -125,7 +125,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
     {
         public ulong DisplayName { get; protected set; }
         public ResourceType MeterType { get; protected set; }
-        public ulong Powers { get; protected set; }
+        public ulong[] Powers { get; protected set; }
         public bool StartsEmpty { get; protected set; }
         public ulong Description { get; protected set; }
         public ulong MeterColor { get; protected set; }
@@ -156,8 +156,8 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
     public class AlliancePrototype : Prototype
     {
-        public ulong HostileTo { get; protected set; }
-        public ulong FriendlyTo { get; protected set; }
+        public ulong[] HostileTo { get; protected set; }
+        public ulong[] FriendlyTo { get; protected set; }
         public ulong WhileConfused { get; protected set; }
         public ulong WhileControlled { get; protected set; }
     }
@@ -438,7 +438,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
     {
         public bool DoPulse { get; protected set; }
         public bool EnableSpawner { get; protected set; }
-        public ulong Spawners { get; protected set; }
+        public ulong[] Spawners { get; protected set; }
         public bool KillSummonedInventory { get; protected set; }
         public bool SearchWholeRegion { get; protected set; }
     }

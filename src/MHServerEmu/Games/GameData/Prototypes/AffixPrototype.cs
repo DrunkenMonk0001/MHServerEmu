@@ -4,7 +4,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
 {
     #region Enums
 
-    [AssetEnum]
+    [AssetEnum((int)Fail)]
     public enum DuplicateHandlingBehavior
     {
         Fail,
@@ -32,7 +32,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         Xenobiology = 6,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)None)]
     public enum InfinityGem
     {
         Soul = 3,
@@ -44,7 +44,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         None = 7,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)Popcorn)]
     public enum Rank
     {
         Popcorn,
@@ -57,7 +57,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         TeamUp,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)None)]
     public enum LootDropEventType
     {
         None = 0,
@@ -72,7 +72,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         OnDamagedForPctHealth = 9,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)Default)]
     public enum HealthBarType
     {
         Default = 0,
@@ -82,7 +82,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         None = 4,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)Default)]
     public enum OverheadInfoDisplayType
     {
         Default = 0,
@@ -98,7 +98,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public ulong Properties { get; protected set; }
         public ulong DisplayNameText { get; protected set; }
         public int Weight { get; protected set; }
-        public ulong TypeFilters { get; protected set; }
+        public ulong[] TypeFilters { get; protected set; }
         public PropertyPickInRangeEntryPrototype[] PropertyEntries { get; protected set; }
         public ulong[] Keywords { get; protected set; }
         public DropRestrictionPrototype[] DropRestrictions { get; protected set; }
@@ -174,7 +174,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public ulong UIIcon { get; protected set; }
         public ulong TooltipDescription { get; protected set; }
         public ulong Properties { get; protected set; }
-        public ulong PassivePowers { get; protected set; }
+        public ulong[] PassivePowers { get; protected set; }
         public ulong Type { get; protected set; }
         public int RanksMax { get; protected set; }
         public ulong RankCostCurve { get; protected set; }
@@ -246,7 +246,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
     public class InfinityGemSetPrototype : ModPrototype
     {
         public ulong UITitle { get; protected set; }
-        public InfinityGemBonusPrototype Bonuses { get; protected set; }
+        public ulong[] Bonuses { get; protected set; }    // VectorPrototypeRefPtr InfinityGemBonusPrototype
         public InfinityGem Gem { get; protected set; }
         public bool Unlocked { get; protected set; }
         public ulong UIColor { get; protected set; }

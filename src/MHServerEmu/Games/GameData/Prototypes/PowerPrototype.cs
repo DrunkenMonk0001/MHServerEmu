@@ -4,7 +4,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
 {
     #region Enums
 
-    [AssetEnum]
+    [AssetEnum((int)MoveIntoRange)]
     public enum WhenOutOfRangeType
     {
         MoveIntoRange = 0,
@@ -14,7 +14,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         ActivateComboMovementPower = 4,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)None)]
     public enum ActivationType
     {
         None = 0,
@@ -24,7 +24,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         TwoStageTargeted = 4,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)None)]
     public enum PowerCategoryType
     {
         None = 0,
@@ -41,7 +41,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         ThrowablePower = 11,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)AllowProcChanceMultiplier)]
     public enum ProcChanceMultiplierBehaviorType
     {
         AllowProcChanceMultiplier = 0,
@@ -49,14 +49,15 @@ namespace MHServerEmu.Games.GameData.Prototypes
         IgnoreProcChanceMultiplierUnlessZero = 2,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)None)]
     public enum TeleportMethodType
     {
+        None = 0,
         Teleport = 1,
         Phase = 2,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)None)]
     public enum PowerEventType
     {
         None = 0,
@@ -92,7 +93,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         OnOutOfRangeActivateMovementPower = 30,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)None)]
     public enum PowerEventActionType
     {
         None = 0,
@@ -134,7 +135,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         LocalCoopEnd = 36,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)Set)]
     public enum BlackboardOperatorType
     {
         Add = 0,
@@ -146,7 +147,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         ClearTargetId = 6,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)None)]
     public enum TargetingShapeType
     {
         None = 0,
@@ -165,7 +166,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         WedgeArea = 13,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)_0)]
     public enum AOEAngleType
     {
         _0 = 0,
@@ -182,7 +183,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         _360 = 11,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)Alive)]
     public enum EntityHealthState
     {
         Alive = 0,
@@ -190,7 +191,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         AliveOrDead = 2,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)All)]
     public enum TargetingHeightType
     {
         All = 0,
@@ -199,7 +200,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         FlyingOnly = 3,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)None)]
     public enum SubsequentActivateType
     {
         None = 0,
@@ -207,7 +208,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         RepeatActivation = 2,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)None)]
     public enum TargetRestrictionType
     {
         None = 0,
@@ -298,7 +299,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public bool DisableEnduranceRegenOnActivate { get; protected set; }
         public EvalPrototype[] EvalOnPreApply { get; protected set; }
         public int RecurringCostIntervalMS { get; protected set; }
-        public ConditionPrototype ConditionsByRef { get; protected set; }
+        public ulong[] ConditionsByRef { get; protected set; }   // VectorPrototypeRefPtr ConditionPrototype 
         public bool IsRecurring { get; protected set; }
         public EvalPrototype EvalCanTrigger { get; protected set; }
         public float RangeActivationReduction { get; protected set; }
@@ -635,7 +636,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
     public class TransformModeEntryPrototype : Prototype
     {
-        public ulong AllowedPowers { get; protected set; }
+        public ulong[] AllowedPowers { get; protected set; }
         public ulong TransformMode { get; protected set; }
     }
 
@@ -719,6 +720,6 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
     public class ExtraActivateCycleToPowerPrototype : ExtraActivatePrototype
     {
-        public ulong CyclePowerList { get; protected set; }
+        public ulong[] CyclePowerList { get; protected set; }
     }
 }

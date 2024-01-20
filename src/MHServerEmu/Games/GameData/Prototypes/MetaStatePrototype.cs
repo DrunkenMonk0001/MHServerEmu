@@ -4,7 +4,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
 {
     #region Enums
 
-    [AssetEnum]
+    [AssetEnum((int)None)]
     public enum DesignWorkflowState
     {
         None = 0,
@@ -13,7 +13,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         Live = 4,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)Open)]
     public enum RegionPlayerAccess
     {
         Open = 1,
@@ -137,9 +137,9 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
     public class MetaStateMissionStateListenerPrototype : MetaStatePrototype
     {
-        public ulong CompleteMissions { get; protected set; }
+        public ulong[] CompleteMissions { get; protected set; }
         public int CompleteMode { get; protected set; }
-        public ulong FailMissions { get; protected set; }
+        public ulong[] FailMissions { get; protected set; }
         public int FailMode { get; protected set; }
     }
 

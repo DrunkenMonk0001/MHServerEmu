@@ -4,9 +4,10 @@ namespace MHServerEmu.Games.GameData.Prototypes
 {
     #region Enums
 
-    [AssetEnum]
+    [AssetEnum((int)Invalid)]
     public enum AvatarStat
     {
+        Invalid = 0,
         Durability = 1,
         Energy = 2,
         Fighting = 3,
@@ -15,9 +16,10 @@ namespace MHServerEmu.Games.GameData.Prototypes
         Strength = 6,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)Invalid)]
     public enum AvatarMode
     {
+        Invalid = -1,
         Normal = 0,
         Hardcore = 1,
         Ladder = 2,
@@ -41,20 +43,20 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public ulong PartyBonusPower { get; protected set; }
         public ulong UnlockDialogText { get; protected set; }
         public ulong SecondaryResourceBehavior { get; protected set; }
-        public ulong LoadingScreens { get; protected set; }
+        public ulong[] LoadingScreens { get; protected set; }
         public int PowerProgressionVersion { get; protected set; }
         public ulong OnLevelUpEval { get; protected set; }
         public EvalPrototype OnPartySizeChange { get; protected set; }
         public ulong StatsPower { get; protected set; }
         public ulong SocialIconPath { get; protected set; }
         public ulong CharacterSelectIconPath { get; protected set; }
-        public ulong StatProgressionTable { get; protected set; }
+        public ulong[] StatProgressionTable { get; protected set; }
         public TransformModeEntryPrototype[] TransformModes { get; protected set; }
         public AvatarSynergyEntryPrototype[] SynergyTable { get; protected set; }
         public ulong[] SuperteamMemberships { get; protected set; }
-        public ulong CharacterSelectPowers { get; protected set; }
-        public PrimaryResourceManaBehaviorPrototype PrimaryResourceBehaviors { get; protected set; }
-        public StealablePowerInfoPrototype StealablePowersAllowed { get; protected set; }
+        public ulong[] CharacterSelectPowers { get; protected set; }
+        public ulong[] PrimaryResourceBehaviors { get; protected set; }     // VectorPrototypeRefPtr PrimaryResourceManaBehaviorPrototype
+        public ulong[] StealablePowersAllowed { get; protected set; }       // VectorPrototypeRefPtr StealablePowerInfoPrototype
         public bool ShowInRosterIfLocked { get; protected set; }
         public ulong CharacterVideoUrl { get; protected set; }
         public ulong CharacterSelectIconPortraitSmall { get; protected set; }
@@ -66,7 +68,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public TalentGroupPrototype[] TalentGroups { get; protected set; }
         public ulong TravelPower { get; protected set; }
         public AbilityAutoAssignmentSlotPrototype[] AbilityAutoAssignmentSlot { get; protected set; }
-        public ulong LoadingScreensConsole { get; protected set; }
+        public ulong[] LoadingScreensConsole { get; protected set; }
         public ItemAssignmentPrototype StartingCostumePS4 { get; protected set; }
         public ItemAssignmentPrototype StartingCostumeXboxOne { get; protected set; }
     }

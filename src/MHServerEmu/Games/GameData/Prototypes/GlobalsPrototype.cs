@@ -5,7 +5,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
 {
     #region Enums
 
-    [AssetEnum]
+    [AssetEnum((int)DoNothing)]
     public enum MusicStateEndBehavior
     {
         DoNothing = 0,
@@ -13,14 +13,14 @@ namespace MHServerEmu.Games.GameData.Prototypes
         StopMusic = 2,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)StartForSlot)]
     public enum CoopOp
     {
         StartForSlot = 0,
         EndForSlot = 1,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)GenericError)]
     public enum CoopOpResult
     {
         Success = 0,
@@ -67,7 +67,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         MovingToInstance = 19,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)None)]
     public enum GamepadInput
     {
         A = 0,
@@ -87,16 +87,17 @@ namespace MHServerEmu.Games.GameData.Prototypes
         None = 14,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)ReturnToWaypoint)]
     public enum DeathReleaseBehavior    // Globals/AvatarDeathReleaseBehavior.type
     {
         ReturnToWaypoint = 0,
         ReturnToCheckpoint = 1,
     }
 
-    [AssetEnum]
+    [AssetEnum((int)Invalid)]
     public enum GlobalEventCriteriaLogic
     {
+        Invalid = -1,
         And = 0,
         Or = 1,
     }
@@ -130,7 +131,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public ulong[] UIConfigFiles { get; protected set; }
         public int InteractRange { get; protected set; }
         public ulong CreditsItemPrototype { get; protected set; }
-        public ulong NegStatusEffectList { get; protected set; }
+        public ulong[] NegStatusEffectList { get; protected set; }
         public ulong PvPPrototype { get; protected set; }
         public ulong MissionPrototype { get; protected set; }
         public EvalPrototype ItemPriceMultiplierBuyFromVendor { get; protected set; }
@@ -211,7 +212,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public int AssistPvPDurationMS { get; protected set; }
         public ulong FulfillmentReceiptPrototype { get; protected set; }
         public ulong PetTechVacuumPower { get; protected set; }
-        public ulong StolenPowerRestrictions { get; protected set; }
+        public ulong[] StolenPowerRestrictions { get; protected set; }
         public ulong PowerVisualsGlobals { get; protected set; }
         public ulong KeywordGlobals { get; protected set; }
         public ulong CurrencyGlobals { get; protected set; }
@@ -243,7 +244,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public ulong PublicEventPrototype { get; protected set; }
         public ulong AvatarCoopStartPower { get; protected set; }
         public ulong AvatarCoopEndPower { get; protected set; }
-        public DifficultyTierPrototype DifficultyTiers { get; protected set; }
+        public ulong[] DifficultyTiers { get; protected set; }      // VectorPrototypeRefPtr DifficultyTierPrototype
         public ulong DefaultLoadingLobbyRegion { get; protected set; }
         public ulong DifficultyTierDefault { get; protected set; }
         public ulong AvatarHealPower { get; protected set; }
@@ -289,7 +290,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public EvalPrototype VendorRollTableLevelEval { get; protected set; }
         public float RestedHealthPerMinMult { get; protected set; }
         public int PowerBoostMax { get; protected set; }
-        public PrestigeLevelPrototype PrestigeLevels { get; protected set; }
+        public ulong[] PrestigeLevels { get; protected set; }   // VectorPrototypeRefPtr PrestigeLevelPrototype
         public ulong ItemAffixLevelingCurve { get; protected set; }
         public ulong ExperienceBonusAvatarSynergy { get; protected set; }
         public float ExperienceBonusAvatarSynergyMax { get; protected set; }
@@ -310,7 +311,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public ulong PctXPFromLevelDeltaCurve { get; protected set; }
         public int InfinitySystemUnlockLevel { get; protected set; }
         public long InfinityPointsCapPerGem { get; protected set; }
-        public InfinityGemSetPrototype InfinityGemSets { get; protected set; }
+        public ulong[] InfinityGemSets { get; protected set; }  // VectorPrototypeRefPtr InfinityGemSetPrototype
         public long InfinityXPCap { get; protected set; }
         public int TravelPowerUnlockLevel { get; protected set; }
         public float ExperienceBonusCoop { get; protected set; }
@@ -440,7 +441,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public ulong MapInfoMissionGiver { get; protected set; }
         public ulong MapInfoMissionObjectiveTalk { get; protected set; }
         public int NumAvatarsToDisplayInItemUsableLists { get; protected set; }
-        public ulong LoadingScreens { get; protected set; }
+        public ulong[] LoadingScreens { get; protected set; }
         public int ChatFadeInMS { get; protected set; }
         public int ChatBeginFadeOutMS { get; protected set; }
         public int ChatFadeOutMS { get; protected set; }
@@ -508,7 +509,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public AffixDisplaySlotPrototype[] CostumeAffixDisplaySlots { get; protected set; }
         public ulong MessagePartyError { get; protected set; }
         public ulong MessageRegionRestricted { get; protected set; }
-        public ulong CreditsMovies { get; protected set; }
+        public ulong[] CreditsMovies { get; protected set; }
         public ulong MessageMetaGameDefault { get; protected set; }
         public ulong MessagePartyPvPPortalFail { get; protected set; }
         public int ChatNewMsgDarkenBgMS { get; protected set; }
@@ -533,7 +534,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public ulong VanityTitleNoTitle { get; protected set; }
         public ulong MessageStealablePowerOccupied { get; protected set; }
         public ulong MessageStolenPowerDuplicate { get; protected set; }
-        public ulong CurrencyDisplayList { get; protected set; }
+        public ulong[] CurrencyDisplayList { get; protected set; }
         public ulong CinematicOpener { get; protected set; }
         public ulong MessageCantQueueInQueueRegion { get; protected set; }
         public int LogoffPanelStoryMissionLevelCap { get; protected set; }
@@ -556,7 +557,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public ulong[] ItemSortCategoryList { get; protected set; }
         public ulong[] ItemSortSubCategoryList { get; protected set; }
         public AffixRollQualityPrototype[] AffixRollRangeRollQuality { get; protected set; }
-        public ulong RadialMenuEntriesList { get; protected set; }
+        public ulong[] RadialMenuEntriesList { get; protected set; }
         public ulong TextStylePowerChargesEmpty { get; protected set; }
         public ulong TextStylePowerChargesFull { get; protected set; }
         public ulong MessageLeaderboardRewarded { get; protected set; }
@@ -566,7 +567,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public ulong GamepadIconMoveAction { get; protected set; }
         public ulong GamepadIconSelectAction { get; protected set; }
         public ulong GamepadIconSellAction { get; protected set; }
-        public ulong ConsoleRadialMenuEntriesList { get; protected set; }
+        public ulong[] ConsoleRadialMenuEntriesList { get; protected set; }
         public CoopOpUIDataEntryPrototype[] CoopOpUIDatas { get; protected set; }
         public ulong MessageOpenMissionEntered { get; protected set; }
         public ulong MessageInfinityPointsAwarded { get; protected set; }
@@ -972,7 +973,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
     public class GlobalEventPrototype : Prototype
     {
         public bool Active { get; protected set; }
-        public ulong CriteriaList { get; protected set; }
+        public ulong[] CriteriaList { get; protected set; }
         public GlobalEventCriteriaLogic CriteriaLogic { get; protected set; }
         public ulong DisplayName { get; protected set; }
         public int LeaderboardLength { get; protected set; }
