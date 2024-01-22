@@ -173,7 +173,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public ulong TooltipTitle { get; protected set; }
         public ulong UIIcon { get; protected set; }
         public ulong TooltipDescription { get; protected set; }
-        public ulong Properties { get; protected set; }
+        public PrototypePropertyCollection Properties { get; protected set; }     // Property list, should this be a property collection?
         public ulong[] PassivePowers { get; protected set; }
         public ulong Type { get; protected set; }
         public int RanksMax { get; protected set; }
@@ -231,7 +231,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
     public class OmegaBonusSetPrototype : ModPrototype
     {
         public ulong UITitle { get; protected set; }
-        public OmegaBonusPrototype OmegaBonuses { get; protected set; }
+        public ulong[] OmegaBonuses { get; protected set; }
         public OmegaPageType UIPageType { get; protected set; }
         public bool Unlocked { get; protected set; }
         public ulong UIColor { get; protected set; }

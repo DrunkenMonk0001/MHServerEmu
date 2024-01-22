@@ -1,5 +1,6 @@
 ﻿using MHServerEmu.Games.Common;
 using MHServerEmu.Games.GameData;
+using MHServerEmu.Games.GameData.Calligraphy;
 
 namespace MHServerEmu.Games.Regions
 {
@@ -22,6 +23,7 @@ namespace MHServerEmu.Games.Regions
 
         #region Enums
 
+        [AssetEnum((int)None)]      // DRAG/RegionGenerators/Edges.type
         public enum Type
         {
             None = 0,
@@ -50,6 +52,7 @@ namespace MHServerEmu.Games.Regions
             NESWcW = 207,
         }
 
+        [AssetEnum((int)WideNESW)]      // DRAG/CellWallTypes.type
         public enum WallGroup
         {
             N = 254,
