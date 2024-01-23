@@ -43,6 +43,9 @@ namespace MHServerEmu.Games.GameData.Calligraphy
             { typeof(PrototypePropertyCollection), ParsePropertyList }      // should this be a property collection or some other type? used only in ModPrototype
         };
 
+        /// <summary>
+        /// Returns a parser for the specified prototype field type.
+        /// </summary>
         private static Func<FieldParserParams, bool> GetParser(Type prototypeFieldType)
         {
             // Adjust type for enums and prototype pointers
@@ -76,30 +79,33 @@ namespace MHServerEmu.Games.GameData.Calligraphy
             return null;
         }
 
+        /// <summary>
+        /// Parses an integer or float value and assigns it to a prototype field.
+        /// </summary>
         private static bool ParseValue<T>(FieldParserParams @params, bool parseAsFloat = false) where T: IConvertible
         {
             // Boolean and numeric values are stored in Calligraphy as 64-bit values.
             // We read the value as either Int64 or Float64 and then cast it to the appropriate type for our field.
             var rawValue = parseAsFloat ? @params.Reader.ReadDouble() : @params.Reader.ReadInt64();
 
-            try
+            // Some prototypes (e.g. ProceduralProfileDrDoomPhase1.defaults) use very high values for int fields that cause overflows.
+            // The client handles this by taking the first 4 bytes of the value and throwing away everything else.
+            // We handle this by setting those fields to int.MaxValue, since the intention is apparently to have the value be as high
+            // as possible. This doesn't seem to happen with other types.
+            if (typeof(T) == typeof(int) && rawValue > int.MaxValue)
             {
-                var value = Convert.ChangeType(rawValue, typeof(T), CultureInfo.InvariantCulture);
-                @params.FieldInfo.SetValue(@params.OwnerPrototype, value);
+                Logger.Warn($"ParseValue overflow for Int32 field {@params.BlueprintMemberInfo.Member.FieldName}, raw value {rawValue}, file name {@params.FileName}");
+                rawValue = int.MaxValue;
             }
-            catch (OverflowException)
-            {
-                // Hacky overflow handling for AI/ProceduralAI/Blueprints/Profiles/Special/DrDoom/ProceduralProfileDrDoomPhase1.defaults
-                if (typeof(T) != typeof(int))
-                    throw new($"Unexpected overflow for type {typeof(T).Name}");
 
-                @params.FieldInfo.SetValue(@params.OwnerPrototype, int.MaxValue);
-                Logger.Warn($"ParseValue overflow for field {@params.BlueprintMemberInfo.Member.FieldName} in {@params.FileName}");
-            }
-            
+            var value = Convert.ChangeType(rawValue, typeof(T), CultureInfo.InvariantCulture);
+            @params.FieldInfo.SetValue(@params.OwnerPrototype, value);
             return true;
         }
 
+        /// <summary>
+        /// Parses an asset enum and assigns it to a prototype field.
+        /// </summary>
         private static bool ParseEnum(FieldParserParams @params)
         {
             // Enums are represented in Calligraphy by assets.
@@ -111,16 +117,19 @@ namespace MHServerEmu.Games.GameData.Calligraphy
             if (assetName.Length > 0 && char.IsDigit(assetName[0]))
                 assetName = $"_{assetName}";
 
-            // Try to parse enum value from its name if we got a valid asset
+            // Try to parse enum value from its name
             if (Enum.TryParse(@params.FieldInfo.PropertyType, assetName, true, out var value) == false)
             {
                 if (assetName != string.Empty)
-                    Logger.Warn($"Missing enum member {assetName} in {@params.BlueprintMemberInfo.Member.RuntimeClassFieldInfo.Name}");
+                    Logger.Warn(string.Format("Missing enum member {0} in {1}, field {2}, file name {3}",
+                        assetName,
+                        @params.FieldInfo.PropertyType.Name,
+                        @params.BlueprintMemberInfo.Member.RuntimeClassFieldInfo.Name,
+                        @params.FileName));
 
                 // Set value to default for enums we can't parse
                 var attribute = @params.FieldInfo.PropertyType.GetCustomAttribute<AssetEnumAttribute>();
-                var defaultValue = attribute.DefaultValue;
-                @params.FieldInfo.SetValue(@params.OwnerPrototype, defaultValue);
+                @params.FieldInfo.SetValue(@params.OwnerPrototype, attribute.DefaultValue);
                 return true;
             }
 
@@ -129,6 +138,9 @@ namespace MHServerEmu.Games.GameData.Calligraphy
             return true;
         }
 
+        /// <summary>
+        /// Parses a data reference and assigns it to a prototype field.
+        /// </summary>
         private static bool ParseDataRef(FieldParserParams @params)
         {
             // Data refs can be StringId, AssetTypeId, CurveId, PrototypeId, LocaleStringId or ulong.
@@ -139,6 +151,9 @@ namespace MHServerEmu.Games.GameData.Calligraphy
             return true;
         }
 
+        /// <summary>
+        /// Deserializes an embedded prototype and assigns it to a prototype field.
+        /// </summary>
         private static bool ParsePrototypePtr(FieldParserParams @params)
         {
             // The client nests multiple methods for deserializing embedded prototypes:
@@ -149,6 +164,9 @@ namespace MHServerEmu.Games.GameData.Calligraphy
             return true;
         }
 
+        /// <summary>
+        /// Deserializes an embedded prototype WITHOUT assigning it to a field.
+        /// </summary>
         private static bool DeserializePrototypePtr(FieldParserParams @params, bool polymorphicSetAllowed, out Prototype prototype)
         {
             prototype = null;
@@ -169,19 +187,25 @@ namespace MHServerEmu.Games.GameData.Calligraphy
 
             // Deserialize
             Type classType = GameDatabase.DataDirectory.GetPrototypeClassType(header.ReferenceType);
-            prototype = (Prototype)Activator.CreateInstance(classType);
+            prototype = GameDatabase.PrototypeClassManager.AllocatePrototype(classType);
 
             DoDeserialize(prototype, header, PrototypeId.Invalid, @params.FileName, reader);
             return true;
         }
 
+        /// <summary>
+        /// Parses a property id and assigns it to a prototype field.
+        /// </summary>
         private static bool ParsePropertyId(FieldParserParams @params)
         {
-            // todo: proper property id deserialization
+            // todo: proper property id deserialization and assignment
             DeserializePrototypePtr(@params, false, out var prototype);
             return true;
         }
-
+        
+        /// <summary>
+        /// Parses a collection of integer or float values and assigns it to a prototype field.
+        /// </summary>
         private static bool ParseCollection<T>(FieldParserParams @params, bool parseAsFloat = false) where T : IConvertible
         {
             var reader = @params.Reader;
@@ -197,6 +221,9 @@ namespace MHServerEmu.Games.GameData.Calligraphy
             return true;
         }
 
+        /// <summary>
+        /// Parses a collection of asset enum values and assigns it to a prototype field.
+        /// </summary>
         private static bool ParseListEnum(FieldParserParams @params)
         {
             var reader = @params.Reader;
@@ -210,10 +237,8 @@ namespace MHServerEmu.Games.GameData.Calligraphy
                 var assetId = (StringId)@params.Reader.ReadUInt64();
                 var assetName = GameDatabase.GetAssetName(assetId);
 
-                // Fix asset names that start with a digit (C# doesn't allow enum members to start with a digit)
-                if (char.IsDigit(assetName[0]))
-                    assetName = $"_{assetName}";
-
+                // Looks like there are no numeric or invalid enum values in list enums, so we can speed this up
+                // by just parsing whatever asset name we have as is.
                 var value = Enum.Parse(@params.FieldInfo.PropertyType.GetElementType(), assetName, true);
                 values.SetValue(value, i);
             }
@@ -222,6 +247,9 @@ namespace MHServerEmu.Games.GameData.Calligraphy
             return true;
         }
 
+        /// <summary>
+        /// Parses a collection of data references and assigns it to a prototype field.
+        /// </summary>
         private static bool ParseListDataRef(FieldParserParams @params)
         {
             var reader = @params.Reader;
@@ -238,6 +266,9 @@ namespace MHServerEmu.Games.GameData.Calligraphy
             return true;
         }
 
+        /// <summary>
+        /// Parses a collection of embedded prototypes and assigns it to a prototype field.
+        /// </summary>
         private static bool ParseListPrototypePtr(FieldParserParams @params)
         {
             var reader = @params.Reader;
@@ -253,9 +284,14 @@ namespace MHServerEmu.Games.GameData.Calligraphy
             return true;
         }
 
+        /// <summary>
+        /// Parses a property collection and assigns it to a prototype field.
+        /// </summary>
+        /// <param name="params"></param>
+        /// <returns></returns>
         private static bool ParsePropertyList(FieldParserParams @params)
         {
-            // todo: proper property list deserialization
+            // todo: proper property list deserialization and assignment
             var reader = @params.Reader;
 
             short numValues = reader.ReadInt16();

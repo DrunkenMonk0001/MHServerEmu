@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Linq.Expressions;
 using System.Reflection;
 using MHServerEmu.Common.Logging;
 using MHServerEmu.Games.GameData.Calligraphy;
@@ -14,6 +15,7 @@ namespace MHServerEmu.Games.GameData
         private static readonly Logger Logger = LogManager.CreateLogger();
 
         private readonly Dictionary<string, Type> _prototypeNameToClassTypeDict = new();
+        private Dictionary<Type, Func<Prototype>> _prototypeConstructorDict;
 
         public int ClassCount { get => _prototypeNameToClassTypeDict.Count; }
 
@@ -27,8 +29,26 @@ namespace MHServerEmu.Games.GameData
                 _prototypeNameToClassTypeDict.Add(type.Name, type);
             }
 
+            _prototypeConstructorDict = new(_prototypeNameToClassTypeDict.Count);
+
             stopwatch.Stop();
             Logger.Info($"Initialized {ClassCount} prototype classes in {stopwatch.ElapsedMilliseconds} ms");
+        }
+
+        /// <summary>
+        /// Creates a new <see cref="Prototype"/> instance of the specified <see cref="Type"/> using a cached constructor delegate if possible.
+        /// </summary>
+        public Prototype AllocatePrototype(Type type)
+        {
+            // Check if we already have a cached constructor delegate
+            if (_prototypeConstructorDict.TryGetValue(type, out var constructor) == false)
+            {
+                // Cache constructor delegate for future use
+                constructor = CreatePrototypeConstructorDelegate(type);
+                _prototypeConstructorDict.Add(type, constructor);
+            }
+
+            return constructor();
         }
 
         /// <summary>
@@ -124,17 +144,17 @@ namespace MHServerEmu.Games.GameData
                 // We do what PrototypeFieldSet::GetMixinFieldInfo() does right here using reflection
                 foreach (var property in ownerClassType.GetProperties())
                 {
-                    if (property.IsDefined(mixinAttribute) == false) continue;  // We look for a property that has our mixin attribute defined
-
                     if (mixinAttribute == typeof(MixinAttribute))
                     {
-                        // For simple mixins we just return the property if it matches our field type
-                        if (property.PropertyType == fieldClassType)
-                            return property;
+                        // For simple mixins we just return the property if it matches our field type and has the correct attribute
+                        if (property.PropertyType != fieldClassType) continue;
+                        if (property.IsDefined(mixinAttribute)) return property;
                     }
                     else if (mixinAttribute == typeof(ListMixinAttribute))
                     {
-                        // For list mixins we have to make sure the list is compatible with our requested field type
+                        // For list mixins we look for a list that is compatible with our requested field type
+                        if (property.PropertyType != typeof(List<PrototypeMixinListItem>)) continue;
+
                         var attribute = property.GetCustomAttribute<ListMixinAttribute>();
                         if (attribute.FieldType == fieldClassType)
                             return property;
@@ -147,6 +167,17 @@ namespace MHServerEmu.Games.GameData
 
             // Mixin not found
             return null;
+        }
+
+        /// <summary>
+        /// Creates a delegate for the <see cref="Prototype"/> constructor of the specified <see cref="Type"/> using a compiled lambda expression.
+        /// </summary>
+        private Func<Prototype> CreatePrototypeConstructorDelegate(Type type)
+        {
+            var constructor = type.GetConstructor(Type.EmptyTypes);
+            var newExpression = Expression.New(constructor);
+            var lambdaExpression = Expression.Lambda<Func<Prototype>>(newExpression);
+            return lambdaExpression.Compile();
         }
     }
 }

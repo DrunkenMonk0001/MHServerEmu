@@ -45,8 +45,8 @@ namespace MHServerEmu.Games.GameData.Prototypes
         StoryMissions = 5,
     }
 
-    [AssetEnum]
-    public enum MatchQueueStatus    // Regions/QueueStatus.type
+    [AssetEnum((int)Invalid)]
+    public enum MatchQueueStatus    // Regions/QueueStatus.type, equivalent to Gazillion::RegionRequestQueueUpdateVar from the protocol
     {
         Invalid = 1,
         SelectQueueMethod = 2,
@@ -143,9 +143,9 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public int MobLOSVisUpdatePeriodMS { get; protected set; }
         public int MobLOSVisStayVisibleDelayMS { get; protected set; }
         public bool MobLOSVisEnabled { get; protected set; }
-        public ulong BeginPlayAssetTypes { get; protected set; }
-        public ulong CachedAssetTypes { get; protected set; }
-        public ulong FileVerificationAssetTypes { get; protected set; }
+        public ulong[] BeginPlayAssetTypes { get; protected set; }
+        public ulong[] CachedAssetTypes { get; protected set; }
+        public ulong[] FileVerificationAssetTypes { get; protected set; }
         public ulong LoadingMusic { get; protected set; }
         public ulong SystemLocalized { get; protected set; }
         public ulong PopulationGlobals { get; protected set; }
@@ -219,7 +219,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public ulong PointerArrowTemplate { get; protected set; }
         public ulong ObjectiveMarkerTemplate { get; protected set; }
         public int VaporizedLootLifespanMS { get; protected set; }
-        public ulong CookedIconAssetTypes { get; protected set; }
+        public ulong[] CookedIconAssetTypes { get; protected set; }
         public ulong LiveTuneAvatarXPDisplayCondition { get; protected set; }
         public ulong LiveTuneCreditsDisplayCondition { get; protected set; }
         public ulong LiveTuneRegionXPDisplayCondition { get; protected set; }
@@ -228,7 +228,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public ulong LiveTuneXPDisplayCondition { get; protected set; }
         public ulong ItemLinkInventory { get; protected set; }
         public ulong LimitedEditionBlueprint { get; protected set; }
-        public ulong MobileIconAssetTypes { get; protected set; }
+        public ulong[] MobileIconAssetTypes { get; protected set; }
         public ulong PetItemBlueprint { get; protected set; }
         public ulong AvatarPrototype { get; protected set; }
         public int ServerBonusUnlockLevel { get; protected set; }
@@ -298,7 +298,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public ulong ExperienceBonusLevel60Synergy { get; protected set; }
         public int TeamUpPowersPerTier { get; protected set; }
         public ulong TeamUpPowerTiersCurve { get; protected set; }
-        public OmegaBonusSetPrototype OmegaBonusSets { get; protected set; }
+        public ulong[] OmegaBonusSets { get; protected set; }   // VectorPrototypeRefPtr OmegaBonusSetPrototype
         public int OmegaPointsCap { get; protected set; }
         public int OmegaSystemLevelUnlock { get; protected set; }
         public PetTechAffixInfoPrototype[] PetTechAffixInfo { get; protected set; }
@@ -699,7 +699,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
     public class GlobalPropertiesPrototype : Prototype
     {
-        public ulong Properties { get; protected set; }
+        public PrototypePropertyCollection Properties { get; protected set; }
     }
 
     public class PowerVisualsGlobalsPrototype : Prototype
@@ -837,7 +837,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
     public class MatchQueueStringEntryPrototype : Prototype
     {
-        public RegionRequestQueueUpdateVar StatusKey { get; protected set; }  // Regions/QueueStatus.type, also appears in protocol
+        public MatchQueueStatus StatusKey { get; protected set; }  // Regions/QueueStatus.type, also appears in the protocol
         public ulong StringLog { get; protected set; }
         public ulong StringStatus { get; protected set; }
     }

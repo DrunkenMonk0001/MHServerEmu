@@ -11,31 +11,11 @@ namespace MHServerEmu.Games.GameData.Calligraphy
     {
         private static readonly Logger Logger = LogManager.CreateLogger();
 
+        /// <summary>
+        /// Deserializes a Calligraphy prototype from stream.
+        /// </summary>
         public override void Deserialize(Prototype prototype, PrototypeId dataRef, Stream stream)
         {
-            // Temp implementation
-
-            // Set this prototype's id data ref
-            prototype.DataRef = dataRef;
-
-            // Deserialize
-            using (BinaryReader reader = new(stream))
-            {
-                // Read Calligraphy prototype file header
-                CalligraphyHeader header = new(reader);
-
-                // Temp deserialization
-                prototype.DeserializeCalligraphy(reader);
-
-                // Temp hack for property info
-                if (prototype is PropertyInfoPrototype propertyInfo)
-                    propertyInfo.FillPropertyInfoFields();
-            }
-        }
-
-        public void DeserializeWip(Prototype prototype, PrototypeId dataRef, Stream stream)
-        {
-            // WIP proper deserialization
             string prototypeName = GameDatabase.GetPrototypeName(dataRef);
 
             using (BinaryReader reader = new(stream))
@@ -51,7 +31,7 @@ namespace MHServerEmu.Games.GameData.Calligraphy
                 // Begin deserialization
                 DoDeserialize(prototype, prototypeHeader, dataRef, prototypeName, reader);
 
-                Logger.Debug("Done!");
+                //Logger.Debug("Done!");
             }
         }
 
@@ -107,6 +87,9 @@ namespace MHServerEmu.Games.GameData.Calligraphy
             }
         }
 
+        /// <summary>
+        /// Deserializes a field group of a Calligraphy prototype.
+        /// </summary>
         private static bool DeserializeFieldGroup(Prototype prototype, Blueprint blueprint, byte blueprintCopyNum, string prototypeName, Type classType, BinaryReader reader, string groupTag)
         {
             var classManager = GameDatabase.PrototypeClassManager;
@@ -119,11 +102,11 @@ namespace MHServerEmu.Games.GameData.Calligraphy
 
                 // Get blueprint member info for this field
                 if (blueprint.TryGetBlueprintMemberInfo(fieldId, out var blueprintMemberInfo) == false)
-                    return Logger.WarnReturn(false, $"Failed to find member {GameDatabase.GetBlueprintFieldName(fieldId)} in blueprint {GameDatabase.GetBlueprintName(blueprint.Id)}");
+                    return Logger.ErrorReturn(false, $"Failed to find member {GameDatabase.GetBlueprintFieldName(fieldId)} in blueprint {GameDatabase.GetBlueprintName(blueprint.Id)}");
 
                 // Check to make sure the type matches (do we need this?)
                 if (blueprintMemberInfo.Member.BaseType != fieldBaseType)
-                    return Logger.WarnReturn(false, $"Type mismatch between blueprint and prototype");
+                    return Logger.ErrorReturn(false, $"Type mismatch between blueprint and prototype");
 
                 // Determine where this field belongs
                 Prototype fieldOwnerPrototype = prototype;
@@ -161,7 +144,7 @@ namespace MHServerEmu.Games.GameData.Calligraphy
 
                         // Get the field info from our mixin
                         fieldInfo = classManager.GetFieldInfo(mixinType, blueprintMemberInfo, false);
-                        Logger.Debug($"Found field info for mixin {mixinType.Name}, field name {blueprintMemberInfo.Member.FieldName}");
+                        //Logger.Debug($"Found field info for mixin {mixinType.Name}, field name {blueprintMemberInfo.Member.FieldName}");
                     }
                     else
                     {
@@ -178,31 +161,39 @@ namespace MHServerEmu.Games.GameData.Calligraphy
 
                             fieldOwnerPrototype = element;
                             fieldInfo = classManager.GetFieldInfo(mixinType, blueprintMemberInfo, false);
-                            Logger.Debug($"Found field info for list mixin {mixinType.Name}, field name {blueprintMemberInfo.Member.FieldName}");
+                            //Logger.Debug($"Found field info for list mixin {mixinType.Name}, field name {blueprintMemberInfo.Member.FieldName}");
                         }
                         else
                         {
                             // Nowhere to put this field, something went very wrong, time to reevaluate life choices
-                            return Logger.WarnReturn(false, $"Failed to find field info for mixin {mixinType.Name}, field name {blueprintMemberInfo.Member.FieldName}");
+                            return Logger.ErrorReturn(false, $"Failed to find field info for mixin {mixinType.Name}, field name {blueprintMemberInfo.Member.FieldName}");
                         }
                     }
                 }
 
-                // Test parsing
+                // Parse
                 var parser = GetParser(fieldInfo.PropertyType);
                 FieldParserParams @params = new(reader, fieldInfo, fieldOwnerPrototype, fieldOwnerBlueprint, prototypeName, blueprintMemberInfo);
-
-                var value = parser(@params);
+                
+                if (parser(@params) == false)
+                {
+                    Logger.ErrorReturn(false, string.Format("Failed to parse field {0} of field group {1} in {2}",
+                        blueprintMemberInfo.Member.FieldName,
+                        GameDatabase.GetBlueprintName(blueprint.Id),
+                        prototypeName));
+                };
             }
 
             return true;
         }
 
-        private static void DeserializePropertyMixin(Prototype prototype, Blueprint blueprint, Blueprint groupBlueprint, byte fieldGroupCopyNum,
+        /// <summary>
+        /// Deserializes a property mixin field group of a Calligraphy prototype.
+        /// </summary>
+        private static void DeserializePropertyMixin(Prototype prototype, Blueprint blueprint, Blueprint groupBlueprint, byte blueprintCopyNum,
             PrototypeId prototypeDataRef, string prototypeName, Type classType, BinaryReader reader)
         {
-            // Skip property fields groups for now
-            // todo: do actual deserialization in DeserializeFieldGroupIntoProperty()
+            // TODO: do actual deserialization in DeserializeFieldGroupIntoProperty()
             short numSimpleFields = reader.ReadInt16();
             for (int i = 0; i < numSimpleFields; i++)
             {
@@ -212,6 +203,20 @@ namespace MHServerEmu.Games.GameData.Calligraphy
                 // Property mixins don't have any RHStructs, so we can always read the value as uint64
                 // (also no types or localized string refs)
                 var value = reader.ReadUInt64();
+
+                // hack: write data to a temporary PrototypePropertyCollection implementation
+                if (classType == typeof(PropertyPrototype)) continue;
+                var propertyCollectionFieldInfo = classType.GetProperty("Properties");
+                var propertyCollection = (PrototypePropertyCollection)propertyCollectionFieldInfo.GetValue(prototype);
+
+                if (propertyCollection == null)
+                {
+                    propertyCollection = new();
+                    propertyCollectionFieldInfo.SetValue(prototype, propertyCollection);
+                }
+
+                string fieldName = GameDatabase.GetBlueprintFieldName(id);
+                propertyCollection.AddPropertyFieldValue(groupBlueprint.Id, blueprintCopyNum, fieldName, value);
             }
 
             // Property field groups do not have any list fields, so numListFields should always be 0
@@ -385,7 +390,7 @@ namespace MHServerEmu.Games.GameData.Calligraphy
         private static Prototype AllocateDynamicPrototype(Type classType, PrototypeId defaults, Prototype instanceToCopy)
         {
             // Create a new prototype of the specified type
-            var prototype = (Prototype)Activator.CreateInstance(classType);
+            var prototype = GameDatabase.PrototypeClassManager.AllocatePrototype(classType);
 
             // Copy fields either from the specified defaults prototype or the provided prototype
             if (defaults != PrototypeId.Invalid && instanceToCopy == null)
