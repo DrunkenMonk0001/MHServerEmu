@@ -15,7 +15,7 @@ namespace MHServerEmu.Games.GameData
         private static readonly Logger Logger = LogManager.CreateLogger();
 
         private readonly Dictionary<string, Type> _prototypeNameToClassTypeDict = new();
-        private Dictionary<Type, Func<Prototype>> _prototypeConstructorDict;
+        private readonly Dictionary<Type, Func<Prototype>> _prototypeConstructorDict;
 
         public int ClassCount { get => _prototypeNameToClassTypeDict.Count; }
 
@@ -29,7 +29,7 @@ namespace MHServerEmu.Games.GameData
                 _prototypeNameToClassTypeDict.Add(type.Name, type);
             }
 
-            _prototypeConstructorDict = new(_prototypeNameToClassTypeDict.Count);
+            _prototypeConstructorDict = new(ClassCount);
 
             stopwatch.Stop();
             Logger.Info($"Initialized {ClassCount} prototype classes in {stopwatch.ElapsedMilliseconds} ms");
@@ -41,14 +41,17 @@ namespace MHServerEmu.Games.GameData
         public Prototype AllocatePrototype(Type type)
         {
             // Check if we already have a cached constructor delegate
-            if (_prototypeConstructorDict.TryGetValue(type, out var constructor) == false)
+            if (_prototypeConstructorDict.TryGetValue(type, out var constructorDelegate) == false)
             {
                 // Cache constructor delegate for future use
-                constructor = CreatePrototypeConstructorDelegate(type);
-                _prototypeConstructorDict.Add(type, constructor);
+                var constructor = type.GetConstructor(Type.EmptyTypes);
+                var newExpression = Expression.New(constructor);
+                var lambdaExpression = Expression.Lambda<Func<Prototype>>(newExpression);
+                constructorDelegate = lambdaExpression.Compile();
+                _prototypeConstructorDict.Add(type, constructorDelegate);
             }
 
-            return constructor();
+            return constructorDelegate();
         }
 
         /// <summary>
@@ -169,15 +172,43 @@ namespace MHServerEmu.Games.GameData
             return null;
         }
 
-        /// <summary>
-        /// Creates a delegate for the <see cref="Prototype"/> constructor of the specified <see cref="Type"/> using a compiled lambda expression.
-        /// </summary>
-        private Func<Prototype> CreatePrototypeConstructorDelegate(Type type)
+        public void PostProcessContainedPrototypes(Prototype prototype)
         {
-            var constructor = type.GetConstructor(Type.EmptyTypes);
-            var newExpression = Expression.New(constructor);
-            var lambdaExpression = Expression.Lambda<Func<Prototype>>(newExpression);
-            return lambdaExpression.Compile();
+            foreach (var property in prototype.GetType().GetProperties())
+            {
+                // Instead of storing a PrototypeFieldType enum value in our fields like the client,
+                // we do a bunch of messy if checks here to determine if a field is a prototype field
+                // that needs to be post-processed. TODO: make this cleaner and faster somehow.
+
+                var fieldType = property.PropertyType;
+
+                // Skip primitive and enum types since those are not prototypes for sure
+                if (fieldType.IsPrimitive) continue;
+                if (fieldType.IsEnum) continue;
+
+                if (fieldType.IsSubclassOf(typeof(Prototype)))
+                {
+                    // Simple embedded prototypes
+                    var embeddedPrototype = (Prototype)property.GetValue(prototype);
+                    embeddedPrototype?.PostProcess();
+                }
+                else if (fieldType.IsArray && fieldType.GetElementType().IsSubclassOf(typeof(Prototype)))
+                {
+                    // List / vector collections of embedded prototypes (that we implemented as arrays)
+                    var prototypeCollection = (IEnumerable<Prototype>)property.GetValue(prototype);
+                    if (prototypeCollection == null) continue;
+                    foreach (var element in prototypeCollection)
+                        element.PostProcess();
+                }
+                else if (fieldType == typeof(List<PrototypeMixinListItem>))
+                {
+                    // List mixins
+                    var mixinList = (List<PrototypeMixinListItem>)property.GetValue(prototype);
+                    if (mixinList == null) continue;
+                    foreach (var mixin in mixinList)
+                        mixin.Prototype.PostProcess();
+                }
+            }
         }
     }
 }
