@@ -2,6 +2,7 @@
 using MHServerEmu.Common.Logging;
 using MHServerEmu.Games.GameData.Calligraphy.Attributes;
 using MHServerEmu.Games.GameData.Prototypes;
+using MHServerEmu.Games.Properties;
 
 namespace MHServerEmu.Games.GameData.Calligraphy
 {
@@ -37,7 +38,7 @@ namespace MHServerEmu.Games.GameData.Calligraphy
         /// <summary>
         /// Deserializes data for a Calligraphy prototype.
         /// </summary>
-        private static void DoDeserialize(Prototype prototype, PrototypeDataHeader header, PrototypeId prototypeDataRef, string prototypeName, BinaryReader reader)
+        private static bool DoDeserialize(Prototype prototype, PrototypeDataHeader header, PrototypeId prototypeDataRef, string prototypeName, BinaryReader reader)
         {
             DataDirectory dataDirectory = GameDatabase.DataDirectory;
 
@@ -48,7 +49,7 @@ namespace MHServerEmu.Games.GameData.Calligraphy
             Blueprint blueprint = dataDirectory.GetPrototypeBlueprint(prototypeDataRef != PrototypeId.Invalid ? prototypeDataRef : header.ReferenceType);
 
             // Make sure there is data to deserialize
-            if (header.ReferenceExists == false) return;
+            if (header.ReferenceExists == false) return Logger.WarnReturn(false, $"Missing reference in {prototypeName}");
 
             // Get class type (we get it from the blueprint's binding instead of calling GetRuntimeClassId())
             Type classType = blueprint.RuntimeBindingClassType;
@@ -61,7 +62,7 @@ namespace MHServerEmu.Games.GameData.Calligraphy
             }
 
             // Deserialize this prototype's data if there is any
-            if (header.InstanceDataExists == false) return;
+            if (header.InstanceDataExists == false) return true;
 
             short numFieldGroups = reader.ReadInt16();
             for (int i = 0; i < numFieldGroups; i++)
@@ -73,17 +74,22 @@ namespace MHServerEmu.Games.GameData.Calligraphy
 
                 if (groupBlueprint.IsProperty())
                 {
-                    DeserializePropertyMixin(prototype, blueprint, groupBlueprint, blueprintCopyNum, prototypeDataRef, prototypeName, classType, reader);
+                    if (DeserializePropertyMixin(prototype, blueprint, groupBlueprint, blueprintCopyNum, prototypeDataRef, prototypeName, classType, reader) == false)
+                        return Logger.WarnReturn(false, $"Failed to deserialize property mixin in {prototypeName}");
                 }
                 else
                 {
                     // Simple fields
-                    DeserializeFieldGroup(prototype, blueprint, blueprintCopyNum, prototypeName, classType, reader, "Simple Fields");
+                    if (DeserializeFieldGroup(prototype, blueprint, blueprintCopyNum, prototypeName, classType, reader, "Simple Fields") == false)
+                        return Logger.WarnReturn(false, $"Failed to deserialize simple field group in {prototypeName}");
 
                     // List fields
-                    DeserializeFieldGroup(prototype, blueprint, blueprintCopyNum, prototypeName, classType, reader, "List Fields");
+                    if (DeserializeFieldGroup(prototype, blueprint, blueprintCopyNum, prototypeName, classType, reader, "List Fields") == false)
+                        return Logger.WarnReturn(false, $"Failed to deserialize list field group in {prototypeName}");
                 }
             }
+
+            return true;
         }
 
         /// <summary>
@@ -195,14 +201,14 @@ namespace MHServerEmu.Games.GameData.Calligraphy
             // This whole mixin system is a huge mess.
             PrototypePropertyCollection collection = null;
 
-            // Property mixins are used both for initializing property infos and filling prototype property collections  
-            // If this isn't a default prototype, it means the field group needs to be deserialized into a property collection
+            // Property mixins are used both for initializing property infos and filling prototype property collections.
+            // If this isn't a default prototype, it means the field group needs to be deserialized into a property collection.
             if (prototypeDataRef != groupBlueprint.DefaultPrototypeId)
             {
                 Type propertyHolderClassType = classType;
                 Prototype propertyHolderPrototype = prototype;
 
-                // Check if this property belongs in one of mixin properyt collections.
+                // Check if this property belongs in one of mixin property collections.
                 // This is basically an edge case for PowerPrototype, since it's the only example of mixins having their own property collections.
                 // We save a little bit of time by skipping this for non-power prototypes. Remove this check if something breaks in other versions of the game.
                 if (prototype is PowerPrototype)
@@ -226,10 +232,11 @@ namespace MHServerEmu.Games.GameData.Calligraphy
                 }
                 
                 // Get property collection to deserialize into from the property holder
-                // TODO: move this to PrototypeFieldManager.GetFieldInfo()
-                var collectionFieldInfo = propertyHolderClassType.GetProperty("Properties");
-                if (collectionFieldInfo != null)
-                    collection = GetPropertyCollectionField(propertyHolderPrototype, collectionFieldInfo);
+                // Note: going through the PrototypeClassManager to get property collection field info doesn't make a whole lot of sense
+                // in the context of our implementation, but that's how it's done in the client, so it's going to be this way (at least for now).
+                var collectionFieldInfo = GameDatabase.PrototypeClassManager.GetFieldInfo(propertyHolderClassType, null, true);
+                if (collectionFieldInfo == null) Logger.WarnReturn(false, "Failed to get property collection field info for property mixin");
+                collection = GetPropertyCollectionField(propertyHolderPrototype, collectionFieldInfo);
             }
 
             // This handles both cases (initialization and filling property collections)
@@ -237,13 +244,23 @@ namespace MHServerEmu.Games.GameData.Calligraphy
 
             // Property field groups do not have any list fields, so numListFields should always be 0
             short numListFields = reader.ReadInt16();
-            if (numListFields != 0) Logger.Warn($"Property field group numListFields != 0");
+            if (numListFields != 0) Logger.WarnReturn(false, $"Property field group numListFields != 0");
             return true;
         }
 
         private static bool DeserializeFieldGroupIntoProperty(PrototypePropertyCollection collection, Blueprint groupBlueprint, byte blueprintCopyNum,
             string prototypeFilePath, BinaryReader reader, string groupTag)
         {
+            if (groupBlueprint.IsProperty() == false) return false;
+
+            PropertyInfoTable propertyInfoTable = GameDatabase.PropertyInfoTable;
+
+            PrototypeId propertyDataRef = groupBlueprint.PropertyDataRef;
+            PropertyEnum propertyEnum = propertyInfoTable.GetPropertyEnumFromPrototype(propertyDataRef);
+            bool isInitializing = collection == null;
+
+            PropertyBuilder propertyBuilder = new(propertyEnum, propertyInfoTable, isInitializing);
+
             // TODO: deserializeFieldGroupIntoPropertyBuilder
             short numSimpleFields = reader.ReadInt16();
             for (int i = 0; i < numSimpleFields; i++)
@@ -264,6 +281,14 @@ namespace MHServerEmu.Games.GameData.Calligraphy
                     collection.AddPropertyFieldValue(groupBlueprint.Id, blueprintCopyNum, blueprintMemberInfo.Member.FieldName, value);
                 }
             }
+
+            if (isInitializing)
+            {
+                propertyBuilder.SetPropertyInfo();
+                return true;
+            }
+
+            // TODO: Add deserialized property to the property collection here
 
             return true;
         }
