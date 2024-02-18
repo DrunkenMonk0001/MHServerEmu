@@ -107,10 +107,10 @@ namespace MHServerEmu.Games.Events
                             true );
 
                         // TODO: applyItemSpecProperties 
-                        bowlingBall.Properties[PropertyEnum.InventoryStackSizeMax] = Property.ToValue(1000);          // Item.StackSettings
-                        bowlingBall.Properties[PropertyEnum.ItemIsTradable] = Property.ToValue(false);                // DefaultSettings.IsTradable
-                        bowlingBall.Properties[PropertyEnum.ItemBindsToCharacterOnEquip] = Property.ToValue(true);    // DefaultSettings.BindsToAccountOnPickup
-                        bowlingBall.Properties[PropertyEnum.ItemBindsToAccountOnPickup] = Property.ToValue(true);     // DefaultSettings.BindsToCharacterOnEquip 
+                        bowlingBall.Properties[PropertyEnum.InventoryStackSizeMax] = 1000;          // Item.StackSettings
+                        bowlingBall.Properties[PropertyEnum.ItemIsTradable] = false;                // DefaultSettings.IsTradable
+                        bowlingBall.Properties[PropertyEnum.ItemBindsToCharacterOnEquip] = true;    // DefaultSettings.BindsToAccountOnPickup
+                        bowlingBall.Properties[PropertyEnum.ItemBindsToAccountOnPickup] = true;     // DefaultSettings.BindsToCharacterOnEquip 
 
                         messageList.Add(new(client, new(bowlingBall.ToNetMessageEntityCreate())));
 
@@ -338,7 +338,7 @@ namespace MHServerEmu.Games.Events
                     ulong avatarRepId = (ulong)client.Session.Account.Player.Avatar.ToPropertyCollectionReplicationId();
 
                     messageList.Add(new(client, new(
-                        Property.ToNetMessageSetProperty(avatarRepId, new(PropertyEnum.ThrowableOriginatorEntity), Property.ToValue(idTarget))
+                        Property.ToNetMessageSetProperty(avatarRepId, new(PropertyEnum.ThrowableOriginatorEntity), idTarget)
                         )));
                     Logger.Warn($"{GameDatabase.GetPrototypeName(client.ThrowingObject.BaseData.PrototypeId)}");
                     // ThrowObject.Prototype.WorldEntity.UnrealClass
@@ -350,7 +350,7 @@ namespace MHServerEmu.Games.Events
                     //    if (throwPrototype.Header.ReferenceType != (PrototypeId)HardcodedBlueprintId.ThrowableSmartProp)
                     //        throwPrototype = throwPrototype.Header.ReferenceType.GetPrototype();
                     messageList.Add(new(client, new(
-                        Property.ToNetMessageSetProperty(avatarRepId, new(PropertyEnum.ThrowableOriginatorAssetRef), Property.ToValue(throwPrototype.UnrealClass))
+                        Property.ToNetMessageSetProperty(avatarRepId, new(PropertyEnum.ThrowableOriginatorAssetRef), throwPrototype.UnrealClass)
                         )));
 
                     // ThrowObject.Prototype.ThrowableRestorePowerProp.Value
@@ -492,7 +492,7 @@ namespace MHServerEmu.Games.Events
                         .Build())));
 
                     messageList.Add(new(client, new(
-                        Property.ToNetMessageSetProperty(arenaEntity.Properties.ReplicationId, new(PropertyEnum.AttachedToEntityId), Property.ToValue(avatarEntityId))
+                        Property.ToNetMessageSetProperty(arenaEntity.Properties.ReplicationId, new(PropertyEnum.AttachedToEntityId), avatarEntityId)
                         )));
 
                     break;
