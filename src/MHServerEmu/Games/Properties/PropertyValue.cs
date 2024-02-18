@@ -1,97 +1,66 @@
-﻿using Google.ProtocolBuffers;
+﻿using System.Runtime.InteropServices;
 using MHServerEmu.Games.Common;
 using MHServerEmu.Games.GameData;
-using MHServerEmu.Games.GameData.Prototypes;
 
 namespace MHServerEmu.Games.Properties
 {
-    public class PropertyValue
+    [StructLayout(LayoutKind.Explicit)]
+    public struct PropertyValue
     {
-        public ulong RawValue { get; protected set; }
+        [FieldOffset(0)]
+        public long RawLong = 0;
 
-        public PropertyValue(ulong rawValue)
+        [FieldOffset(0)]
+        public float RawFloat = 0;
+
+        public PropertyValue(bool value)
         {
-            RawValue = rawValue;
+            RawLong = Convert.ToInt64(value);
         }
 
-        public virtual object Get() => RawValue;
-        public virtual void Set(object value) => RawValue = (ulong)value;
-
-        public override string ToString() => $"0x{RawValue.ToString("X")}";
-    }
-
-    public class PropertyValueBoolean : PropertyValue
-    {
-        public PropertyValueBoolean(ulong rawValue) : base(rawValue) { }
-
-        public override object Get() => Convert.ToBoolean(RawValue);
-        public override void Set(object value) => RawValue = Convert.ToUInt64((bool)value);
-
-        public override string ToString() => ((bool)Get()).ToString();
-    }
-
-    public class PropertyValueReal : PropertyValue
-    {
-        public PropertyValueReal(ulong rawValue) : base(rawValue) { }
-
-        public override object Get() => BitConverter.ToSingle(BitConverter.GetBytes(RawValue));
-        public override void Set(object value)
+        public PropertyValue(float value)
         {
-            byte[] bytes = new byte[8];
-            BitConverter.GetBytes((float)value).CopyTo(bytes, 0);
-            RawValue = BitConverter.ToUInt64(bytes);
+            RawFloat = value;
         }
 
-        public override string ToString() => ((float)Get()).ToString();
-    }
-
-    public class PropertyValueInteger : PropertyValue
-    {
-        public PropertyValueInteger(ulong rawValue) : base(rawValue) { }
-
-        public override object Get() => CodedInputStream.DecodeZigZag64(RawValue);
-        public override void Set(object value) => RawValue = CodedOutputStream.EncodeZigZag64((int)value);
-
-        public override string ToString() => Get().ToString();
-    }
-
-    public class PropertyValuePrototype : PropertyValue
-    {
-        public PropertyValuePrototype(ulong rawValue) : base(rawValue) { }
-
-        public override object Get() => GameDatabase.DataDirectory.GetPrototypeFromEnumValue<Prototype>((int)RawValue);
-        public override void Set(object value) => RawValue = (ulong)GameDatabase.DataDirectory.GetPrototypeEnumValue<Prototype>((PrototypeId)value);
-
-        public override string ToString() => GameDatabase.GetPrototypeName((PrototypeId)Get());
-    }
-
-    public class PropertyValueInt21Vector3 : PropertyValue
-    {
-        public PropertyValueInt21Vector3(ulong rawValue) : base(rawValue) { }
-
-        // This value type stores xyz of a vector3 as three 21 bit integer numbers
-
-        public override object Get()
+        public PropertyValue(int value)
         {
-            int x = (int)((RawValue >> 42) & 0x1FFFFF);
-            if ((x & 0x10000) != 0)
-                x = (int)((RawValue >> 42) | 0xFFE00000);
-
-            int y = (int)((RawValue >> 21) & 0x1FFFFF);
-            if ((y & 0x10000) != 0)
-                y = (int)((RawValue >> 21) | 0xFFE00000);
-
-            int z = (int)(RawValue & 0x1FFFFF);
-            if ((z & 0x10000) != 0)
-                z = (int)(RawValue | 0xFFE00000);
-
-            return new Vector3(x, y, z);
+            RawLong = value;
         }
 
-        public override void Set(object value)
+        public PropertyValue(long value)
         {
-            Vector3 vector = (Vector3)value;
+            RawLong = value;
+        }
 
+        public PropertyValue(uint value)
+        {
+            RawLong = (int)value;
+        }
+
+        public PropertyValue(ulong value)
+        {
+            // for EntityId, Time, Guid, RegionId
+            RawLong = (long)value;
+        }
+
+        public PropertyValue(PrototypeId prototypeId)
+        {
+            RawLong = (long)prototypeId;
+        }
+
+        public PropertyValue(CurveId curveId)
+        {
+            RawLong = (long)curveId;
+        }
+
+        public PropertyValue(AssetId assetId)
+        {
+            RawLong = (long)assetId;
+        }
+
+        public PropertyValue(Vector3 vector)
+        {
             ulong x = (ulong)vector.X & 0x1FFFFF;
             if (vector.X < 0)
                 x |= 0x10000;
@@ -106,9 +75,57 @@ namespace MHServerEmu.Games.Properties
             if (vector.Z < 0)
                 x |= 0x10000;
 
-            RawValue = x | y | z;
+            RawLong = (long)(x | y | z);
         }
 
-        public override string ToString() => ((Vector3)Get()).ToString();
+        public bool ToBool() => RawLong != 0;
+
+        public float ToFloat() => RawFloat;
+
+        public int ToInt() => (int)RawLong;
+
+        public long ToLong() => RawLong;
+
+        public uint ToUInt() => (uint)(int)RawLong;
+
+        public ulong ToULong() => (ulong)RawLong;
+
+        public PrototypeId ToPrototypeId() => (PrototypeId)RawLong;
+
+        public CurveId ToCurveId() => (CurveId)RawLong;
+
+        public AssetId ToAssetId() => (AssetId)RawLong;
+
+        public Vector3 ToVector3()
+        {
+            ulong raw = (ulong)RawLong;
+
+            int x = (int)((raw >> 42) & 0x1FFFFF);
+            if ((x & 0x10000) != 0)
+                x = (int)((raw >> 42) | 0xFFE00000);
+
+            int y = (int)((raw >> 21) & 0x1FFFFF);
+            if ((y & 0x10000) != 0)
+                y = (int)((raw >> 21) | 0xFFE00000);
+
+            int z = (int)(raw & 0x1FFFFF);
+            if ((z & 0x10000) != 0)
+                z = (int)(raw | 0xFFE00000);
+
+            return new Vector3(x, y, z);
+        }
+
+        public string Print(PropertyDataType type)
+        {
+            switch (type)
+            {
+                case PropertyDataType.Boolean:      return ToBool().ToString();
+                case PropertyDataType.Real:         return ToFloat().ToString();
+                case PropertyDataType.Integer:      return ToInt().ToString();
+                case PropertyDataType.Prototype:    return GameDatabase.GetPrototypeName(ToPrototypeId());
+                case PropertyDataType.Int21Vector3: return ToVector3().ToString();
+                default:                            return $"0x{RawLong:X}";
+            }
+        }
     }
 }
