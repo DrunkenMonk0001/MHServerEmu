@@ -17,10 +17,20 @@ namespace MHServerEmu.Games.Properties
         private static readonly Logger Logger = LogManager.CreateLogger();
 
         // TODO: reimplement PropertyList data structure from the client?
+        // NOTE: Gazillion's PropertyList structure uses a different sorting order
         protected SortedDictionary<PropertyId, PropertyValue> _propertyList = new();
 
         public PropertyCollection() { }
 
+        /// <summary>
+        /// Returns the <see cref="PropertyValue"/> corresponding to the specified <see cref="PropertyId"/>.
+        /// Returns the <see cref="PropertyValue"/> equivalent of 0 if this <see cref="PropertyCollection"/> contains no such property.
+        /// </summary>
+        /// <remarks>
+        /// <see cref="PropertyValue"/> can be implicitly converted to and from <see cref="bool"/>, <see cref="float"/>,
+        /// <see cref="int"/>, <see cref="long"/>, <see cref="uint"/>, <see cref="ulong"/>, <see cref="PrototypeId"/>,
+        /// <see cref="CurveId"/>, <see cref="AssetId"/>, and <see cref="Vector3"/>.
+        /// </remarks>
         public PropertyValue GetProperty(PropertyId propertyId)
         {
             if (_propertyList.TryGetValue(propertyId, out var value) == false)
@@ -29,18 +39,22 @@ namespace MHServerEmu.Games.Properties
             return value;
         }
 
-        public void SetProperty(PropertyValue value, PropertyId propertyId) => SetPropertyValue(propertyId, value);
-        public void SetProperty(bool value, PropertyId propertyId) => SetPropertyValue(propertyId, Property.ToValue(value));
-        public void SetProperty(float value, PropertyId propertyId) => SetPropertyValue(propertyId, Property.ToValue(value));
-        public void SetProperty(int value, PropertyId propertyId) => SetPropertyValue(propertyId, Property.ToValue(value));
-        public void SetProperty(long value, PropertyId propertyId) => SetPropertyValue(propertyId, Property.ToValue(value));
-        public void SetProperty(uint value, PropertyId propertyId) => SetPropertyValue(propertyId, Property.ToValue(value));
-        public void SetProperty(ulong value, PropertyId propertyId) => SetPropertyValue(propertyId, Property.ToValue(value));
-        public void SetProperty(PrototypeId value, PropertyId propertyId) => SetPropertyValue(propertyId, Property.ToValue(value));
-        public void SetProperty(CurveId value, PropertyId propertyId) => SetPropertyValue(propertyId, Property.ToValue(value));
-        public void SetProperty(AssetId value, PropertyId propertyId) => SetPropertyValue(propertyId, Property.ToValue(value));
-        public void SetProperty(Vector3 value, PropertyId propertyId) => SetPropertyValue(propertyId, Property.ToValue(value));
+        /// <summary>
+        /// Sets the <see cref="PropertyValue"/> corresponding to the specified <see cref="PropertyId"/>.
+        /// </summary>
+        /// <remarks>
+        /// <see cref="PropertyValue"/> can be implicitly converted to and from <see cref="bool"/>, <see cref="float"/>,
+        /// <see cref="int"/>, <see cref="long"/>, <see cref="uint"/>, <see cref="ulong"/>, <see cref="PrototypeId"/>,
+        /// <see cref="CurveId"/>, <see cref="AssetId"/>, and <see cref="Vector3"/>.
+        /// </remarks>
+        public void SetProperty(PropertyValue value, PropertyId propertyId)
+        {
+            SetPropertyValue(propertyId, value);
+        }
 
+        /// <summary>
+        /// Returns <see langword="true"/> if this <see cref="PropertyCollection"/> contains any properties with the specified <see cref="PropertyEnum"/>.
+        /// </summary>
         public bool HasProperty(PropertyEnum propertyEnum)
         {
             foreach (var kvp in this)
@@ -52,6 +66,9 @@ namespace MHServerEmu.Games.Properties
             return false;
         }
 
+        /// <summary>
+        /// Returns <see langword="true"/> if this <see cref="PropertyCollection"/> contains any properties with the specified <see cref="PropertyId"/>.
+        /// </summary>
         public bool HasProperty(PropertyId propertyId)
         {
             return _propertyList.TryGetValue(propertyId, out _);
@@ -143,6 +160,9 @@ namespace MHServerEmu.Games.Properties
 
         // PropertyCollection::serializeWithDefault
 
+        /// <summary>
+        /// Decodes <see cref="PropertyCollection"/> data from a <see cref="CodedInputStream"/>.
+        /// </summary>
         public virtual void Decode(CodedInputStream stream)
         {
             uint propertyCount = stream.ReadRawUInt32();
@@ -155,6 +175,9 @@ namespace MHServerEmu.Games.Properties
             }
         }
 
+        /// <summary>
+        /// Encodes <see cref="PropertyCollection"/> data to a <see cref="CodedOutputStream"/>.
+        /// </summary>
         public virtual void Encode(CodedOutputStream stream)
         {
             stream.WriteRawUInt32((uint)_propertyList.Count);
@@ -165,38 +188,35 @@ namespace MHServerEmu.Games.Properties
         public override string ToString()
         {
             StringBuilder sb = new();
-            int count = 0;
             foreach (var kvp in this)
             {
                 PropertyId id = kvp.Key;
                 PropertyValue value = kvp.Value;
                 PropertyInfo info = GameDatabase.PropertyInfoTable.LookupPropertyInfo(id.Enum);
 
-                sb.Append($"Property{count}: ");
-                sb.AppendLine($"Id: {id}");
-                sb.AppendLine($"Enum: {id.Enum}");
-
-                if (kvp.Key.HasParams)
-                {
-                    sb.Append($"Params:");
-                    PropertyParam[] @params = id.GetParams();
-                    for (int i = 0; i < @params.Length; i++)
-                        sb.Append($" {@params[i]}");
-                    sb.AppendLine();
-                }
-
-                sb.AppendLine($"Value: {value.Print(info.DataType)} ({info.DataType})");
-                count++;
+                sb.AppendLine($"{info.BuildPropertyName(id)}: {value.Print(info.DataType)}");
             }
             return sb.ToString();
         }
 
+        /// <summary>
+        /// Sets the <see cref="PropertyValue"/> of a <see cref="PropertyId"/>.
+        /// </summary>
         protected bool SetPropertyValue(PropertyId propertyId, PropertyValue propertyValue)
         {
+            // TODO:
+            // PropertyInfo::IsPropertyValueTruncated()
+            // ClampPropertyValue()
+            // updateAggregateValueFromBase()
+            // track changes
+
             _propertyList[propertyId] = propertyValue;
             return true;
         }
 
+        /// <summary>
+        /// Serializes a key/value pair of <see cref="PropertyId"/> and <see cref="PropertyValue"/> to a <see cref="CodedOutputStream"/>.
+        /// </summary>
         protected bool SerializePropertyForPacking(KeyValuePair<PropertyId, PropertyValue> kvp, CodedOutputStream stream)
         {
             // TODO: Serialize only properties that are different from the base collection for replication 
@@ -208,6 +228,10 @@ namespace MHServerEmu.Games.Properties
         }
 
         // TODO: make value <-> bits conversion protected once we no longer need it for hacks
+
+        /// <summary>
+        /// Converts a <see cref="PropertyValue"/> to a <see cref="ulong"/> bit representation.
+        /// </summary>
         public static ulong ConvertValueToBits(PropertyValue value, PropertyDataType type)
         {
             switch (type)
@@ -221,6 +245,9 @@ namespace MHServerEmu.Games.Properties
             }
         }
 
+        /// <summary>
+        /// Converts a <see cref="ulong"/> bit representation to a <see cref="PropertyValue"/>.
+        /// </summary>
         public static PropertyValue ConvertBitsToValue(ulong bits, PropertyDataType type)
         {
             switch (type)
