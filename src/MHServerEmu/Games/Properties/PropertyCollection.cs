@@ -20,11 +20,18 @@ namespace MHServerEmu.Games.Properties
         // NOTE: Gazillion's PropertyList structure uses a different sorting order
         protected SortedDictionary<PropertyId, PropertyValue> _propertyList = new();
 
+        // Curve properties are its own can of worms it seems
+        protected SortedDictionary<PropertyId, CurveProperty> _curveList = new();
+
         public PropertyCollection() { }
+
+        // NOTE: In the client GetProperty() and SetProperty() handle conversion to and from PropertyValue,
+        // but we take care of that with implicit casting defined in PropertyValue.cs, so these methods are
+        // largely redundant and are kept to avoid deviating from the client.
 
         /// <summary>
         /// Returns the <see cref="PropertyValue"/> corresponding to the specified <see cref="PropertyId"/>.
-        /// Returns the <see cref="PropertyValue"/> equivalent of 0 if this <see cref="PropertyCollection"/> contains no such property.
+        /// Falls back to the default value for the property if this <see cref="PropertyCollection"/> does not contain it.
         /// </summary>
         /// <remarks>
         /// <see cref="PropertyValue"/> can be implicitly converted to and from <see cref="bool"/>, <see cref="float"/>,
@@ -33,10 +40,7 @@ namespace MHServerEmu.Games.Properties
         /// </remarks>
         public PropertyValue GetProperty(PropertyId propertyId)
         {
-            if (_propertyList.TryGetValue(propertyId, out var value) == false)
-                return Logger.WarnReturn(new PropertyValue(), $"Failed to get property value for id {propertyId}");
-
-            return value;
+            return GetPropertyValue(propertyId);
         }
 
         /// <summary>
@@ -248,6 +252,22 @@ namespace MHServerEmu.Games.Properties
         }
 
         /// <summary>
+        /// Returns the <see cref="PropertyValue"/> corresponding to the specified <see cref="PropertyId"/>.
+        /// Falls back to the default value for the property if this <see cref="PropertyCollection"/> does not contain it.
+        /// </summary>
+        protected PropertyValue GetPropertyValue(PropertyId propertyId)
+        {
+            PropertyInfo info = GameDatabase.PropertyInfoTable.LookupPropertyInfo(propertyId.Enum);
+
+            // TODO: EvalPropertyValue()
+
+            if (_propertyList.TryGetValue(propertyId, out var value) == false)
+                return Logger.TraceReturn(info.DefaultValue, $"Falling back to the default value for {propertyId}");
+
+            return value;
+        }
+
+        /// <summary>
         /// Sets the <see cref="PropertyValue"/> of a <see cref="PropertyId"/>.
         /// </summary>
         protected bool SetPropertyValue(PropertyId propertyId, PropertyValue propertyValue)
@@ -307,6 +327,15 @@ namespace MHServerEmu.Games.Properties
                 case PropertyDataType.Prototype:    return new(GameDatabase.DataDirectory.GetPrototypeFromEnumValue<Prototype>((int)bits));
                 default:                            return new((long)bits);
             }
+        }
+
+        protected struct CurveProperty
+        {
+            public PropertyId PropertyId { get; set; }
+            public PropertyId IndexPropertyId { get; set; }
+            public CurveId CurveId { get; set; }
+
+            // TODO: Serialize
         }
     }
 }
