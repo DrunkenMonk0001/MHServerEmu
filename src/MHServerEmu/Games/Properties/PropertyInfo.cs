@@ -17,9 +17,6 @@ namespace MHServerEmu.Games.Properties
         private readonly int[] _paramOffsets = new int[Property.MaxParamCount];
         private readonly PropertyParam[] _paramMaxValues = new PropertyParam[Property.MaxParamCount];
 
-        private int _paramCount;
-        private PropertyParam[] _paramDefaultValues;
-
         private bool _updatedInfo = false;
 
         public bool IsFullyLoaded { get; set; }
@@ -29,11 +26,14 @@ namespace MHServerEmu.Games.Properties
 
         public string PropertyInfoName { get; }
         public PrototypeId PropertyInfoPrototypeRef { get; }
-        public PropertyInfoPrototype PropertyInfoPrototype { get; private set; }
+        public PropertyInfoPrototype Prototype { get; private set; }
 
         public BlueprintId PropertyMixinBlueprintRef { get; set; } = BlueprintId.Invalid;
 
+        public int ParamCount { get; private set; }
+
         public PropertyValue DefaultValue { get; private set; }
+        public PropertyParam[] DefaultParamValues { get; private set; }
         public PropertyId DefaultCurveIndex { get; set; }
 
         public PropertyDataType DataType { get; private set; }
@@ -60,12 +60,12 @@ namespace MHServerEmu.Games.Properties
 
         public PropertyParam[] DecodeParameters(PropertyId propertyId)
         {
-            if (_paramCount == 0) return new PropertyParam[Property.MaxParamCount];
+            if (ParamCount == 0) return new PropertyParam[Property.MaxParamCount];
 
             ulong encodedParams = propertyId.Raw & Property.ParamMask;
             PropertyParam[] decodedParams = new PropertyParam[Property.MaxParamCount];
 
-            for (int i = 0; i < _paramCount; i++)
+            for (int i = 0; i < ParamCount; i++)
                 decodedParams[i] = (PropertyParam)(int)((encodedParams >> _paramOffsets[i]) & ((1ul << _paramBitCounts[i]) - 1));
 
             return decodedParams;
@@ -76,14 +76,14 @@ namespace MHServerEmu.Games.Properties
 
         public PropertyId EncodeParameters(PropertyEnum propertyEnum, PropertyParam[] @params)
         {
-            switch (_paramCount)
+            switch (ParamCount)
             {
                 case 0: return new(propertyEnum);
                 case 1: return EncodeParameters(propertyEnum, @params[0]);
                 case 2: return EncodeParameters(propertyEnum, @params[0], @params[1]);
                 case 3: return EncodeParameters(propertyEnum, @params[0], @params[1], @params[2]);
                 case 4: return EncodeParameters(propertyEnum, @params[0], @params[1], @params[2], @params[3]);
-                default: return Logger.WarnReturn(new PropertyId(propertyEnum), $"Failed to encode params: invalid param count {_paramCount}");
+                default: return Logger.WarnReturn(new PropertyId(propertyEnum), $"Failed to encode params: invalid param count {ParamCount}");
             }
         }
 
@@ -145,7 +145,7 @@ namespace MHServerEmu.Games.Properties
             sb.Append(PropertyName);
             var @params = id.GetParams();
 
-            for (int i = 0; i < _paramCount; i++)
+            for (int i = 0; i < ParamCount; i++)
             {
                 switch (GetParamType(i))
                 {
@@ -260,18 +260,18 @@ namespace MHServerEmu.Games.Properties
             return true;
         }
 
-        public bool SetPropertyInfoPrototype(PropertyInfoPrototype propertyInfoPrototype)
+        public bool SetPropertyInfoPrototype(PropertyInfoPrototype prototype)
         {
-            if (PropertyInfoPrototype != null) Logger.WarnReturn(false, "Failed to set PropertyInfoPrototype: already set");
-            PropertyInfoPrototype = propertyInfoPrototype;
+            if (Prototype != null) Logger.WarnReturn(false, "SetPropertyInfoPrototype(): already set");
+            Prototype = prototype;
 
             // Set shortcuts for prototype data
-            DataType = PropertyInfoPrototype.Type;
-            TruncatePropertyValueToInt = PropertyInfoPrototype.TruncatePropertyValueToInt;
+            DataType = Prototype.Type;
+            TruncatePropertyValueToInt = Prototype.TruncatePropertyValueToInt;
             
             // Curve properties get their default values from the info prototype rather than default mixins
             if (DataType == PropertyDataType.Curve)
-                DefaultValue = (float)PropertyInfoPrototype.CurveDefault;
+                DefaultValue = (float)Prototype.CurveDefault;
 
             return true;
         }
@@ -302,12 +302,12 @@ namespace MHServerEmu.Games.Properties
 
             // Set default values
             DefaultValue = defaultValue;
-            _paramCount = paramCount;
-            _paramDefaultValues = paramDefaultValues;
+            ParamCount = paramCount;
+            DefaultParamValues = paramDefaultValues;
 
             // Calculate bit offsets for params
             int offset = Property.ParamBitCount;
-            for (int i = 0; i < _paramCount; i++)
+            for (int i = 0; i < ParamCount; i++)
             {
                 _paramBitCounts[i] = ((int)_paramMaxValues[i]).HighestBitSet() + 1;
                 
