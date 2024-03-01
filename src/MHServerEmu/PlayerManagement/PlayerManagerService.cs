@@ -119,8 +119,8 @@ namespace MHServerEmu.PlayerManagement
             // Timestamp sync messages
             if (message.Id == (byte)ClientToGameServerMessage.NetMessageSyncTimeRequest || message.Id == (byte)ClientToGameServerMessage.NetMessagePing)
             {
-                message.GameTimeReceived = Clock.GetGameTime();
-                message.DateTimeReceived = Clock.GetDateTime();
+                message.GameTimeReceived = Clock.GameTime;
+                message.DateTimeReceived = Clock.DateTime;
             }
 
             switch ((ClientToGameServerMessage)message.Id)
@@ -265,50 +265,55 @@ namespace MHServerEmu.PlayerManagement
 
             // Sync time
             client.SendMessage(MuxChannel, new(NetMessageInitialTimeSync.CreateBuilder()
-                .SetGameTimeServerSent(Clock.GetGameTime().Ticks / 10)
-                .SetDateTimeServerSent(Clock.GetDateTime().Ticks / 10)
+                .SetGameTimeServerSent(Clock.GameTime.Ticks / 10)
+                .SetDateTimeServerSent(Clock.DateTime.Ticks / 10)
                 .Build()));
         }
 
-        private void OnSyncTimeRequest(FrontendClient client, NetMessageSyncTimeRequest syncTimeRequest, TimeSpan gameTimeReceived, TimeSpan dateTimeReceived)
+        private void OnSyncTimeRequest(FrontendClient client, NetMessageSyncTimeRequest request, TimeSpan gameTimeReceived, TimeSpan dateTimeReceived)
         {
-            //Logger.Debug($"NetMessageSyncTimeRequest:");
-            //Logger.Debug(syncTimeRequest.ToString());
+            //Logger.Debug($"NetMessageSyncTimeRequest:\n{request}");
 
-            client.SendMessage(MuxChannel, new(NetMessageSyncTimeReply.CreateBuilder()
-                .SetGameTimeClientSent(syncTimeRequest.GameTimeClientSent)
+            var reply = NetMessageSyncTimeReply.CreateBuilder()
+                .SetGameTimeClientSent(request.GameTimeClientSent)
                 .SetGameTimeServerReceived(gameTimeReceived.Ticks / 10)
-                .SetGameTimeServerSent(Clock.GetGameTime().Ticks / 10)
-                .SetDateTimeClientSent(syncTimeRequest.DateTimeClientSent)
+                .SetGameTimeServerSent(Clock.GameTime.Ticks / 10)
+                .SetDateTimeClientSent(request.DateTimeClientSent)
                 .SetDateTimeServerReceived(dateTimeReceived.Ticks / 10)
-                .SetDateTimeServerSent(Clock.GetDateTime().Ticks / 10)
+                .SetDateTimeServerSent(Clock.DateTime.Ticks / 10)
                 .SetDialation(1.0f)
                 .SetGametimeDialationStarted(0)
                 .SetDatetimeDialationStarted(0)
-                .Build()));
+                .Build();
+
+            //Logger.Debug($"NetMessageSyncTimeReply:\n{reply}");
+
+            client.SendMessage(MuxChannel, new(reply));
         }
 
         private void OnPing(FrontendClient client, NetMessagePing ping, TimeSpan gameTimeReceived)
         {
-            //Logger.Debug($"NetMessagePing:");
-            //Logger.Debug(ping.ToString());
+            //Logger.Debug($"NetMessagePing:\n{ping}");
 
-            client.SendMessage(MuxChannel, new(NetMessagePingResponse.CreateBuilder()
+            var response = NetMessagePingResponse.CreateBuilder()
                 .SetDisplayOutput(ping.DisplayOutput)
                 .SetRequestSentClientTime(ping.SendClientTime)
                 .SetRequestSentGameTime(ping.SendGameTime)
                 .SetRequestNetReceivedGameTime((ulong)gameTimeReceived.TotalMilliseconds)
-                .SetResponseSendTime((ulong)Clock.GetGameTime().TotalMilliseconds)
-                .SetServerTickforecast(0)
+                .SetResponseSendTime((ulong)Clock.GameTime.TotalMilliseconds)
+                .SetServerTickforecast(0)   // server tick time ms
                 .SetGameservername("BOPR-MHVGIS2")
                 .SetFrontendname("bopr-mhfes2")
-                .Build()));
+                .Build();
+
+            //Logger.Debug($"NetMessagePingResponse:\n{response}");
+
+            client.SendMessage(MuxChannel, new(response));
         }
 
         private void OnFps(FrontendClient client, NetMessageFPS fps)
         {
-            //Logger.Info("Received FPS:");
-            //Logger.Trace(fps.ToString());
+            //Logger.Debug($"NetMessageFPS:\n{fps}");
         }
 
         private void OnGracefulDisconnect(FrontendClient client)
