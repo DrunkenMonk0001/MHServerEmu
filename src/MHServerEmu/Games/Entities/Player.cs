@@ -1,4 +1,5 @@
 ﻿using System.Text;
+using Gazillion;
 using Google.ProtocolBuffers;
 using MHServerEmu.Common;
 using MHServerEmu.Common.Encoders;
@@ -14,7 +15,9 @@ using MHServerEmu.Games.Missions;
 using MHServerEmu.Games.Network;
 using MHServerEmu.Games.Properties;
 using MHServerEmu.Games.Regions;
+using MHServerEmu.Games.Regions.MatchQueues;
 using MHServerEmu.Games.Social;
+using MHServerEmu.Games.Social.Guilds;
 using MHServerEmu.PlayerManagement.Accounts;
 using MHServerEmu.PlayerManagement.Accounts.DBModels;
 
@@ -51,12 +54,17 @@ namespace MHServerEmu.Games.Entities
         private ReplicatedVariable<string> _playerName;
         private ulong[] _consoleAccountIds = new ulong[(int)PlayerAvatarIndex.Count];
         private ReplicatedVariable<string> _secondaryPlayerName;
+
+        private ulong _guildId;
+        private string _guildName;
+        private GuildMembership _guildMembership;
+
         private SortedSet<AvailableBadges> _badges;
 
         public MissionManager MissionManager { get; set; }
         public ReplicatedPropertyCollection AvatarProperties { get; set; }
         public ulong ShardId { get; set; }
-        public ulong MatchQueueStatus { get; set; }
+        public MatchQueueStatus MatchQueueStatus { get; set; }
 
         // NOTE: EmailVerified and AccountCreationTimestamp are set in NetMessageGiftingRestrictionsUpdate that
         // should be sent in the packet right after logging in. NetMessageGetCurrencyBalanceResponse should be
@@ -65,10 +73,6 @@ namespace MHServerEmu.Games.Entities
         public TimeSpan AccountCreationTimestamp { get; set; }  // UnixTime
 
         public ReplicatedVariable<ulong> PartyId { get; set; }
-        public string UnknownString { get; set; }
-        public bool HasGuildInfo { get; set; }
-        public GuildMemberReplicationRuntimeInfo GuildInfo { get; set; }
-        public bool HasCommunity { get; set; }
         public Community Community { get; set; }
         public bool UnkBool { get; set; }
         public PrototypeId[] StashInventories { get; set; }
@@ -82,7 +86,7 @@ namespace MHServerEmu.Games.Entities
         public Player(EntityBaseData baseData, AOINetworkPolicyValues replicationPolicy, ReplicatedPropertyCollection properties,
             MissionManager missionManager, ReplicatedPropertyCollection avatarProperties,
             ulong shardId, ReplicatedVariable<string> playerName, ReplicatedVariable<string> secondaryPlayerName,
-            ulong matchQueueStatus, bool emailVerified, TimeSpan accountCreationTimestamp, ReplicatedVariable<ulong> partyId,
+            MatchQueueStatus matchQueueStatus, bool emailVerified, TimeSpan accountCreationTimestamp, ReplicatedVariable<ulong> partyId,
             Community community, bool unkBool, PrototypeId[] stashInventories, SortedSet<AvailableBadges> badges,
             GameplayOptions gameplayOptions, AchievementState achievementState, StashTabOption[] stashTabOptions) : base(baseData)
         {
@@ -123,20 +127,23 @@ namespace MHServerEmu.Games.Entities
             _consoleAccountIds[1] = stream.ReadRawVarint64();
             _secondaryPlayerName = new(stream);
 
-            MatchQueueStatus = stream.ReadRawVarint64();
+            MatchQueueStatus = new(stream);
+            MatchQueueStatus.SetOwner(this);
 
             EmailVerified = boolDecoder.ReadBool(stream);
             AccountCreationTimestamp = Clock.UnixTimeMicrosecondsToTimeSpan(stream.ReadRawInt64());
 
             PartyId = new(stream);
 
-            HasGuildInfo = boolDecoder.ReadBool(stream);
-            if (HasGuildInfo) GuildInfo = new(stream);      // GuildMember::SerializeReplicationRuntimeInfo
+            GuildMember.SerializeReplicationRuntimeInfo(stream, boolDecoder, ref _guildId, ref _guildName, ref _guildMembership);
 
-            UnknownString = stream.ReadRawString();
+            // There is a string here that is always empty and is immediately discarded after reading, purpose unknown
+            string emptyString = stream.ReadRawString();
+            if (emptyString != string.Empty)
+                Logger.Warn($"Decode(): emptyString is not empty!");
 
-            HasCommunity = boolDecoder.ReadBool(stream);
-            if (HasCommunity) Community = new(stream);
+            bool hasCommunity = boolDecoder.ReadBool(stream);
+            if (hasCommunity) Community = new(stream);
 
             UnkBool = boolDecoder.ReadBool(stream);
 
@@ -168,8 +175,8 @@ namespace MHServerEmu.Games.Entities
             MissionManager.EncodeBools(boolEncoder);
 
             boolEncoder.EncodeBool(EmailVerified);
-            boolEncoder.EncodeBool(HasGuildInfo);
-            boolEncoder.EncodeBool(HasCommunity);
+            boolEncoder.EncodeBool(_guildId != GuildMember.InvalidGuildId);
+            boolEncoder.EncodeBool(true);   // hasCommunity TODO: Check archive's replication policy and send community only to owners
             boolEncoder.EncodeBool(UnkBool);
 
             GameplayOptions.EncodeBools(boolEncoder);
@@ -185,19 +192,15 @@ namespace MHServerEmu.Games.Entities
             stream.WriteRawVarint64(_consoleAccountIds[0]);
             stream.WriteRawVarint64(_consoleAccountIds[1]);
             _secondaryPlayerName.Encode(stream);
-            stream.WriteRawVarint64(MatchQueueStatus);
+            MatchQueueStatus.Encode(stream);
             boolEncoder.WriteBuffer(stream);   // EmailVerified
             stream.WriteRawInt64(AccountCreationTimestamp.Ticks / 10);
-
             PartyId.Encode(stream);
+            GuildMember.SerializeReplicationRuntimeInfo(stream, boolEncoder, ref _guildId, ref _guildName, ref _guildMembership);
+            stream.WriteRawString(string.Empty);    // Mysterious always empty throwaway string
 
-            boolEncoder.WriteBuffer(stream);   // HasGuildInfo
-            if (HasGuildInfo) GuildInfo.Encode(stream);
-
-            stream.WriteRawString(UnknownString);
-
-            boolEncoder.WriteBuffer(stream);   // HasCommunity
-            if (HasCommunity) Community.Encode(stream);
+            boolEncoder.WriteBuffer(stream);   // hasCommunity
+            Community.Encode(stream);
 
             boolEncoder.WriteBuffer(stream);   // UnkBool
 
@@ -336,14 +339,18 @@ namespace MHServerEmu.Games.Entities
             sb.AppendLine($"{nameof(_consoleAccountIds)}[0]: {_consoleAccountIds[0]}");
             sb.AppendLine($"{nameof(_consoleAccountIds)}[1]: {_consoleAccountIds[1]}");
             sb.AppendLine($"{nameof(_secondaryPlayerName)}: {_secondaryPlayerName}");
-            sb.AppendLine($"{nameof(MatchQueueStatus)}: 0x{MatchQueueStatus:X}");
+            sb.AppendLine($"{nameof(MatchQueueStatus)}: {MatchQueueStatus}");
             sb.AppendLine($"{nameof(EmailVerified)}: {EmailVerified}");
             sb.AppendLine($"{nameof(AccountCreationTimestamp)}: {AccountCreationTimestamp}");
             sb.AppendLine($"{nameof(PartyId)}: {PartyId}");
-            sb.AppendLine($"{nameof(HasGuildInfo)}: {HasGuildInfo}");
-            sb.AppendLine($"{nameof(GuildInfo)}: {GuildInfo}");
-            sb.AppendLine($"{nameof(UnknownString)}: {UnknownString}");
-            sb.AppendLine($"{nameof(HasCommunity)}: {HasCommunity}");
+
+            if (_guildId != GuildMember.InvalidGuildId)
+            {
+                sb.AppendLine($"{nameof(_guildId)}: {_guildId}");
+                sb.AppendLine($"{nameof(_guildName)}: {_guildName}");
+                sb.AppendLine($"{nameof(_guildMembership)}: {_guildMembership}");
+            }
+
             sb.AppendLine($"{nameof(Community)}: {Community}");
             sb.AppendLine($"{nameof(UnkBool)}: {UnkBool}");
 
