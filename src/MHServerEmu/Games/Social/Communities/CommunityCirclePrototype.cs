@@ -10,9 +10,12 @@
         Flag2   = 1 << 2
     }
 
+    /// <summary>
+    /// A fake "prototype" that contains data for system <see cref="CommunityCircle"/> instances.
+    /// </summary>
     public class CommunityCirclePrototype
     {
-        public readonly SystemCircle Id;
+        public readonly CircleId Id;
         public readonly bool IsPersistent;
         public readonly bool IsMigrated;
         public readonly bool Field3;
@@ -25,7 +28,7 @@
         public readonly bool NotifyOnline;
         public readonly CommunityCirclePrototypeFlags Flags;
 
-        public CommunityCirclePrototype(SystemCircle id, bool isPersistent, bool isMigrated, bool field3, bool field4,
+        public CommunityCirclePrototype(CircleId id, bool isPersistent, bool isMigrated, bool field3, bool field4,
             bool field5, bool field6, bool field7, bool restrictsIgnore, int maxMembers, bool notifyOnline, CommunityCirclePrototypeFlags flags)
         {
             Id = id;
