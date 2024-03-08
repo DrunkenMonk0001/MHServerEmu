@@ -8,6 +8,7 @@ using MHServerEmu.Common.Logging;
 using MHServerEmu.Games.Achievements;
 using MHServerEmu.Games.Common;
 using MHServerEmu.Games.Entities.Avatars;
+using MHServerEmu.Games.Entities.Inventories;
 using MHServerEmu.Games.Entities.Options;
 using MHServerEmu.Games.GameData;
 using MHServerEmu.Games.GameData.Prototypes;
@@ -59,7 +60,11 @@ namespace MHServerEmu.Games.Entities
         private string _guildName;
         private GuildMembership _guildMembership;
 
+        private List<PrototypeId> _unlockedInventoryList;
+
         private SortedSet<AvailableBadges> _badges;
+
+        private Dictionary<PrototypeId, StashTabOptions> _stashTabOptionsDict;
 
         public MissionManager MissionManager { get; set; }
         public ReplicatedPropertyCollection AvatarProperties { get; set; }
@@ -74,11 +79,9 @@ namespace MHServerEmu.Games.Entities
 
         public ReplicatedVariable<ulong> PartyId { get; set; }
         public Community Community { get; set; }
-        public bool UnkBool { get; set; }
-        public PrototypeId[] StashInventories { get; set; }
+
         public GameplayOptions GameplayOptions { get; set; }
         public AchievementState AchievementState { get; set; }
-        public StashTabOption[] StashTabOptions { get; set; }
 
         public Player(EntityBaseData baseData, ByteString archiveData) : base(baseData, archiveData) { }
 
@@ -87,8 +90,8 @@ namespace MHServerEmu.Games.Entities
             MissionManager missionManager, ReplicatedPropertyCollection avatarProperties,
             ulong shardId, ReplicatedVariable<string> playerName, ReplicatedVariable<string> secondaryPlayerName,
             MatchQueueStatus matchQueueStatus, bool emailVerified, TimeSpan accountCreationTimestamp, ReplicatedVariable<ulong> partyId,
-            Community community, bool unkBool, PrototypeId[] stashInventories, SortedSet<AvailableBadges> badges,
-            GameplayOptions gameplayOptions, AchievementState achievementState, StashTabOption[] stashTabOptions) : base(baseData)
+            Community community, List<PrototypeId> unlockedInventoryList, SortedSet<AvailableBadges> badges,
+            GameplayOptions gameplayOptions, AchievementState achievementState, Dictionary<PrototypeId, StashTabOptions> stashTabOptionsDict) : base(baseData)
         {
             ReplicationPolicy = replicationPolicy;
             Properties = properties;
@@ -103,12 +106,11 @@ namespace MHServerEmu.Games.Entities
             AccountCreationTimestamp = accountCreationTimestamp;
             PartyId = partyId;
             Community = community;
-            UnkBool = unkBool;
-            StashInventories = stashInventories;
+            _unlockedInventoryList = unlockedInventoryList;
             _badges = badges;
             GameplayOptions = gameplayOptions;
             AchievementState = achievementState;
-            StashTabOptions = stashTabOptions;
+            _stashTabOptionsDict = stashTabOptionsDict;
         }
 
         protected override void Decode(CodedInputStream stream)
@@ -138,8 +140,7 @@ namespace MHServerEmu.Games.Entities
             GuildMember.SerializeReplicationRuntimeInfo(stream, boolDecoder, ref _guildId, ref _guildName, ref _guildMembership);
 
             // There is a string here that is always empty and is immediately discarded after reading, purpose unknown
-            string emptyString = stream.ReadRawString();
-            if (emptyString != string.Empty)
+            if (stream.ReadRawString() != string.Empty)
                 Logger.Warn($"Decode(): emptyString is not empty!");
 
             Community = new(this);
@@ -147,11 +148,14 @@ namespace MHServerEmu.Games.Entities
             bool hasCommunityData = boolDecoder.ReadBool(stream);
             if (hasCommunityData) Community.Decode(stream);
 
-            UnkBool = boolDecoder.ReadBool(stream);
+            // Unknown bool, always false
+            if (boolDecoder.ReadBool(stream))
+                Logger.Warn($"Decode(): unkBool is true!");
 
-            StashInventories = new PrototypeId[stream.ReadRawVarint64()];
-            for (int i = 0; i < StashInventories.Length; i++)
-                StashInventories[i] = stream.ReadPrototypeEnum<Prototype>();
+            _unlockedInventoryList = new();
+            ulong numUnlockedInventories = stream.ReadRawVarint64();
+            for (ulong i = 0; i < numUnlockedInventories; i++)
+                _unlockedInventoryList.Add(stream.ReadPrototypeEnum<Prototype>());
 
             _badges = new();
             ulong numBadges = stream.ReadRawVarint64();
@@ -162,9 +166,13 @@ namespace MHServerEmu.Games.Entities
 
             AchievementState = new(stream);
 
-            StashTabOptions = new StashTabOption[stream.ReadRawVarint64()];
-            for (int i = 0; i < StashTabOptions.Length; i++)
-                StashTabOptions[i] = new(stream);
+            _stashTabOptionsDict = new();
+            ulong numStashTabOptions = stream.ReadRawVarint64();
+            for (ulong i = 0; i < numStashTabOptions; i++)
+            {
+                PrototypeId stashTabRef = stream.ReadPrototypeEnum<Prototype>();
+                _stashTabOptionsDict.Add(stashTabRef, new(stream));
+            }
         }
 
         public override void Encode(CodedOutputStream stream)
@@ -179,7 +187,7 @@ namespace MHServerEmu.Games.Entities
             boolEncoder.EncodeBool(EmailVerified);
             boolEncoder.EncodeBool(_guildId != GuildMember.InvalidGuildId);
             boolEncoder.EncodeBool(true);   // hasCommunity TODO: Check archive's replication policy and send community only to owners
-            boolEncoder.EncodeBool(UnkBool);
+            boolEncoder.EncodeBool(false);  // Unknown unused bool, always false
 
             GameplayOptions.EncodeBools(boolEncoder);
 
@@ -206,8 +214,9 @@ namespace MHServerEmu.Games.Entities
 
             boolEncoder.WriteBuffer(stream);   // UnkBool
 
-            stream.WriteRawVarint64((ulong)StashInventories.Length);
-            foreach (PrototypeId stashInventory in StashInventories) stream.WritePrototypeEnum<Prototype>(stashInventory);
+            stream.WriteRawVarint64((ulong)_unlockedInventoryList.Count);
+            foreach (PrototypeId unlockedInventory in _unlockedInventoryList)
+                stream.WritePrototypeEnum<Prototype>(unlockedInventory);
 
             stream.WriteRawVarint64((ulong)_badges.Count);
             foreach (AvailableBadges badge in _badges)
@@ -217,8 +226,12 @@ namespace MHServerEmu.Games.Entities
 
             AchievementState.Encode(stream);
 
-            stream.WriteRawVarint64((ulong)StashTabOptions.Length);
-            foreach (StashTabOption option in StashTabOptions) option.Encode(stream);
+            stream.WriteRawVarint64((ulong)_stashTabOptionsDict.Count);
+            foreach (var kvp in _stashTabOptionsDict)
+            {
+                stream.WritePrototypeEnum<Prototype>(kvp.Key);
+                kvp.Value.Encode(stream);
+            }
         }
 
         /// <summary>
@@ -226,6 +239,8 @@ namespace MHServerEmu.Games.Entities
         /// </summary>
         public void InitializeFromDBAccount(DBAccount account)
         {
+            var prototype = GameDatabase.GetPrototype<PlayerPrototype>(BaseData.PrototypeId);
+
             // Adjust properties
             foreach (var accountAvatar in account.Avatars.Values)
             {
@@ -319,6 +334,15 @@ namespace MHServerEmu.Games.Entities
                 .Build());
             #endregion
 
+            // Initialize stash tabs
+            _unlockedInventoryList.Clear();
+            _stashTabOptionsDict.Clear();
+            OnEnterGameInitStashTabOptions();
+
+            // Unlock all locked tabs
+            foreach (PrototypeId stashRef in GetStashInventoryProtoRefs(true, false))
+                UnlockInventory(stashRef);
+
             // Add all badges to admin accounts
             if (account.UserLevel == AccountUserLevel.Admin)
             {
@@ -352,6 +376,194 @@ namespace MHServerEmu.Games.Entities
                 return 0;
 
             return _consoleAccountIds[(int)avatarIndex];
+        }
+
+        /// <summary>
+        /// Returns <see langword="true"/> if the inventory with the specified <see cref="PrototypeId"/> is unlocked for this <see cref="Player"/>.
+        /// </summary>
+        public bool IsInventoryUnlocked(PrototypeId invProtoRef)
+        {
+            if (invProtoRef == PrototypeId.Invalid)
+                return Logger.WarnReturn(false, $"IsInventoryUnlocked(): invProtoRef == PrototypeId.Invalid");
+
+            return _unlockedInventoryList.Contains(invProtoRef);
+        }
+
+        /// <summary>
+        /// Unlocks the inventory with the specified <see cref="PrototypeId"/> for this <see cref="Player"/>.
+        /// </summary>
+        public bool UnlockInventory(PrototypeId invProtoRef)
+        {
+            // Entity::GetInventoryByRef()
+
+            if (_unlockedInventoryList.Contains(invProtoRef))
+                return Logger.WarnReturn(false, $"UnlockInventory(): {GameDatabase.GetFormattedPrototypeName(invProtoRef)} is already unlocked");
+
+            _unlockedInventoryList.Add(invProtoRef);
+
+            // Entity::addInventory()
+
+            if (Inventory.IsPlayerStashInventory(invProtoRef))
+                StashTabInsert(invProtoRef, 0);
+
+            return true;
+        }
+
+        /// <summary>
+        /// Returns <see cref="PrototypeId"/> values of all locked and/or unlocked stash tabs for this <see cref="Player"/>.
+        /// </summary>
+        public IEnumerable<PrototypeId> GetStashInventoryProtoRefs(bool getLocked, bool getUnlocked)
+        {
+            var playerProto = GameDatabase.GetPrototype<PlayerPrototype>(BaseData.PrototypeId);
+            if (playerProto == null) yield break;
+            if (playerProto.StashInventories == null) yield break;
+
+            foreach (EntityInventoryAssignmentPrototype invAssignmentProto in playerProto.StashInventories)
+            {
+                if (invAssignmentProto.Inventory == PrototypeId.Invalid) continue;
+
+                // TODO: isLocked = Entity::GetInventory() == null
+                // For now use prototype data + unlock list for this
+                var inventoryProto = GameDatabase.GetPrototype<InventoryPrototype>(invAssignmentProto.Inventory);
+                bool isLocked = true;
+                isLocked &= inventoryProto.LockedByDefault;
+                isLocked &= _unlockedInventoryList.Contains(inventoryProto.DataRef) == false;
+                // Although the unified stash from the console version is unlocked by default, we consider it always locked on PC
+                isLocked |= inventoryProto.ConvenienceLabel == ConvenienceLabel.UnifiedStash;
+
+                if (isLocked && getLocked || isLocked == false && getUnlocked)
+                    yield return invAssignmentProto.Inventory;
+            }
+        }
+
+        /// <summary>
+        /// Updates <see cref="StashTabOptions"/> with the data from a <see cref="NetMessageStashTabOptions"/>.
+        /// </summary>
+        public bool UpdateStashTabOptions(NetMessageStashTabOptions optionsMessage)
+        {
+            PrototypeId inventoryRef = (PrototypeId)optionsMessage.InventoryRefId;
+
+            if (Inventory.IsPlayerStashInventory(inventoryRef) == false)
+                return Logger.WarnReturn(false, $"UpdateStashTabOptions(): {inventoryRef} is not a player stash ref");
+
+            // Entity::GetInventoryByRef() != nullptr
+
+            if (_stashTabOptionsDict.TryGetValue(inventoryRef, out StashTabOptions options) == false)
+            {
+                options = new();
+                _stashTabOptionsDict.Add(inventoryRef, options);
+            }
+
+            // Stash tab names can be up to 30 characters long
+            if (optionsMessage.HasDisplayName)
+                options.DisplayName = optionsMessage.DisplayName.Substring(0, 30);
+
+            if (optionsMessage.HasIconPathAssetId)
+                options.IconPathAssetId = (AssetId)optionsMessage.IconPathAssetId;
+
+            if (optionsMessage.HasColor)
+                options.Color = (StashTabColor)optionsMessage.Color;
+
+            return true;
+        }
+
+        /// <summary>
+        /// Inserts the stash tab with the specified <see cref="PrototypeId"/> into the specified position.
+        /// </summary>
+        public bool StashTabInsert(PrototypeId insertedStashRef, int newSortOrder)
+        {
+            if (newSortOrder < 0)
+                return Logger.WarnReturn(false, $"StashTabInsert(): Invalid newSortOrder {newSortOrder}");
+
+            if (insertedStashRef == PrototypeId.Invalid)
+                return Logger.WarnReturn(false, $"StashTabInsert(): Invalid insertedStashRef {insertedStashRef}");
+
+            if (Inventory.IsPlayerStashInventory(insertedStashRef) == false)
+                return Logger.WarnReturn(false, $"StashTabInsert(): insertedStashRef {insertedStashRef} is not a player stash ref");
+
+            // Entity::GetInventoryByRef(insertedStashRef) != nullptr
+
+            // Get options for the tab we need to insert
+            if (_stashTabOptionsDict.TryGetValue(insertedStashRef, out StashTabOptions options))
+            {
+                // Only new tabs are allowed to be in the same location
+                if (options.SortOrder == newSortOrder)
+                    return Logger.WarnReturn(false, "StashTabInsert(): Inserting an existing tab at the same location");
+            }
+            else
+            {
+                // Create options of the tab if there are none yet
+                options = new();
+                _stashTabOptionsDict.Add(insertedStashRef, options);
+            }
+
+            // No need to sort if only have a single tab
+            if (_stashTabOptionsDict.Count == 1)
+                return true;
+
+            // Assign the new sort order to the tab
+            int oldSortOrder = options.SortOrder;
+            options.SortOrder = newSortOrder;
+
+            // Rearrange other tabs
+            int sortIncrement, sortStart, sortFinish;
+
+            if (oldSortOrder < newSortOrder)
+            {
+                // If the sort order is increasing we need to shift back everything in between
+                sortIncrement = -1;
+                sortStart = oldSortOrder;
+                sortFinish = newSortOrder;
+            }
+            else
+            {
+                // If the sort order is decreasing we need to shift forward everything in between
+                sortIncrement = 1;
+                sortStart = newSortOrder;
+                sortFinish = oldSortOrder;
+            }
+
+            // Fall back in case our sort order overflows for some reason
+            SortedList<int, PrototypeId> sortedTabs = new();
+            bool orderOverflow = false;
+
+            // Update sort order for all tabs
+            foreach (var kvp in _stashTabOptionsDict)
+            {
+                PrototypeId sortRef = kvp.Key;
+                StashTabOptions sortOptions = kvp.Value;
+
+                if (sortRef != insertedStashRef)
+                {
+                    // Move the tab if:
+                    // 1. We are adding a new tab and everything needs to be shifted
+                    // 2. We are within our sort range
+                    bool isNew = oldSortOrder == newSortOrder && sortOptions.SortOrder >= newSortOrder;
+                    bool isWithinSortRange = sortOptions.SortOrder >= sortStart && sortOptions.SortOrder <= sortFinish;
+
+                    if (isNew || isWithinSortRange)
+                        sortOptions.SortOrder += sortIncrement;
+                }
+
+                // Make sure our sort order does not exceed the amount of stored stash tab options
+                sortedTabs[sortOptions.SortOrder] = sortRef;
+                if (sortOptions.SortOrder >= _stashTabOptionsDict.Count)
+                    orderOverflow = true;
+            }
+
+            // Reorder if our sort order overflows
+            if (orderOverflow)
+            {
+                Logger.Warn($"StashTabInsert(): Sort order overflow, reordering");
+                int fixedOrder = 0;
+                foreach (var kvp in sortedTabs)
+                {
+                    _stashTabOptionsDict[kvp.Value].SortOrder = fixedOrder;
+                    fixedOrder++;
+                }
+            }
+
+            return true;
         }
 
         /// <summary>
@@ -393,10 +605,9 @@ namespace MHServerEmu.Games.Entities
             }
 
             sb.AppendLine($"{nameof(Community)}: {Community}");
-            sb.AppendLine($"{nameof(UnkBool)}: {UnkBool}");
 
-            for (int i = 0; i < StashInventories.Length; i++)
-                sb.AppendLine($"StashInventory{i}: {GameDatabase.GetPrototypeName(StashInventories[i])}");
+            for (int i = 0; i < _unlockedInventoryList.Count; i++)
+                sb.AppendLine($"_unlockedInventoryList[{i}]: {GameDatabase.GetPrototypeName(_unlockedInventoryList[i])}");
 
             if (_badges.Any())
             {
@@ -409,8 +620,20 @@ namespace MHServerEmu.Games.Entities
             sb.AppendLine($"{nameof(GameplayOptions)}: {GameplayOptions}");
             sb.AppendLine($"{nameof(AchievementState)}: {AchievementState}");
 
-            for (int i = 0; i < StashTabOptions.Length; i++)
-                sb.AppendLine($"StashTabOption{i}: {StashTabOptions[i]}");
+            foreach (var kvp in _stashTabOptionsDict)
+                sb.AppendLine($"StashTabOptions[{GameDatabase.GetFormattedPrototypeName(kvp.Key)}]: {kvp.Value}");
+        }
+
+        /// <summary>
+        /// Initializes <see cref="StashTabOptions"/> for any stash tabs that are unlocked but don't have any options yet.
+        /// </summary>
+        private void OnEnterGameInitStashTabOptions()
+        {
+            foreach (PrototypeId stashRef in GetStashInventoryProtoRefs(false, true))
+            {
+                if (_stashTabOptionsDict.ContainsKey(stashRef) == false)
+                    StashTabInsert(stashRef, 0);
+            }
         }
     }
 }
