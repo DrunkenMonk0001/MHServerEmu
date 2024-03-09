@@ -21,10 +21,6 @@ namespace MHServerEmu.Games.Entities
     {
         private static readonly Logger Logger = LogManager.CreateLogger();
 
-        // Hardcoded messages we use for loading
-        private static readonly NetMessageEntityCreate PlayerMessage = PacketHelper.LoadMessagesFromPacketFile("NetMessageEntityCreatePlayer.bin")[0]
-            .Deserialize<NetMessageEntityCreate>();
-
         private readonly Game _game;
         private readonly Dictionary<ulong, Entity> _entityDict = new();
 
@@ -35,13 +31,9 @@ namespace MHServerEmu.Games.Entities
         public EntityManager(Game game)
         {
             _game = game;
-
-            // minihack: force default player entity message initialization on construction
-            // so that there isn't a lag when a player logs in for the first time after the server starts
-            bool playerMessageIsEmpty = PlayerMessage == null;
         }
 
-        public WorldEntity CreateWorldEntity(Cell cell, PrototypeId prototypeId, Vector3 position, Vector3 orientation,
+        public WorldEntity CreateWorldEntity(Cell cell, PrototypeId prototypeId, Vector3 position, Orientation orientation,
             int health, bool requiresEnterGameWorld, bool OverrideSnapToFloor = false)
         {
             if (cell == null) return default;
@@ -63,7 +55,7 @@ namespace MHServerEmu.Games.Entities
             return worldEntity;
         }
 
-        public WorldEntity CreateWorldEntityEnemy(Cell cell, PrototypeId prototypeId, Vector3 position, Vector3 orientation,
+        public WorldEntity CreateWorldEntityEnemy(Cell cell, PrototypeId prototypeId, Vector3 position, Orientation orientation,
             int health, bool requiresEnterGameWorld, int characterLevel)
         {
             EntityBaseData baseData = (requiresEnterGameWorld == false)
@@ -87,7 +79,7 @@ namespace MHServerEmu.Games.Entities
             return worldEntity;
         }
 
-        public WorldEntity CreateWorldEntityEmpty(ulong regionId, PrototypeId prototypeId, Vector3 position, Vector3 orientation)
+        public WorldEntity CreateWorldEntityEmpty(ulong regionId, PrototypeId prototypeId, Vector3 position, Orientation orientation)
         {
             EntityBaseData baseData = new EntityBaseData(GetNextEntityId(), prototypeId, position, orientation);
             WorldEntity worldEntity = new(baseData, AOINetworkPolicyValues.AOIChannelProximity, _game.CurrentRepId);
@@ -123,7 +115,7 @@ namespace MHServerEmu.Games.Entities
             return item;
         }
 
-        public Transition SpawnTransitionMarker(Cell cell, TransitionPrototype transitionProto, Vector3 position, Vector3 orientation,
+        public Transition SpawnTransitionMarker(Cell cell, TransitionPrototype transitionProto, Vector3 position, Orientation orientation,
             bool requiresEnterGameWorld, bool OverrideSnapToFloor)
         {
             if (cell == null) return default;
@@ -144,7 +136,7 @@ namespace MHServerEmu.Games.Entities
             return transition;
         }
 
-        public Transition SpawnTargetTeleport(Cell cell, TransitionPrototype transitionProto, Vector3 position, Vector3 orientation,
+        public Transition SpawnTargetTeleport(Cell cell, TransitionPrototype transitionProto, Vector3 position, Orientation orientation,
             bool requiresEnterGameWorld, PrototypeId targetRef, bool OverrideSnapToFloor)
         {
             if (cell == null) return default;
@@ -250,12 +242,6 @@ namespace MHServerEmu.Games.Entities
 
             replicationId = 0;
             return false;
-        }
-
-        public Player GetDefaultPlayerEntity()
-        {
-            EntityBaseData baseData = new(PlayerMessage.BaseData);
-            return new(baseData, PlayerMessage.ArchiveData);
         }
 
         public IEnumerable<Entity> GetEntities()
@@ -451,7 +437,7 @@ namespace MHServerEmu.Games.Entities
                         var teleportProto = teleport.TransitionPrototype;
                         if (teleportProto.VisibleByDefault == false) // To fix
                         {
-                            // Logger.Debug($"[{teleport.Location.GetPosition().ToStringFloat()}][InvT]{GameDatabase.GetFormattedPrototypeName(teleport.Destinations[0].Target)} = {teleport.Destinations[0].Target},");
+                            // Logger.Debug($"[{teleport.Location.GetPosition()}][InvT]{GameDatabase.GetFormattedPrototypeName(teleport.Destinations[0].Target)} = {teleport.Destinations[0].Target},");
                             if (LockedTargets.Contains((InvTarget)teleport.Destinations[0].Target) == false) continue;
                             PrototypeId visibleParent = GetVisibleParentRef(teleportProto.ParentDataRef);
                             entity.BaseData.PrototypeId = visibleParent;
