@@ -26,7 +26,7 @@ namespace MHServerEmu.Games.Generators.Population
             PropSetPrototype propSetProto = GetPropSetPrototypeFromRef(propSetRef);
             if (propSetProto == null) return false;
 
-            if (propSetProto.PropShapeLists.IsNullOrEmpty() == false)
+            if (propSetProto.PropShapeLists.HasValue())
             {
                 foreach (PropSetTypeListPrototype propList in propSetProto.PropShapeLists)
                 {
@@ -46,7 +46,7 @@ namespace MHServerEmu.Games.Generators.Population
                         continue;
                     }
 
-                    if (propList.PropShapeEntries.IsNullOrEmpty() == false)
+                    if (propList.PropShapeEntries.HasValue())
                     {
                         if (!Map.TryGetValue(propTypeDataRef, out PropGroupList groupList))
                         {
@@ -187,10 +187,10 @@ namespace MHServerEmu.Games.Generators.Population
                 
                 PropTable.GetPropRandomOffsetAndRotation(out Vector3 randomOffset, out float randomRotation, randomSeed, propGroup);
 
-                Vector3 position = markerPrototype.Position;
+                Vector3 position = new(markerPrototype.Position);
                 position += randomOffset;
 
-                Vector3 rotation = markerPrototype.Rotation;
+                Orientation rotation = new(markerPrototype.Rotation);
                 rotation.Yaw += randomRotation;
 
                 Transform3 transform = Transform3.BuildTransform(position, rotation);

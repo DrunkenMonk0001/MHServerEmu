@@ -5,6 +5,7 @@ using MHServerEmu.Games.GameData.Calligraphy.Attributes;
 using MHServerEmu.Games.GameData.Prototypes.Markers;
 using MHServerEmu.Games.Generators;
 using MHServerEmu.Games.Generators.Population;
+using System.Text;
 
 namespace MHServerEmu.Games.GameData.Prototypes
 {
@@ -31,7 +32,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
         public virtual void BuildCluster(ClusterGroup group, ClusterObjectFlag flags)
         {
-            if (Riders.IsNullOrEmpty() == false && flags.HasFlag(ClusterObjectFlag.Henchmen) == false)
+            if (Riders.HasValue() && flags.HasFlag(ClusterObjectFlag.Henchmen) == false)
             {
                 foreach(var rider in Riders)
                     if (rider is PopulationRiderEntityPrototype riderEntityProto)
@@ -45,6 +46,30 @@ namespace MHServerEmu.Games.GameData.Prototypes
             }
         }
 
+        public virtual void GetContainedEntities(HashSet<PrototypeId> entities, bool unwrapEntitySelectors = false)
+        {
+            if (Riders.HasValue())
+            {
+                foreach (var rider in Riders)
+                    if (rider is PopulationRiderEntityPrototype riderEntityProto && riderEntityProto.Entity != PrototypeId.Invalid)
+                        entities.Add(riderEntityProto.Entity);
+            }
+        }
+
+        public static int UnwrapEntitySelector(PrototypeId selectorRef, HashSet<PrototypeId> entities)
+        {
+            int count = 0;
+            var proto = GameDatabase.GetPrototype<Prototype>(selectorRef);
+            if (proto is EntitySelectorPrototype selectorProto && selectorProto.Entities.HasValue())
+                foreach (PrototypeId entity in selectorProto.Entities)
+                {
+                    entities.Add(entity);
+                    count++;
+                }
+
+            return count;
+        }
+
         public FormationTypePrototype GetFormation()
         {
             if (Formation != null)
@@ -52,6 +77,15 @@ namespace MHServerEmu.Games.GameData.Prototypes
             else
                 return GameDatabase.GetPrototype<FormationTypePrototype>(FormationTemplate);
         }
+
+        public override string ToString()
+        {
+            StringBuilder sb = new();
+            sb.AppendLine($"[{GetType().Name}]: {GameDatabase.GetFormattedPrototypeName(UsePopulationMarker)}");
+            sb.AppendLine($"Riders: {Riders.Length}");
+            return sb.ToString();
+        }
+
     }
 
     public class PopulationEntityPrototype : PopulationObjectPrototype
@@ -66,6 +100,16 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
             base.BuildCluster(group, flags);
         }
+
+        public override void GetContainedEntities(HashSet<PrototypeId> entities, bool unwrapEntitySelectors = false)
+        {            
+            base.GetContainedEntities(entities, unwrapEntitySelectors);
+
+            if (Entity != PrototypeId.Invalid)
+                if (unwrapEntitySelectors == false || UnwrapEntitySelector(Entity, entities) == 0)
+                    entities.Add(Entity);
+        }
+
     }
 
     public class PopulationClusterFixedPrototype : PopulationObjectPrototype
@@ -75,7 +119,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
         public override void BuildCluster(ClusterGroup group, ClusterObjectFlag flags)
         {
-            if (Entities.IsNullOrEmpty() == false)
+            if (Entities.HasValue())
                 foreach (var entity in Entities)
                 {
                     ClusterEntity clusterEntity = group.CreateClusterEntity(entity);
@@ -83,7 +127,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
                     clusterEntity.Flags |= flags;
                 }
 
-            if (EntityEntries.IsNullOrEmpty() == false)
+            if (EntityEntries.HasValue())
                 foreach (var entry in EntityEntries)
                 {
                     if (entry == null) continue;
@@ -96,6 +140,33 @@ namespace MHServerEmu.Games.GameData.Prototypes
                 }
 
             base.BuildCluster(group, flags);
+        }
+
+        public override void GetContainedEntities(HashSet<PrototypeId> entities, bool unwrapEntitySelectors = false)
+        {
+            base.GetContainedEntities(entities, unwrapEntitySelectors);
+            InternalGetContainedEntities(entities, unwrapEntitySelectors);
+        }
+
+        private void InternalGetContainedEntities(HashSet<PrototypeId> entities, bool unwrapEntitySelectors)
+        {
+            if (Entities.HasValue())
+                foreach (var entity in Entities)
+                {
+                    if (entity != PrototypeId.Invalid)
+                        if (unwrapEntitySelectors == false || UnwrapEntitySelector(entity, entities) == 0)
+                            entities.Add(entity);
+                }
+
+            if (EntityEntries.HasValue())
+                foreach (var entry in EntityEntries)
+                {
+                    if (entry == null) continue;
+                    var entity = entry.Entity;
+                    if (entity != PrototypeId.Invalid)
+                        if (unwrapEntitySelectors == false || UnwrapEntitySelector(entity, entities) == 0)
+                            entities.Add(entity);
+                }
         }
     }
 
@@ -121,6 +192,15 @@ namespace MHServerEmu.Games.GameData.Prototypes
             }
 
             base.BuildCluster(group, flags);
+        }
+
+        public override void GetContainedEntities(HashSet<PrototypeId> entities, bool unwrapEntitySelectors = false)
+        {
+            base.GetContainedEntities(entities, unwrapEntitySelectors);
+
+            if (Entity != PrototypeId.Invalid)
+                if (unwrapEntitySelectors == false || UnwrapEntitySelector(Entity, entities) == 0)
+                    entities.Add(Entity);
         }
     }
 
@@ -150,7 +230,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
                 {
                     // TODO check obj as PopulationGroupPrototype
                     PopulationEntityPrototype choiceEntity = obj as PopulationEntityPrototype;
-                    if (choiceEntity != null) continue;
+                    if (choiceEntity == null) continue;
                     ClusterEntity clusterEntity = group.CreateClusterEntity(choiceEntity.Entity);
                     if (clusterEntity == null) continue;
                     clusterEntity.Flags |= flags;
@@ -159,6 +239,20 @@ namespace MHServerEmu.Games.GameData.Prototypes
             
             base.BuildCluster(group, flags);            
         }
+
+        public override void GetContainedEntities(HashSet<PrototypeId> entities, bool unwrapEntitySelectors = false)
+        {
+            base.GetContainedEntities(entities, unwrapEntitySelectors);
+            InternalGetContainedEntities(entities, unwrapEntitySelectors);
+        }
+
+        private void InternalGetContainedEntities(HashSet<PrototypeId> entities, bool unwrapEntitySelectors)
+        {
+            if (Choices.HasValue())
+                foreach (var choice in Choices)
+                    choice?.GetContainedEntities(entities, unwrapEntitySelectors);
+        }
+
     }
 
     public class PopulationLeaderPrototype : PopulationObjectPrototype
@@ -175,7 +269,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
                 clusterEntity.Flags |= flags | ClusterObjectFlag.Leader;
             }
 
-            if (Henchmen.IsNullOrEmpty() == false)
+            if (Henchmen.HasValue())
             {
                 // Add picker for choice henchmen
                 Picker<PopulationObjectPrototype> picker = new(group.Random);
@@ -185,6 +279,23 @@ namespace MHServerEmu.Games.GameData.Prototypes
             }
 
             base.BuildCluster(group, flags);
+        }
+
+        public override void GetContainedEntities(HashSet<PrototypeId> entities, bool unwrapEntitySelectors = false)
+        {
+            base.GetContainedEntities(entities, unwrapEntitySelectors);
+            InternalGetContainedEntities(entities, unwrapEntitySelectors);
+        }
+
+        private void InternalGetContainedEntities(HashSet<PrototypeId> entities, bool unwrapEntitySelectors)
+        {
+            if (Leader != PrototypeId.Invalid)
+                if (unwrapEntitySelectors == false || UnwrapEntitySelector(Leader, entities) == 0)
+                    entities.Add(Leader);
+
+            if (Henchmen.HasValue())
+                foreach (var henchmen in Henchmen)
+                    henchmen?.GetContainedEntities(entities, unwrapEntitySelectors);
         }
     }
 
@@ -213,13 +324,13 @@ namespace MHServerEmu.Games.GameData.Prototypes
                 if (marker is not EntityMarkerPrototype markerP) continue;
                 if (markerP.EntityGuid == PrototypeGuid.Invalid)
                 {
-                    Logger.Warn($"Marker at in Cell:\n  {ToString()}\nand position:\n  {markerP.Position.ToStringFloat()}\nhas invalid GUID");
+                    Logger.Warn($"Marker at in Cell:\n  {ToString()}\nand position:\n  {markerP.Position}\nhas invalid GUID");
                     continue;
                 }
                 PrototypeId markerRef = GameDatabase.GetDataRefByPrototypeGuid(markerP.EntityGuid);
                 if (markerRef == PrototypeId.Invalid)
                 {
-                    Logger.Warn($"Marker at in Cell:\n  {ToString()}\nand position:\n  {markerP.Position.ToStringFloat()}\nhas invalid Ref, GUID was valid, so likely prototype ref was deleted from calligraphy:\n  {markerP.LastKnownEntityName}");
+                    Logger.Warn($"Marker at in Cell:\n  {ToString()}\nand position:\n  {markerP.Position}\nhas invalid Ref, GUID was valid, so likely prototype ref was deleted from calligraphy:\n  {markerP.LastKnownEntityName}");
                     continue;
                 }
                 
@@ -272,6 +383,19 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
             return encounterProtoRef;
         }
+
+        public override void GetContainedEntities(HashSet<PrototypeId> entities, bool unwrapEntitySelectors = false)
+        {
+            base.GetContainedEntities(entities, unwrapEntitySelectors);
+            InternalGetContainedEntities(entities, unwrapEntitySelectors);
+        }
+
+        private void InternalGetContainedEntities(HashSet<PrototypeId> entities, bool unwrapEntitySelectors)
+        {
+            var resourceProto = GetEncounterResource();
+            if (resourceProto != null && resourceProto.MarkerSet != null)
+                resourceProto.MarkerSet.GetContainedEntities(entities);
+        }
     }
 
     public class PopulationFormationPrototype : PopulationObjectPrototype
@@ -280,7 +404,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
         public override void BuildCluster(ClusterGroup group, ClusterObjectFlag flags)
         {
-            if (Objects.IsNullOrEmpty() == false)
+            if (Objects.HasValue())
                 foreach (var requiredObject in Objects)
                 {
                     if (requiredObject == null) continue;
@@ -302,6 +426,14 @@ namespace MHServerEmu.Games.GameData.Prototypes
     public class PopulationGroupPrototype : PopulationObjectPrototype
     {
         public PopulationObjectPrototype[] EntitiesAndGroups { get; protected set; }
+
+        public override void GetContainedEntities(HashSet<PrototypeId> entities, bool unwrapEntitySelectors = false)
+        {
+            if (EntitiesAndGroups.HasValue())
+                foreach (var objectProto in EntitiesAndGroups)
+                    objectProto?.GetContainedEntities(entities, unwrapEntitySelectors);
+        }
+
     }
 
     public class PopulationRiderPrototype : Prototype
@@ -339,11 +471,25 @@ namespace MHServerEmu.Games.GameData.Prototypes
             else
                 return GameDatabase.GetPrototype<PopulationObjectPrototype>(ObjectTemplate);
         }
+
+        public virtual void GetContainedEntities(HashSet<PrototypeId> refs) 
+        {
+            var objectProto = GetPopObject();
+            objectProto?.GetContainedEntities( refs );
+        }
     }
 
     public class PopulationRequiredObjectListPrototype : Prototype
     {
         public PopulationRequiredObjectPrototype[] RequiredObjects { get; protected set; }
+
+        public virtual void GetContainedEntities(HashSet<PrototypeId> entities)
+        {
+            if (RequiredObjects.HasValue())
+                foreach (var requiredObjectProto in RequiredObjects)
+                    requiredObjectProto?.GetContainedEntities(entities);
+        }
+
     }
 
     public class BoxFormationTypePrototype : FormationTypePrototype

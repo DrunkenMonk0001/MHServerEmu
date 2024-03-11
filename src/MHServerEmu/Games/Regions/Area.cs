@@ -123,7 +123,7 @@ namespace MHServerEmu.Games.Regions
 
             PropTable = new();
 
-            if (AreaPrototype.PropSets.IsNullOrEmpty() == false)
+            if (AreaPrototype.PropSets.HasValue())
             {
                 foreach (var propSet in AreaPrototype.PropSets)
                     PropTable.AppendPropSet(propSet);
@@ -222,10 +222,10 @@ namespace MHServerEmu.Games.Regions
 
         private bool PostGenerate()
         {
-            /*    if (AreaPrototype.FullyGenerateCells) // only TheRaft
-                    foreach (var cell in CellList)
-                        cell.PostGenerate(); // can be here?
-            */
+            // if (AreaPrototype.FullyGenerateCells) // only TheRaft
+            foreach (var cell in CellIterator())
+                cell.PostGenerate(); // can be here?
+            
             return true;
         }
 
@@ -391,7 +391,7 @@ namespace MHServerEmu.Games.Regions
 
         public static void CreateConnection(Area areaA, Area areaB, Vector3 position, ConnectPosition connectPosition)
         {
-            if (areaA.LogDebug) Logger.Debug($"connect {position.ToStringFloat()} {areaA.Id} <> {areaB.Id}");
+            if (areaA.LogDebug) Logger.Debug($"connect {position} {areaA.Id} <> {areaB.Id}");
             areaA.AddConnection(position, areaB, connectPosition);
             areaB.AddConnection(position, areaA, connectPosition);
         }
@@ -417,7 +417,7 @@ namespace MHServerEmu.Games.Regions
 
         public override string ToString()
         {
-            return $"{PrototypeName}, areaid={Id}, aabb={RegionBounds.ToStringFloat()}, game={Game}";
+            return $"{PrototypeName}, areaid={Id}, aabb={RegionBounds}, game={Game}";
         }
 
         public string PrototypeName => GameDatabase.GetFormattedPrototypeName(PrototypeDataRef);
@@ -491,7 +491,7 @@ namespace MHServerEmu.Games.Regions
                 .Build().ToByteArray());
         }
 
-        public bool FindTargetPosition(Vector3 markerPos, Vector3 markerRot, RegionConnectionTargetPrototype target)
+        public bool FindTargetPosition(Vector3 markerPos, Orientation markerRot, RegionConnectionTargetPrototype target)
         {
             var cellRef = GameDatabase.GetDataRefByAsset(target.Cell);
 

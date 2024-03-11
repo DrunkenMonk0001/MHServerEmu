@@ -94,7 +94,7 @@ namespace MHServerEmu.Games.Regions
                 CameraSettingPrototype cameraSetting = cameraSettingCollectionPrototype.CameraSettings.First();
 
                 var normalizedDirection = Vector3.Normalize2D(new(cameraSetting.DirectionX, cameraSetting.DirectionY, cameraSetting.DirectionZ));
-                float angle = MathHelper.WrapAngleRadians(Vector3.FromDeltaVector2D(normalizedDirection).Yaw + MathF.PI - (MathF.PI / 4f));
+                float angle = Orientation.WrapAngleRadians(Orientation.FromDeltaVector2D(normalizedDirection).Yaw + MathHelper.Pi - MathHelper.PiOver4);
                 _cameraView = Transform3.RotationZ(angle) * _cameraView;
             }
         }
@@ -228,8 +228,7 @@ namespace MHServerEmu.Games.Regions
             List<WorldEntity> newEntities = new();
 
             // Update Entity
-            EntityRegionSPContext context = new() { Flags = EntityRegionSPContextFlags.ActivePartition | EntityRegionSPContextFlags.StaticPartition};
-            foreach (var worldEntity in region.IterateEntitiesInVolume(_entitiesVolume, context))
+            foreach (var worldEntity in region.IterateEntitiesInVolume(_entitiesVolume, new()))
             {
                 if (_loadedCells.TryGetValue(worldEntity.Location.Cell.Id, out var status))
                     if (status.Loaded == false) continue;

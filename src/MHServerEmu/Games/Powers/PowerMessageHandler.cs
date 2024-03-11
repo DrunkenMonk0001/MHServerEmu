@@ -10,6 +10,10 @@ using MHServerEmu.Games.Entities.Items;
 using MHServerEmu.Games.Properties;
 using MHServerEmu.Games.Entities;
 using MHServerEmu.Games.Entities.Avatars;
+using MHServerEmu.Games.MetaGame;
+using MHServerEmu.Games.Entities.Locomotion;
+using MHServerEmu.Games.Network;
+using MHServerEmu.Games.Common;
 
 namespace MHServerEmu.Games.Powers
 {
@@ -67,6 +71,11 @@ namespace MHServerEmu.Games.Powers
                         return OnAbilitySwapInAbilityBar(client, swapInAbilityBar);
                     break;
 
+                case ClientToGameServerMessage.NetMessageAssignStolenPower:
+                    if (message.TryDeserialize<NetMessageAssignStolenPower>(out var assignStolenPower))
+                        return OnAssignStolenPower(client, assignStolenPower);
+                    break;
+
                 default:
                     Logger.Warn($"Received unhandled message {(ClientToGameServerMessage)message.Id} (id {message.Id})");
                     break;
@@ -75,13 +84,13 @@ namespace MHServerEmu.Games.Powers
             return Array.Empty<QueuedGameMessage>();
         }
 
-        private bool PowerHasKeyword(PrototypeId powerId, HardcodedBlueprintId keyword)
+        private bool PowerHasKeyword(PrototypeId powerId, PrototypeId keyword)
         {
             var power = GameDatabase.GetPrototype<PowerPrototype>(powerId);
             if (power == null) return false;
 
             for (int i = 0; i < power.Keywords.Length; i++)
-                if (power.Keywords[i] == (PrototypeId)keyword) return true;
+                if (power.Keywords[i] == keyword) return true;
 
             return false;
         }
@@ -134,9 +143,9 @@ namespace MHServerEmu.Games.Powers
             }
             else if (powerPrototypePath.Contains("EmmaFrost/"))
             {
-                if (PowerHasKeyword(powerPrototypeId, HardcodedBlueprintId.DiamondFormActivatePower))
+                if (PowerHasKeyword(powerPrototypeId, (PrototypeId)HardcodedBlueprints.DiamondFormActivatePower))
                     _eventManager.AddEvent(client, EventEnum.DiamondFormActivate, 0, tryActivatePower.PowerPrototypeId);
-                else if (PowerHasKeyword(powerPrototypeId, HardcodedBlueprintId.Mental))
+                else if (PowerHasKeyword(powerPrototypeId, (PrototypeId)HardcodedBlueprints.Mental))
                     _eventManager.AddEvent(client, EventEnum.DiamondFormDeactivate, 0, tryActivatePower.PowerPrototypeId);
             }
             else if (tryActivatePower.PowerPrototypeId == (ulong)PowerPrototypes.Magik.Ultimate)
@@ -179,6 +188,7 @@ namespace MHServerEmu.Games.Powers
                 WorldEntity entity = (WorldEntity)client.CurrentGame.EntityManager.GetEntityById(entityId);
                 if (entity != null)
                 {
+                    var proto = entity.WorldEntityPrototype;
                     var repId = entity.Properties.ReplicationId;
                     int health = entity.Properties[PropertyEnum.Health];
                     int newHealth = health - damage;
@@ -190,6 +200,28 @@ namespace MHServerEmu.Games.Powers
                         messageList.Add(new(client,
                          new(Property.ToNetMessageSetProperty(repId, new(PropertyEnum.IsDead), true))
                          ));
+                    } else if (proto is AgentPrototype agent && agent.Locomotion.Immobile == false)
+                    {
+                        LocomotionStateUpdateArchive locomotion = new()
+                        {
+                            ReplicationPolicy = AOINetworkPolicyValues.AOIChannelProximity,
+                            EntityId = entityId,
+                            FieldFlags = LocomotionMessageFlags.NoLocomotionState,
+                            Position = new(entity.Location.GetPosition()),
+                            Orientation = new(),
+                            LocomotionState = new(0)
+                        };
+                        locomotion.Orientation.Yaw = Vector3.Angle(locomotion.Position, client.LastPosition);
+                        messageList.Add(new(client, new(NetMessageLocomotionStateUpdate.CreateBuilder()
+                            .SetArchiveData(locomotion.Serialize())
+                            .Build())));
+                    }
+                    if (entity.ConditionCollection.Count > 0 && health == entity.Properties[PropertyEnum.HealthMaxOther])
+                    {
+                        messageList.Add(new(client, new(NetMessageDeleteCondition.CreateBuilder()
+                            .SetIdEntity(entityId)
+                            .SetKey(1)
+                            .Build())));
                     }
                     entity.Properties[PropertyEnum.Health] = newHealth;
                     messageList.Add(new(client,
@@ -288,6 +320,13 @@ namespace MHServerEmu.Games.Powers
             abilityKeyMapping.SetAbilityInAbilitySlot(prototypeA, slotB);
 
             return Array.Empty<QueuedGameMessage>();
+        }
+
+        private IEnumerable<QueuedGameMessage> OnAssignStolenPower(FrontendClient client, NetMessageAssignStolenPower assignStolenPower)
+        {
+            PropertyParam param = Property.ToParam(PropertyEnum.AvatarMappedPower, 0, (PrototypeId)assignStolenPower.StealingPowerProtoId);
+            yield return new(client, new(Property.ToNetMessageSetProperty((ulong)HardcodedAvatarPropertyCollectionReplicationId.Rogue,
+                new(PropertyEnum.AvatarMappedPower, param), (PrototypeId)assignStolenPower.StolenPowerProtoId)));
         }
 
         #endregion

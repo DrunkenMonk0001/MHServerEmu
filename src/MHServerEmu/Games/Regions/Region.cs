@@ -39,6 +39,8 @@ namespace MHServerEmu.Games.Regions
     public class Region : IMissionManagerOwner
     {
         // Old
+        private static readonly IdGenerator IdGenerator = new(IdType.Region, 0);
+
         public RegionPrototypeId PrototypeId { get; private set; }   
         public byte[] ArchiveData { get; set; }
         public CreateRegionParams CreateParams { get; private set; }
@@ -89,7 +91,7 @@ namespace MHServerEmu.Games.Regions
 
         public Region(RegionPrototypeId prototype, int randomSeed, byte[] archiveData, CreateRegionParams createParams) // Old
         {
-            Id = IdGenerator.Generate(IdType.Region);
+            Id = IdGenerator.Generate();
 
             PrototypeId = prototype;
             RandomSeed = randomSeed;
@@ -127,7 +129,7 @@ namespace MHServerEmu.Games.Regions
             RandomSeed = settings.Seed;
             Bound = settings.Bound;
             AvatarSwapEnabled = RegionPrototype.EnableAvatarSwap;
-            RestrictedRosterEnabled = (RegionPrototype.RestrictedRoster.IsNullOrEmpty() == false);
+            RestrictedRosterEnabled = (RegionPrototype.RestrictedRoster.HasValue());
 
             SetRegionLevel();
 
@@ -158,7 +160,7 @@ namespace MHServerEmu.Games.Regions
 
             CreateParams = new((uint)RegionLevel, (DifficultyTier)settings.DifficultyTierRef); // OLD params
 
-            if (regionProto.DividedStartLocations.IsNullOrEmpty() == false)
+            if (regionProto.DividedStartLocations.HasValue())
                 InitDividedStartLocations(regionProto.DividedStartLocations);
 
             // if (!NaviSystem.Initialize(this))  return false;
@@ -252,7 +254,7 @@ namespace MHServerEmu.Games.Regions
                 Logger.Warn($"Region created with affixes, but no RegionAffixTable. REGION={this} AFFIXES={Settings.Affixes}")
             }
 
-            if (regionProto.AvatarPowers.IsNullOrEmpty() == false)
+            if (regionProto.AvatarPowers.HasValue())
                 foreach (var avatarPower in regionProto.AvatarPowers)
                     SetProperty<bool>(true, new (PropertyEnum.RegionAvatarPower, avatarPower));
 
@@ -419,7 +421,7 @@ namespace MHServerEmu.Games.Regions
                 return null;
             }
             Areas[area.Id] = area;
-            if (settings.RegionSettings.GenerateLog) Logger.Debug($"Adding area {area.PrototypeName}, id={area.Id}, areapos = {area.Origin.ToStringFloat()}, seed = {RandomSeed}");
+            if (settings.RegionSettings.GenerateLog) Logger.Debug($"Adding area {area.PrototypeName}, id={area.Id}, areapos = {area.Origin}, seed = {RandomSeed}");
             return area;
         }
 
@@ -507,6 +509,7 @@ namespace MHServerEmu.Games.Regions
 
         public DateTime CreatedTime { get; set; }
         public DateTime VisitedTime { get; private set; }
+        public string PrototypeName => GameDatabase.GetFormattedPrototypeName(PrototypeDataRef);
 
         public override string ToString()
         {
@@ -626,7 +629,7 @@ namespace MHServerEmu.Games.Regions
             }
         }
 
-        public bool FindTargetPosition(Vector3 markerPos, Vector3 markerRot, RegionConnectionTargetPrototype target)
+        public bool FindTargetPosition(Vector3 markerPos, Orientation markerRot, RegionConnectionTargetPrototype target)
         {
             Area targetArea;
 
@@ -704,14 +707,14 @@ namespace MHServerEmu.Games.Regions
                 if (client.EntityToTeleport != null) // TODO change teleport without reload Region
                 {
                     Vector3 position = new(client.EntityToTeleport.Location.GetPosition());
-                    Vector3 orientation = new(client.EntityToTeleport.Location.GetOrientation());
+                    Orientation orientation = new(client.EntityToTeleport.Location.GetOrientation());
                     if (client.EntityToTeleport.EntityPrototype is TransitionPrototype teleportEntity
                         && teleportEntity.SpawnOffset > 0) teleportEntity.CalcSpawnOffset(orientation, position);
                     client.StartPositon = position;
                     client.StartOrientation = orientation;
                     client.EntityToTeleport = null;
                 }
-                else if (RegionTransition.FindStartPosition(this, targetRef, out Vector3 position, out Vector3 orientation))
+                else if (RegionTransition.FindStartPosition(this, targetRef, out Vector3 position, out Orientation orientation))
                 {
                     client.StartPositon = position;
                     client.StartOrientation = orientation;
@@ -719,7 +722,7 @@ namespace MHServerEmu.Games.Regions
                 else
                 {
                     client.StartPositon = StartArea.Origin;
-                    client.StartOrientation = Vector3.Zero;
+                    client.StartOrientation = Orientation.Zero;
                 }
 
                 client.AOI.Reset(this);
@@ -756,6 +759,38 @@ namespace MHServerEmu.Games.Regions
             }
         }
 
+        public static bool IsBoundsBlockedByEntity(Bounds bounds, WorldEntity entity, BlockingCheckFlags blockFlags)
+        {
+            if (entity != null)
+            {
+                if (entity.NoCollide) return false;
+
+                bool selfBlocking = false;
+                bool otherBlocking = false;
+
+                if (blockFlags != 0)
+                {
+                    var entityProto = entity.WorldEntityPrototype;
+                    if (entityProto == null) return false;
+
+                    var boundsProto = entityProto.Bounds;
+                    if (boundsProto == null) return false;
+
+                    selfBlocking |= blockFlags.HasFlag(BlockingCheckFlags.CheckSelf);
+                    otherBlocking |= blockFlags.HasFlag(BlockingCheckFlags.CheckSpawns) && boundsProto.BlocksSpawns;
+                    otherBlocking |= blockFlags.HasFlag(BlockingCheckFlags.CheckGroundMovementPowers) && (boundsProto.BlocksMovementPowers == BoundsMovementPowerBlockType.Ground || boundsProto.BlocksMovementPowers == BoundsMovementPowerBlockType.All);
+                    otherBlocking |= blockFlags.HasFlag(BlockingCheckFlags.CheckAllMovementPowers) && boundsProto.BlocksMovementPowers == BoundsMovementPowerBlockType.All;
+                    otherBlocking |= blockFlags.HasFlag(BlockingCheckFlags.CheckLanding) && boundsProto.BlocksLanding;
+
+                    if (otherBlocking == false) return false;
+                }
+
+                Bounds entityBounds = entity.Bounds;
+                if (bounds.CanBeBlockedBy(entityBounds, selfBlocking, otherBlocking) && bounds.Intersects(entityBounds)) return true;
+            }
+
+            return false;
+        }
 
     }
 

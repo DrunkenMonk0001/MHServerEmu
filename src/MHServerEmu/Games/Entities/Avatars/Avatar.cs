@@ -1,30 +1,60 @@
 ﻿using System.Text;
+using Gazillion;
 using Google.ProtocolBuffers;
 using MHServerEmu.Common.Encoders;
 using MHServerEmu.Common.Extensions;
+using MHServerEmu.Common.Logging;
 using MHServerEmu.Games.Common;
-using MHServerEmu.Games.GameData.Prototypes;
 using MHServerEmu.Games.GameData;
+using MHServerEmu.Games.GameData.Calligraphy;
+using MHServerEmu.Games.GameData.Prototypes;
+using MHServerEmu.Games.Network;
 using MHServerEmu.Games.Powers;
 using MHServerEmu.Games.Properties;
-using MHServerEmu.Games.Social;
+using MHServerEmu.Games.Social.Guilds;
 using MHServerEmu.PlayerManagement.Accounts.DBModels;
 
 namespace MHServerEmu.Games.Entities.Avatars
 {
     public class Avatar : Agent
     {
+        private static readonly Logger Logger = LogManager.CreateLogger();
+
+        private ulong _guildId = GuildMember.InvalidGuildId;
+        private string _guildName = string.Empty;
+        private GuildMembership _guildMembership = GuildMembership.eGMNone;
+
         public ReplicatedVariable<string> PlayerName { get; set; }
         public ulong OwnerPlayerDbId { get; set; }
-        public string GuildName { get; set; }
-        public bool HasGuildInfo { get; set; }
-        public GuildMemberReplicationRuntimeInfo GuildInfo { get; set; }
         public AbilityKeyMapping[] AbilityKeyMappings { get; set; }
+
+        public Avatar(ulong entityId, ulong replicationId) : base(new())
+        {
+            // Entity
+            BaseData.ReplicationPolicy = AOINetworkPolicyValues.AOIChannelOwner;
+            BaseData.LocomotionState = new(0f);
+            BaseData.EntityId = entityId;
+            BaseData.InterestPolicies = AOINetworkPolicyValues.AOIChannelOwner;
+            BaseData.FieldFlags = EntityCreateMessageFlags.HasInterestPolicies | EntityCreateMessageFlags.HasInvLoc | EntityCreateMessageFlags.HasAvatarWorldInstanceId;
+            
+            ReplicationPolicy = AOINetworkPolicyValues.AOIChannelOwner;
+            Properties = new(replicationId);
+
+            // WorldEntity
+            TrackingContextMap = new();
+            ConditionCollection = new();
+            PowerCollection = new();
+            UnkEvent = 134463198;
+
+            // Avatar
+            PlayerName = new(++replicationId, string.Empty);
+            OwnerPlayerDbId = 0x20000000000D3D03;   // D3D03 == 867587 from Player's EntityBaseData
+        }
 
         public Avatar(EntityBaseData baseData, ByteString archiveData) : base(baseData, archiveData) { }
 
-        public Avatar(EntityBaseData baseData, EntityTrackingContextMap[] trackingContextMap, Condition[] conditionCollection, PowerCollectionRecord[] powerCollection, int unkEvent,
-            ReplicatedVariable<string> playerName, ulong ownerPlayerDbId, string guildName, bool hasGuildInfo, GuildMemberReplicationRuntimeInfo guildInfo, AbilityKeyMapping[] abilityKeyMappings)
+        public Avatar(EntityBaseData baseData, List<EntityTrackingContextMap> trackingContextMap, List<Condition> conditionCollection, List<PowerCollectionRecord> powerCollection, int unkEvent,
+            ReplicatedVariable<string> playerName, ulong ownerPlayerDbId, ulong guildId, string guildName, GuildMembership guildMembership, AbilityKeyMapping[] abilityKeyMappings)
             : base(baseData)
         {
             TrackingContextMap = trackingContextMap;
@@ -33,9 +63,9 @@ namespace MHServerEmu.Games.Entities.Avatars
             UnkEvent = unkEvent;
             PlayerName = playerName;
             OwnerPlayerDbId = ownerPlayerDbId;
-            GuildName = guildName;
-            HasGuildInfo = hasGuildInfo;
-            GuildInfo = guildInfo;
+            _guildId = guildId;
+            _guildName = guildName;
+            _guildMembership = guildMembership;
             AbilityKeyMappings = abilityKeyMappings;
         }
 
@@ -48,11 +78,11 @@ namespace MHServerEmu.Games.Entities.Avatars
             PlayerName = new(stream);
             OwnerPlayerDbId = stream.ReadRawVarint64();
 
-            GuildName = stream.ReadRawString();
+            // Similar throwaway string to Player entity
+            if (stream.ReadRawString() != string.Empty)
+                Logger.Warn($"Decode(): emptyString is not empty!");
 
-            //Gazillion::GuildMember::SerializeReplicationRuntimeInfo
-            HasGuildInfo = boolDecoder.ReadBool(stream);
-            if (HasGuildInfo) GuildInfo = new(stream);
+            GuildMember.SerializeReplicationRuntimeInfo(stream, boolDecoder, ref _guildId, ref _guildName, ref _guildMembership);
 
             AbilityKeyMappings = new AbilityKeyMapping[stream.ReadRawVarint64()];
             for (int i = 0; i < AbilityKeyMappings.Length; i++)
@@ -66,64 +96,145 @@ namespace MHServerEmu.Games.Entities.Avatars
             // Prepare bool encoder
             BoolEncoder boolEncoder = new();
 
-            boolEncoder.EncodeBool(HasGuildInfo);
-            foreach (AbilityKeyMapping keyMap in AbilityKeyMappings) keyMap.EncodeBools(boolEncoder);
+            boolEncoder.EncodeBool(_guildId != GuildMember.InvalidGuildId);
+            foreach (AbilityKeyMapping keyMap in AbilityKeyMappings)
+                keyMap.EncodeBools(boolEncoder);
 
             boolEncoder.Cook();
 
             // Encode
             PlayerName.Encode(stream);
             stream.WriteRawVarint64(OwnerPlayerDbId);
-            stream.WriteRawString(GuildName);
 
-            boolEncoder.WriteBuffer(stream);   // HasGuildInfo  
-            if (HasGuildInfo) GuildInfo.Encode(stream);
+            stream.WriteRawString(string.Empty);    // throwaway string
 
+            GuildMember.SerializeReplicationRuntimeInfo(stream, boolEncoder, ref _guildId, ref _guildName, ref _guildMembership);
+            
             stream.WriteRawVarint64((ulong)AbilityKeyMappings.Length);
-            foreach (AbilityKeyMapping keyMap in AbilityKeyMappings) keyMap.Encode(stream, boolEncoder);
+            foreach (AbilityKeyMapping keyMap in AbilityKeyMappings)
+                keyMap.Encode(stream, boolEncoder);
         }
 
         /// <summary>
         /// Initializes this <see cref="Avatar"/> from data contained in the provided <see cref="DBAccount"/>.
         /// </summary>
-        public void InitializeFromDBAccount(DBAccount account)
+        public void InitializeFromDBAccount(PrototypeId prototypeId, DBAccount account)
         {
+            DBAvatar dbAvatar = account.GetAvatar(prototypeId);
+            AvatarPrototype prototype = GameDatabase.GetPrototype<AvatarPrototype>(prototypeId);
+
+            // Base Data
+            BaseData.PrototypeId = prototypeId;
+
+            // Archive Data
             PlayerName.Value = account.PlayerName;
 
-            Properties[PropertyEnum.CostumeCurrent] = (PrototypeId)account.CurrentAvatar.Costume;
+            // Properties
+            Properties.FlattenCopyFrom(prototype.Properties, true);
+
+            // AvatarLastActiveTime is needed for missions to show up in the tracker
+            Properties[PropertyEnum.AvatarLastActiveCalendarTime] = 1509657924421;  // Nov 02 2017 21:25:24 GMT+0000
+            Properties[PropertyEnum.AvatarLastActiveTime] = 161351646299;
+
+            Properties[PropertyEnum.CostumeCurrent] = (PrototypeId)dbAvatar.Costume;
             Properties[PropertyEnum.CharacterLevel] = 60;
             Properties[PropertyEnum.CombatLevel] = 60;
-            Properties[PropertyEnum.AvatarPrestigeLevel] = 0;
-            Properties[PropertyEnum.AvatarVanityTitle] = PrototypeId.Invalid;
             Properties[PropertyEnum.AvatarPowerUltimatePoints] = 19;
+
+            // Health
+            Properties[PropertyEnum.HealthMaxOther] = (int)(float)Properties[PropertyEnum.HealthBase];
+            Properties[PropertyEnum.Health] = Properties[PropertyEnum.HealthMaxOther];
+
+            // Resources
+            // Ger primary resources defaults from PrimaryResourceBehaviors
+            foreach (PrototypeId manaBehaviorId in prototype.PrimaryResourceBehaviors)
+            {
+                var behaviorPrototype = GameDatabase.GetPrototype<PrimaryResourceManaBehaviorPrototype>(manaBehaviorId);
+                Curve manaCurve = GameDatabase.GetCurve(behaviorPrototype.BaseEndurancePerLevel);
+                Properties[PropertyEnum.EnduranceBase, (int)behaviorPrototype.ManaType] = manaCurve.GetAt(60);
+            }
+;           
+            // Set primary resources
+            Properties[PropertyEnum.EnduranceMaxOther] = Properties[PropertyEnum.EnduranceBase];
+            Properties[PropertyEnum.EnduranceMax] = Properties[PropertyEnum.EnduranceMaxOther];
             Properties[PropertyEnum.Endurance] = Properties[PropertyEnum.EnduranceMax];
+            Properties[PropertyEnum.EnduranceMaxOther, (int)ManaType.Type2] = Properties[PropertyEnum.EnduranceBase, (int)ManaType.Type2];
+            Properties[PropertyEnum.EnduranceMax, (int)ManaType.Type2] = Properties[PropertyEnum.EnduranceMaxOther, (int)ManaType.Type2];
             Properties[PropertyEnum.Endurance, (int)ManaType.Type2] = Properties[PropertyEnum.EnduranceMax, (int)ManaType.Type2];
+
+            // Secondary resource base is already present in the prototype's property collection as a curve property
+            Properties[PropertyEnum.SecondaryResourceMax] = Properties[PropertyEnum.SecondaryResourceMaxBase];
             Properties[PropertyEnum.SecondaryResource] = Properties[PropertyEnum.SecondaryResourceMax];
 
-            // We need 10 synergies active to remove the in-game popup
-            Properties.RemovePropertyRange(PropertyEnum.AvatarSynergySelected);
-            for (int i = 0; i < 10; i++)
-                Properties[PropertyEnum.AvatarSynergySelected, (PrototypeId)account.Avatars[i].Prototype] = true;
-
-            if (account.CurrentAvatar.AbilityKeyMapping == null)
+            // Stats
+            foreach (PrototypeId entryId in prototype.StatProgressionTable)
             {
-                account.CurrentAvatar.AbilityKeyMapping = new(0);
-                account.CurrentAvatar.AbilityKeyMapping.SlotDefaultAbilities(this);
+                var entry = entryId.As<StatProgressionEntryPrototype>();
+
+                if (entry.DurabilityValue > 0)
+                    Properties[PropertyEnum.StatDurability] = entry.DurabilityValue;
+                
+                if (entry.StrengthValue > 0)
+                    Properties[PropertyEnum.StatStrength] = entry.StrengthValue;
+                
+                if (entry.FightingSkillsValue > 0)
+                    Properties[PropertyEnum.StatFightingSkills] = entry.FightingSkillsValue;
+                
+                if (entry.SpeedValue > 0)
+                    Properties[PropertyEnum.StatSpeed] = entry.SpeedValue;
+                
+                if (entry.EnergyProjectionValue > 0)
+                    Properties[PropertyEnum.StatEnergyProjection] = entry.EnergyProjectionValue;
+                
+                if (entry.IntelligenceValue > 0)
+                    Properties[PropertyEnum.StatIntelligence] = entry.IntelligenceValue;
             }
 
-            AbilityKeyMappings = new AbilityKeyMapping[] { account.CurrentAvatar.AbilityKeyMapping };
+            // Unlock all stealable powers for Rogue
+            if (prototypeId == (PrototypeId)6514650100102861856)
+            {
+                foreach (PrototypeId stealablePowerInfoId in GameDatabase.DataDirectory.IteratePrototypesInHierarchy(typeof(StealablePowerInfoPrototype), PrototypeIterateFlags.NoAbstract))
+                {
+                    var stealablePowerInfo = stealablePowerInfoId.As<StealablePowerInfoPrototype>();
+                    Properties[PropertyEnum.StolenPowerAvailable, stealablePowerInfo.Power] = true;
+                }
+            }
+
+            // We need 10 synergies active to remove the in-game popup
+            int synergyCount = 0;
+            foreach (PrototypeId avatarId in GameDatabase.DataDirectory.IteratePrototypesInHierarchy(typeof(AvatarPrototype),
+                PrototypeIterateFlags.NoAbstract | PrototypeIterateFlags.ApprovedOnly))
+            {
+                Properties[PropertyEnum.AvatarSynergySelected, avatarId] = true;
+                if (++synergyCount >= 10) break;
+            }
+
+            // Initialize AbilityKeyMapping if needed
+            if (dbAvatar.AbilityKeyMapping == null)
+            {
+                dbAvatar.AbilityKeyMapping = new(0);
+                dbAvatar.AbilityKeyMapping.SlotDefaultAbilities(this);
+            }
+
+            AbilityKeyMappings = new AbilityKeyMapping[] { dbAvatar.AbilityKeyMapping };
         }
 
         protected override void BuildString(StringBuilder sb)
         {
             base.BuildString(sb);
 
-            sb.AppendLine($"PlayerName: {PlayerName}");
-            sb.AppendLine($"OwnerPlayerDbId: 0x{OwnerPlayerDbId:X}");
-            sb.AppendLine($"GuildName: {GuildName}");
-            sb.AppendLine($"HasGuildInfo: {HasGuildInfo}");
-            sb.AppendLine($"GuildInfo: {GuildInfo}");
-            for (int i = 0; i < AbilityKeyMappings.Length; i++) sb.AppendLine($"AbilityKeyMapping{i}: {AbilityKeyMappings[i]}");
+            sb.AppendLine($"{nameof(PlayerName)}: {PlayerName}");
+            sb.AppendLine($"{nameof(OwnerPlayerDbId)}: 0x{OwnerPlayerDbId:X}");
+
+            if (_guildId != GuildMember.InvalidGuildId)
+            {
+                sb.AppendLine($"{nameof(_guildId)}: {_guildId}");
+                sb.AppendLine($"{nameof(_guildName)}: {_guildName}");
+                sb.AppendLine($"{nameof(_guildMembership)}: {_guildMembership}");
+            }
+
+            for (int i = 0; i < AbilityKeyMappings.Length; i++)
+                sb.AppendLine($"AbilityKeyMapping{i}: {AbilityKeyMappings[i]}");
         }
     }
 }

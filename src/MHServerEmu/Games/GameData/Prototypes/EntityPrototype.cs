@@ -249,10 +249,17 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public AssetId MarvelModelRenderClass { get; protected set; }
         public DesignWorkflowState DesignStatePS4 { get; protected set; }
         public DesignWorkflowState DesignStateXboxOne { get; protected set; }
+
         [DoNotCopy]
         public AlliancePrototype AlliancePrototype { get => Alliance.As<AlliancePrototype>(); }
         [DoNotCopy]
         public RankPrototype RankPrototype { get => Rank.As<RankPrototype>(); }
+
+        public override bool ApprovedForUse()
+        {
+            // Add settings for using DesignStatePS4 or DesignStateXboxOne here if we end up supporting console clients
+            return GameDatabase.DesignStateOk(DesignState);
+        }
     }
 
     public class StateChangePrototype : Prototype
@@ -356,7 +363,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
         public PrototypeId SelectEntity(GRandom random, Region region)
         {
-            if (Entities.IsNullOrEmpty() == false)
+            if (Entities.HasValue())
             {
                 // SelectUniqueEntities region ???
 
@@ -412,11 +419,11 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public PrototypeId ShowConfirmationDialogTemplate { get; protected set; }
         public PrototypeId ShowConfirmationDialogEnemy { get; protected set; }
 
-        public void CalcSpawnOffset(Vector3 targetRot, Vector3 targetPos)
+        public void CalcSpawnOffset(Orientation targetRot, Vector3 targetPos)
         {
             float offset = SpawnOffset;
-            targetPos.X += offset * MathF.Cos(targetRot.X);
-            targetPos.Y += offset * MathF.Sin(targetRot.X);
+            targetPos.X += offset * MathF.Cos(targetRot.Yaw);
+            targetPos.Y += offset * MathF.Sin(targetRot.Yaw);
         }
     }
 
@@ -438,17 +445,32 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
     public class InteractionSpecPrototype : Prototype
     {
+        public virtual void GetPrototypeContextRefs(HashSet<PrototypeId> refs) { }
     }
 
     public class ConnectionTargetEnableSpecPrototype : InteractionSpecPrototype
     {
         public PrototypeId ConnectionTarget { get; protected set; }
         public bool Enabled { get; protected set; }
+
+        public override void GetPrototypeContextRefs(HashSet<PrototypeId> refs)
+        {
+            if (ConnectionTarget != PrototypeId.Invalid) refs.Add(ConnectionTarget);
+        }
     }
 
     public class EntityBaseSpecPrototype : InteractionSpecPrototype
     {
         public EntityFilterPrototype EntityFilter { get; protected set; }
+
+        public override void GetPrototypeContextRefs(HashSet<PrototypeId> refs)
+        {
+            if (EntityFilter != null)
+            {
+                EntityFilter.GetEntityDataRefs(refs);
+                EntityFilter.GetKeywordDataRefs(refs);
+            }
+        }
     }
 
     public class EntityVisibilitySpecPrototype : EntityBaseSpecPrototype
@@ -528,6 +550,54 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public FormationFacing SpawnFacing { get; protected set; }
         public SpawnFailBehavior SpawnFailBehavior { get; protected set; }
         public int DefeatTimeoutMS { get; protected set; }
+
+        [DoNotCopy]
+        public AlliancePrototype EntityAlliance { get; private set; }
+
+        public override void PostProcess()
+        {
+            base.PostProcess();
+            EntityAlliance = CheckForSingleEntityAlliance();
+        }
+
+        private AlliancePrototype CheckForSingleEntityAlliance()
+        {
+            AlliancePrototype resultProto = null;
+
+            if (SpawnSequence.HasValue())
+            {
+                HashSet<PrototypeId> entities = new ();
+
+                foreach (var sequenceProto in SpawnSequence)
+                {
+                    if (sequenceProto == null) continue;
+                    PopulationObjectPrototype popObject = sequenceProto.GetPopObject();
+                    popObject?.GetContainedEntities(entities);
+                }
+
+                foreach (var entityRef in entities)
+                {
+                    if (entityRef == PrototypeId.Invalid) continue;                    
+                    var proto = GameDatabase.GetPrototype<Prototype>(entityRef);
+                    if (proto is AgentPrototype agentProto && agentProto.Alliance != PrototypeId.Invalid)
+                    {
+                        var allianceProto = agentProto.Alliance.As<AlliancePrototype>();
+                        if (resultProto == null || resultProto == allianceProto)
+                            resultProto = allianceProto;
+                        else
+                            return null;
+                    }
+                    else
+                    {
+                        return null;
+                    }
+                   
+                }
+            }
+
+            return resultProto;
+        }
+
     }
 
     public class KismetSequenceEntityPrototype : WorldEntityPrototype

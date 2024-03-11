@@ -4,6 +4,7 @@ using MHServerEmu.Billing;
 using MHServerEmu.Common.Logging;
 using MHServerEmu.Frontend;
 using MHServerEmu.Grouping;
+using MHServerEmu.Leaderboards;
 using MHServerEmu.Networking;
 using MHServerEmu.PlayerManagement;
 
@@ -23,6 +24,7 @@ namespace MHServerEmu
         public GroupingManagerService GroupingManagerService { get; private set; }
         public PlayerManagerService PlayerManagerService { get; private set; }
         public BillingService BillingService { get; private set; }
+        public LeaderboardService LeaderboardService { get; private set; }
 
         // Frontend
         public FrontendServer FrontendServer { get; private set; }
@@ -39,6 +41,7 @@ namespace MHServerEmu
             GroupingManagerService = new();
             PlayerManagerService = new();
             BillingService = new();
+            LeaderboardService = new();
 
             StartupTime = DateTime.Now;
         }
@@ -153,15 +156,6 @@ namespace MHServerEmu
             return $"Server Status\nUptime: {DateTime.Now - StartupTime:hh\\:mm\\:ss}\nSessions: {PlayerManagerService.SessionCount}";
         }
 
-        public long GetDateTimeMicroseconds()
-        {
-            return DateTime.Now.Ticks / TimeSpan.TicksPerMillisecond / 1000;
-        }
-
-        public long GetGameTimeMicroseconds()
-        {
-            return (DateTime.Now - StartupTime).Ticks / TimeSpan.TicksPerMillisecond / 1000;
-        }
 
         #endregion
     }

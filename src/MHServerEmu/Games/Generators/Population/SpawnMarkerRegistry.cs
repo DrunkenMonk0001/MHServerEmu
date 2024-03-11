@@ -2,6 +2,7 @@
 using MHServerEmu.Common.Extensions;
 using MHServerEmu.Common.Logging;
 using MHServerEmu.Games.Common;
+using MHServerEmu.Games.Entities;
 using MHServerEmu.Games.GameData;
 using MHServerEmu.Games.GameData.Prototypes;
 using MHServerEmu.Games.GameData.Prototypes.Markers;
@@ -60,6 +61,14 @@ namespace MHServerEmu.Games.Generators.Population
             _reservationOctree = null;
         }
 
+        public IEnumerable<SpawnReservation> IterateReservationsInVolume<B>(B bound) where B : IBounds
+        {
+            if (_reservationOctree != null)
+                return _reservationOctree.IterateElementsInVolume(bound);
+            else
+                return Enumerable.Empty<SpawnReservation>();
+        }
+
         public void InitializeSpacialPartition(Aabb bound)
         {
             if (_reservationOctree != null) return;
@@ -110,14 +119,14 @@ namespace MHServerEmu.Games.Generators.Population
                                 $"MARKER={GameDatabase.GetFormattedPrototypeName(markerRef)}, REGIONPOS={regionPos}, CELLPOS={marker.Position}");
                             continue;
                         }
-                        //Logger.Debug($"Marker [{GameDatabase.GetFormattedPrototypeName(markerRef)}] {regionPos.ToStringFloat()}");
+                        //Logger.Debug($"Marker [{GameDatabase.GetFormattedPrototypeName(markerRef)}] {regionPos}");
                         AddSpawnTypeLocation(markerRef, marker.Position, marker.Rotation, cell, ++id);
                     }
                 }
             }
         }
 
-        private void AddSpawnTypeLocation(PrototypeId markerRef, Vector3 position, Vector3 rotation, Cell cell, int id)
+        private void AddSpawnTypeLocation(PrototypeId markerRef, Vector3 position, Orientation rotation, Cell cell, int id)
         {
             if (markerRef == 0) return;
             SpawnMarkerPrototype spawnMarkerProto = GameDatabase.GetPrototype<SpawnMarkerPrototype>(markerRef);
@@ -279,7 +288,7 @@ namespace MHServerEmu.Games.Generators.Population
             return false;
         }
 
-        public SpawnReservation ReserveFreeReservation(PrototypeId markerRef, GRandom random, Cell spawnCell, PrototypeId[] spawnAreas, AssetId[] spawnCells)
+        public SpawnReservation ReserveFreeReservation(PrototypeId markerRef, GRandom random, Cell spawnCell, List<PrototypeId> spawnAreas, List<PrototypeId> spawnCells)
         {
             Picker<SpawnReservation> picker = new(random);
 
@@ -288,22 +297,22 @@ namespace MHServerEmu.Games.Generators.Population
             var spawnAreaRef = spawnCell.Area.PrototypeDataRef;
 
             // picker add
-            if (spawnCells.IsNullOrEmpty() == false)
+            if (spawnCells.Any())
             {
-                foreach (var cellAsset in spawnCells)
+                foreach (var cellref in spawnCells)
                 {
-                    if (spawnCellRef != GameDatabase.GetDataRefByAsset(cellAsset)) continue;
+                    if (spawnCellRef != cellref) continue;
                     if (_cellLookup.TryGetValue(spawnCellId, out var spawnMap) == false || spawnMap == null) continue;
                     if (spawnMap.TryGetValue(markerRef, out var list) == false || list == null) continue;
                     foreach (var testReservation in list)
                     {
                         if (testReservation.State != MarkerState.Free) continue;
-                        if (spawnAreas.IsNullOrEmpty() == false && spawnAreas.Contains(spawnAreaRef) == false) continue;
+                        if (spawnAreas?.Contains(spawnAreaRef) == false) continue;
                         picker.Add(testReservation);
                     }
                 }
             } 
-            else if (spawnAreas.IsNullOrEmpty() == false)
+            else if (spawnAreas.Any())
             {
                 foreach (var areaRef in spawnAreas)
                 {
@@ -323,6 +332,18 @@ namespace MHServerEmu.Games.Generators.Population
                 reservation.State = MarkerState.Reserved;
                 return reservation;
             }
+            return null;
+        }
+
+        public SpawnReservation GetReservationByPid(int pid)
+        {
+            int cellId = pid / 1000;
+            int markerId = pid % 1000; 
+            List<SpawnReservation> reservations = new();
+            GetReservationsInCell((uint)cellId, reservations);
+            foreach (var reservation in reservations)
+                if (reservation.Id == markerId) return reservation;
+
             return null;
         }
     }

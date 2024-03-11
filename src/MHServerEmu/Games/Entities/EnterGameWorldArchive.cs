@@ -30,13 +30,13 @@ namespace MHServerEmu.Games.Entities
 
         private const int LocoFlagsCount = 12;
 
-        public AoiNetworkPolicyValues ReplicationPolicy { get; }
+        public AOINetworkPolicyValues ReplicationPolicy { get; }
         public ulong EntityId { get; set; }
         public LocomotionMessageFlags LocoFieldFlags { get; set; }
         public EnterGameWorldMessageFlags ExtraFieldFlags { get; set; }
         public PrototypeId EntityPrototypeId { get; set; }
         public Vector3 Position { get; set; }
-        public Vector3 Orientation { get; set; }
+        public Orientation Orientation { get; set; }
         public LocomotionState LocomotionState { get; set; }
         public uint AvatarWorldInstanceId { get; set; }     // This was signed in old protocols
 
@@ -44,7 +44,7 @@ namespace MHServerEmu.Games.Entities
         {
             CodedInputStream stream = CodedInputStream.CreateInstance(data.ToByteArray());
 
-            ReplicationPolicy = (AoiNetworkPolicyValues)stream.ReadRawVarint32();
+            ReplicationPolicy = (AOINetworkPolicyValues)stream.ReadRawVarint32();
             EntityId = stream.ReadRawVarint64();
 
             // This archive contains additional flags combined with LocomotionMessageFlags in a single 32-bit value
@@ -70,7 +70,7 @@ namespace MHServerEmu.Games.Entities
 
         public EnterGameWorldArchive(ulong entityId, Vector3 position, float orientation)
         {
-            ReplicationPolicy = AoiNetworkPolicyValues.AoiChannel0;
+            ReplicationPolicy = AOINetworkPolicyValues.AOIChannelProximity;
             EntityId = entityId;
             LocoFieldFlags = LocomotionMessageFlags.NoLocomotionState;
             ExtraFieldFlags = EnterGameWorldMessageFlags.None;
@@ -80,7 +80,7 @@ namespace MHServerEmu.Games.Entities
 
         public EnterGameWorldArchive(ulong entityId, Vector3 position, float orientation, float moveSpeed)
         {
-            ReplicationPolicy = AoiNetworkPolicyValues.AoiChannel0;
+            ReplicationPolicy = AOINetworkPolicyValues.AOIChannelProximity;
             EntityId = entityId;
             LocoFieldFlags = LocomotionMessageFlags.UpdatePathNodes | LocomotionMessageFlags.HasMoveSpeed;
             ExtraFieldFlags = EnterGameWorldMessageFlags.HasAvatarWorldInstanceId;
@@ -103,12 +103,12 @@ namespace MHServerEmu.Games.Entities
                 if (LocoFieldFlags.HasFlag(LocomotionMessageFlags.HasEntityPrototypeId))
                     cos.WritePrototypeEnum<EntityPrototype>(EntityPrototypeId);
 
-                Position.Encode(cos, 3);
+                Position.Encode(cos);
 
                 if (LocoFieldFlags.HasFlag(LocomotionMessageFlags.HasFullOrientation))
-                    Orientation.Encode(cos, 6);
+                    Orientation.Encode(cos);
                 else
-                    cos.WriteRawZigZagFloat(Orientation.X, 6);
+                    cos.WriteRawZigZagFloat(Orientation.Yaw, 6);
 
                 if (LocoFieldFlags.HasFlag(LocomotionMessageFlags.NoLocomotionState) == false)
                     LocomotionState.Encode(cos, LocoFieldFlags);

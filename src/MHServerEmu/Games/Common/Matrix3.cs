@@ -20,11 +20,6 @@
             Col2 = col2;
         }
 
-        public static Matrix3 GetMatrix3(Vector3 orientation)
-        {
-            return RotationZYX(new(-orientation.Roll, -orientation.Pitch, orientation.Yaw));
-        }
-
         public static Matrix3 RotationZYX(Vector3 radiansXYZ)
         {
             float sX = MathF.Sin(radiansXYZ.X);
@@ -48,6 +43,20 @@
                 Vector3.AbsPerElem(mat.Col0),
                 Vector3.AbsPerElem(mat.Col1),
                 Vector3.AbsPerElem(mat.Col2)
+            );
+        }
+
+        public static Matrix3 Inverse(Matrix3 mat)
+        {
+            float detinv;
+            var tmp0 = Vector3.Cross(mat.Col1, mat.Col2);
+            var tmp1 = Vector3.Cross(mat.Col2, mat.Col0);
+            var tmp2 = Vector3.Cross(mat.Col0, mat.Col1);
+            detinv = 1.0f / Vector3.Dot(mat.Col2, tmp2);
+            return new (
+                new Vector3(tmp0.X * detinv, tmp1.X * detinv, tmp2.X * detinv),
+                new Vector3(tmp0.Y * detinv, tmp1.Y * detinv, tmp2.Y * detinv),
+                new Vector3(tmp0.Z * detinv, tmp1.Z * detinv, tmp2.Z * detinv)
             );
         }
 

@@ -37,16 +37,16 @@ namespace MHServerEmu.Games.Entities
     {
         // Note: in old client builds (July 2014 and earlier) this used to be a protobuf message with 20+ fields.
         // It was probably converted to an archive for optimization reasons.
-        public AoiNetworkPolicyValues ReplicationPolicy { get; set; }
+        public AOINetworkPolicyValues ReplicationPolicy { get; set; }
         public ulong EntityId { get; set; }
         public PrototypeId PrototypeId { get; set; }
         public EntityCreateMessageFlags FieldFlags { get; set; }
         public LocomotionMessageFlags LocoFieldFlags { get; set; }
-        public AoiNetworkPolicyValues InterestPolicies { get; set; }
+        public AOINetworkPolicyValues InterestPolicies { get; set; }
         public uint AvatarWorldInstanceId { get; set; }
         public uint DbId { get; set; }
         public Vector3 Position { get; set; }
-        public Vector3 Orientation { get; set; }
+        public Orientation Orientation { get; set; }
         public LocomotionState LocomotionState { get; set; }
         public float BoundsScaleOverride { get; }
         public ulong SourceEntityId { get; }
@@ -60,15 +60,15 @@ namespace MHServerEmu.Games.Entities
         {
             CodedInputStream stream = CodedInputStream.CreateInstance(data.ToByteArray());
 
-            ReplicationPolicy = (AoiNetworkPolicyValues)stream.ReadRawVarint32();
+            ReplicationPolicy = (AOINetworkPolicyValues)stream.ReadRawVarint32();
             EntityId = stream.ReadRawVarint64();
             PrototypeId = stream.ReadPrototypeEnum<EntityPrototype>();
             FieldFlags = (EntityCreateMessageFlags)stream.ReadRawVarint32();
             LocoFieldFlags = (LocomotionMessageFlags)stream.ReadRawVarint32();
 
             InterestPolicies = FieldFlags.HasFlag(EntityCreateMessageFlags.HasInterestPolicies)
-                ? (AoiNetworkPolicyValues)stream.ReadRawVarint32()
-                : AoiNetworkPolicyValues.AoiChannel0;    // This defaults to 0x1 if no policies are specified
+                ? (AOINetworkPolicyValues)stream.ReadRawVarint32()
+                : AOINetworkPolicyValues.AOIChannelProximity;    // This defaults to 0x1 if no policies are specified
 
             if (FieldFlags.HasFlag(EntityCreateMessageFlags.HasAvatarWorldInstanceId))
                 AvatarWorldInstanceId = stream.ReadRawVarint32();
@@ -78,10 +78,10 @@ namespace MHServerEmu.Games.Entities
 
             if (FieldFlags.HasFlag(EntityCreateMessageFlags.HasPositionAndOrientation))
             {
-                Position = new(stream, 3);
+                Position = new(stream);
 
                 Orientation = LocoFieldFlags.HasFlag(LocomotionMessageFlags.HasFullOrientation)
-                    ? new(stream, 6)
+                    ? new(stream)
                     : new(stream.ReadRawZigZagFloat(6), 0f, 0f);
             }
 
@@ -95,7 +95,7 @@ namespace MHServerEmu.Games.Entities
                 SourceEntityId = stream.ReadRawVarint64();
 
             if (FieldFlags.HasFlag(EntityCreateMessageFlags.HasSourcePosition))
-                SourcePosition = new(stream, 3);
+                SourcePosition = new(stream);
 
             if (FieldFlags.HasFlag(EntityCreateMessageFlags.HasActivePowerPrototypeId))
                 ActivePowerPrototypeId = stream.ReadPrototypeEnum<PowerPrototype>();
@@ -116,9 +116,9 @@ namespace MHServerEmu.Games.Entities
 
         public EntityBaseData() { }
 
-        public EntityBaseData(ulong entityId, PrototypeId prototypeId, Vector3 position, Vector3 orientation, bool snap = false)
+        public EntityBaseData(ulong entityId, PrototypeId prototypeId, Vector3 position, Orientation orientation, bool snap = false)
         {
-            ReplicationPolicy = AoiNetworkPolicyValues.AoiChannel5;
+            ReplicationPolicy = AOINetworkPolicyValues.AOIChannelDiscovery;
             EntityId = entityId;
             PrototypeId = prototypeId;
             LocomotionState = new(0f);
@@ -156,12 +156,12 @@ namespace MHServerEmu.Games.Entities
             // Location
             if (FieldFlags.HasFlag(EntityCreateMessageFlags.HasPositionAndOrientation))
             {
-                Position.Encode(stream, 3);
+                Position.Encode(stream);
 
                 if (LocoFieldFlags.HasFlag(LocomotionMessageFlags.HasFullOrientation))
-                    Orientation.Encode(stream, 6);
+                    Orientation.Encode(stream);
                 else
-                    stream.WriteRawZigZagFloat(Orientation.X, 6);
+                    stream.WriteRawZigZagFloat(Orientation.Yaw, 6);
             }
 
             if (LocoFieldFlags.HasFlag(LocomotionMessageFlags.NoLocomotionState) == false)
@@ -174,7 +174,7 @@ namespace MHServerEmu.Games.Entities
                 stream.WriteRawVarint64(SourceEntityId);
 
             if (FieldFlags.HasFlag(EntityCreateMessageFlags.HasSourcePosition))
-                SourcePosition.Encode(stream, 3);
+                SourcePosition.Encode(stream);
 
             if (FieldFlags.HasFlag(EntityCreateMessageFlags.HasActivePowerPrototypeId))
                 stream.WritePrototypeEnum<PowerPrototype>(ActivePowerPrototypeId);

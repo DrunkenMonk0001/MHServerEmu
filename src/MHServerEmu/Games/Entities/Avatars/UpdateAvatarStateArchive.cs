@@ -10,14 +10,14 @@ namespace MHServerEmu.Games.Entities.Avatars
 {
     public class UpdateAvatarStateArchive
     {
-        public AoiNetworkPolicyValues ReplicationPolicy { get; set; }
+        public AOINetworkPolicyValues ReplicationPolicy { get; set; }
         public int AvatarIndex { get; set; }
         public ulong EntityId { get; set; }
         public bool IsUsingGamepadInput { get; set; }
         public uint AvatarWorldInstanceId { get; set; }
         public LocomotionMessageFlags FieldFlags { get; set; }
         public Vector3 Position { get; set; }
-        public Vector3 Orientation { get; set; }
+        public Orientation Orientation { get; set; }
         public LocomotionState LocomotionState { get; set; }
 
         public UpdateAvatarStateArchive(ByteString data)
@@ -25,15 +25,15 @@ namespace MHServerEmu.Games.Entities.Avatars
             CodedInputStream stream = CodedInputStream.CreateInstance(data.ToByteArray());
             BoolDecoder boolDecoder = new();
 
-            ReplicationPolicy = (AoiNetworkPolicyValues)stream.ReadRawVarint32();
+            ReplicationPolicy = (AOINetworkPolicyValues)stream.ReadRawVarint32();
             AvatarIndex = stream.ReadRawInt32();
             EntityId = stream.ReadRawVarint64();
             IsUsingGamepadInput = boolDecoder.ReadBool(stream);
             AvatarWorldInstanceId = stream.ReadRawVarint32();
             FieldFlags = (LocomotionMessageFlags)stream.ReadRawVarint32();
-            Position = new(stream, 3);
+            Position = new(stream);
             if (FieldFlags.HasFlag(LocomotionMessageFlags.HasFullOrientation))
-                Orientation = new(stream, 6);
+                Orientation = new(stream);
             else
                 Orientation = new(stream.ReadRawZigZagFloat(6), 0f, 0f);
             LocomotionState = new(stream, FieldFlags);
@@ -59,11 +59,11 @@ namespace MHServerEmu.Games.Entities.Avatars
                 boolEncoder.WriteBuffer(cos);   // IsUsingGamepadInput  
                 cos.WriteRawVarint32(AvatarWorldInstanceId);
                 cos.WriteRawVarint32((uint)FieldFlags);
-                Position.Encode(cos, 3);
+                Position.Encode(cos);
                 if (FieldFlags.HasFlag(LocomotionMessageFlags.HasFullOrientation))
-                    Orientation.Encode(cos, 6);
+                    Orientation.Encode(cos);
                 else
-                    cos.WriteRawZigZagFloat(Orientation.X, 6);
+                    cos.WriteRawZigZagFloat(Orientation.Yaw, 6);
                 LocomotionState.Encode(cos, FieldFlags);
 
                 cos.Flush();

@@ -1,67 +1,203 @@
-﻿using Google.ProtocolBuffers;
-using ICSharpCode.SharpZipLib.Zip.Compression.Streams;
+﻿using System.Diagnostics;
+using System.Text.Json;
+using Free.Ports.zLib;
+using Google.ProtocolBuffers;
 using Gazillion;
+using MHServerEmu.Common;
 using MHServerEmu.Common.Helpers;
 using MHServerEmu.Common.Logging;
+using MHServerEmu.Common.Serialization;
+using MHServerEmu.Games.Locales;
 
 namespace MHServerEmu.Games.Achievements
 {
+    /// <summary>
+    /// A singleton that contains achievement infomation.
+    /// </summary>
     public class AchievementDatabase
     {
         private static readonly Logger Logger = LogManager.CreateLogger();
 
-        private NetMessageAchievementDatabaseDump _cachedDump = null;
+        private static readonly string AchievementsDirectory = Path.Combine(FileHelper.DataDirectory, "Game", "Achievements");
+
+        private readonly Dictionary<uint, AchievementInfo> _achievementInfoMap = new();
+        private byte[] _localizedAchievementStringBuffer = Array.Empty<byte>();
+        private NetMessageAchievementDatabaseDump _cachedDump = NetMessageAchievementDatabaseDump.DefaultInstance;
 
         public static AchievementDatabase Instance { get; } = new();
 
-        public byte[] LocalizedAchievementStringBuffer { get; set; }
-        public AchievementInfo[] AchievementInfos { get; set; }
-        public ulong AchievementNewThresholdUS { get; set; }
+        public TimeSpan AchievementNewThresholdUS { get; private set; }     // Unix timestamp in seconds
 
         private AchievementDatabase() { }
 
-        public void Initialize()
+        /// <summary>
+        /// Initializes the <see cref="AchievementDatabase"/> instance.
+        /// </summary>
+        public bool Initialize()    // AchievementDatabase::ReceiveDumpMsg()
         {
-            string compressedDumpPath = Path.Combine(FileHelper.DataDirectory, "Game", "CompressedAchievementDatabaseDump.bin");
-            byte[] compressedDump = File.ReadAllBytes(compressedDumpPath);
+            Clear();    // Clean up whatever data there is
 
-            // Decompress the dump
-            using (MemoryStream input = new(compressedDump))
-            using (MemoryStream output = new())
-            using (InflaterInputStream iis = new(input))
+            var stopwatch = Stopwatch.StartNew();
+
+            // Load achievement info map
+            string achievementInfoMapPath = Path.Combine(AchievementsDirectory, "AchievementInfoMap.json");
+            if (File.Exists(achievementInfoMapPath) == false)
+                return Logger.WarnReturn(false, $"Initialize(): Achievement info map not found at {achievementInfoMapPath}");
+
+            string achievementInfoMapJson = File.ReadAllText(achievementInfoMapPath);
+            
+            try
             {
-                iis.CopyTo(output);
-                var dump = AchievementDatabaseDump.ParseFrom(output.ToArray());
+                JsonSerializerOptions options = new();
+                options.Converters.Add(new TimeSpanJsonConverter());
+                var infos = JsonSerializer.Deserialize<IEnumerable<AchievementInfo>>(achievementInfoMapJson, options);
 
-                LocalizedAchievementStringBuffer = dump.LocalizedAchievementStringBuffer.ToByteArray();
-                AchievementInfos = dump.AchievementInfosList.Select(item => new AchievementInfo(item)).ToArray();
-                AchievementNewThresholdUS = dump.AchievementNewThresholdUS;
+                foreach (AchievementInfo info in infos)
+                    _achievementInfoMap.Add(info.Id, info);
+            }
+            catch (Exception e)
+            {
+                return Logger.WarnReturn(false, $"Initialize(): Achievement info map deserialization failed - {e.Message}");
             }
 
-            Logger.Info($"Initialized achievement database with {AchievementInfos.Length} achievements");
+            // Load string buffer
+            string stringBufferPath = Path.Combine(AchievementsDirectory, "eng.achievements.string");
+            if (File.Exists(stringBufferPath) == false)
+                return Logger.WarnReturn(false, $"Initialize(): String buffer not found at {stringBufferPath}");
 
-            // Cache the dump for sending to clients
-            _cachedDump = NetMessageAchievementDatabaseDump.CreateBuilder().SetCompressedAchievementDatabaseDump(ByteString.CopyFrom(compressedDump)).Build();
-            //CompressAndCacheDump();
+            _localizedAchievementStringBuffer = File.ReadAllBytes(stringBufferPath);
+
+            // Load new achievement threshold
+            string thresholdPath = Path.Combine(AchievementsDirectory, "AchievementNewThresholdUS.txt");
+            if (File.Exists(thresholdPath) == false)
+            {
+                // Default to now if file not found
+                Logger.Warn($"Initialize(): New achievement threshold not found at {thresholdPath}");
+                AchievementNewThresholdUS = Clock.UnixTime;
+            }
+            else
+            {
+                string thresholdString = File.ReadAllText(thresholdPath);
+                if (long.TryParse(thresholdString, out long threshold) == false)
+                {
+                    // Default to now if failed to parse
+                    Logger.Warn($"Initialize(): Failed to parse new achievement threshold");
+                    AchievementNewThresholdUS = Clock.UnixTime;
+                }
+                else
+                {
+                    AchievementNewThresholdUS = TimeSpan.FromSeconds(threshold);
+                }
+            }
+
+            // Post-process
+            ImportAchievementStringsToCurrentLocale();
+            HookUpParentChildAchievementReferences();
+            RebuildCachedData();
+
+            // Create the dump for sending to clients
+            CreateDump();
+
+            Logger.Info($"Initialized {_achievementInfoMap.Count} achievements in {stopwatch.ElapsedMilliseconds} ms");
+            return true;
         }
 
-        public NetMessageAchievementDatabaseDump ToNetMessageAchievementDatabaseDump() => _cachedDump;
-
-        private void CompressAndCacheDump()
+        /// <summary>
+        /// Returns the <see cref="AchievementInfo"/> with the specified id. Returns <see langword="null"/> if not found.
+        /// </summary>
+        public AchievementInfo GetAchievementInfoById(uint id)
         {
-            // This produces different output from our existing dumped database. Why?
+            if (_achievementInfoMap.TryGetValue(id, out AchievementInfo info) == false)
+                return null;
+
+            return info;
+        }
+
+        /// <summary>
+        /// Returns all <see cref="AchievementInfo"/> instances that use the specified <see cref="ScoringEventType"/>.
+        /// </summary>
+        public IEnumerable<AchievementInfo> GetAchievementsByEventType(ScoringEventType eventType)
+        {
+            // TODO: Optimize this if needed
+            foreach (AchievementInfo info in _achievementInfoMap.Values)
+            {
+                if (info.EventType == eventType)
+                    yield return info;
+            }
+        }
+
+        /// <summary>
+        /// Returns a <see cref="NetMessageAchievementDatabaseDump"/> instance that contains a compressed dump of the <see cref="AchievementDatabase"/>.
+        /// </summary>
+        public NetMessageAchievementDatabaseDump GetDump() => _cachedDump;
+
+        /// <summary>
+        /// Clears the <see cref="AchievementDatabase"/> instance.
+        /// </summary>
+        private void Clear()
+        {
+            _achievementInfoMap.Clear();
+            _localizedAchievementStringBuffer = Array.Empty<byte>();
+            _cachedDump = NetMessageAchievementDatabaseDump.DefaultInstance;
+            AchievementNewThresholdUS = TimeSpan.Zero;
+        }
+
+        /// <summary>
+        /// Constructs relationships between achievements.
+        /// </summary>
+        private void HookUpParentChildAchievementReferences()
+        {
+            foreach (AchievementInfo info in _achievementInfoMap.Values)
+            {
+                if (info.ParentId == 0) continue;
+
+                if (_achievementInfoMap.TryGetValue(info.ParentId, out AchievementInfo parent) == false)
+                {
+                    Logger.Warn($"HookUpParentChildAchievementReferences(): Parent info {info.ParentId} not found");
+                    continue;
+                }
+
+                info.Parent = parent;
+                parent.Children.Add(info);
+            }
+        }
+
+        private void ImportAchievementStringsToCurrentLocale()
+        {
+            Locale currentLocale = LocaleManager.Instance.CurrentLocale;
+
+            using (MemoryStream ms = new(_localizedAchievementStringBuffer))
+                currentLocale.ImportStringStream("achievements", ms);
+        }
+
+        private void RebuildCachedData()
+        {
+            // TODO
+        }
+
+        /// <summary>
+        /// Creates and caches a <see cref="NetMessageAchievementDatabaseDump"/> instance that will be sent to clients.
+        /// </summary>
+        private void CreateDump()
+        {
             var dumpBuffer = AchievementDatabaseDump.CreateBuilder()
-                .SetLocalizedAchievementStringBuffer(ByteString.CopyFrom(LocalizedAchievementStringBuffer))
-                .AddRangeAchievementInfos(AchievementInfos.Select(item => item.ToNetStruct()))
-                .SetAchievementNewThresholdUS(AchievementNewThresholdUS)
+                .SetLocalizedAchievementStringBuffer(ByteString.CopyFrom(_localizedAchievementStringBuffer))
+                .AddRangeAchievementInfos(_achievementInfoMap.Values.Select(info => info.ToNetStruct()))
+                .SetAchievementNewThresholdUS((ulong)AchievementNewThresholdUS.TotalSeconds)
                 .Build().ToByteArray();
 
+            // We need to compress specifically with a port of zlib rather than various alternatives like SharpZipLib
+            // to produce the same result. zlib.compress() in Python also produces the result we need.
+
             using (MemoryStream ms = new())
-            using (DeflaterOutputStream dos = new(ms))
+            using (ZStreamWriter writer = new(ms))
             {
-                dos.Write(dumpBuffer);
-                dos.Flush();
-                _cachedDump = NetMessageAchievementDatabaseDump.CreateBuilder().SetCompressedAchievementDatabaseDump(ByteString.CopyFrom(ms.ToArray())).Build();
+                writer.Write(dumpBuffer);
+                writer.Close();
+
+               _cachedDump = NetMessageAchievementDatabaseDump.CreateBuilder()
+                    .SetCompressedAchievementDatabaseDump(ByteString.CopyFrom(ms.ToArray()))
+                    .Build();
             }
         }
     }
