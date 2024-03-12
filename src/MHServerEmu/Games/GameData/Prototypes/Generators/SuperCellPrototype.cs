@@ -1,6 +1,6 @@
-﻿using MHServerEmu.Common;
-using MHServerEmu.Games.Common;
-using MHServerEmu.Common.Extensions;
+﻿using MHServerEmu.Games.Common;
+using MHServerEmu.Core.Extensions;
+using MHServerEmu.Core.System.Random;
 using MHServerEmu.Games.Generators;
 using MHServerEmu.Games.GameData.Calligraphy.Attributes;
 

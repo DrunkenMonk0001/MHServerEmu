@@ -1,7 +1,6 @@
 ﻿using Gazillion;
-using MHServerEmu.Common.Config;
+using MHServerEmu.Core.Config;
 using MHServerEmu.Frontend;
-using MHServerEmu.Networking;
 
 namespace MHServerEmu.Grouping
 {

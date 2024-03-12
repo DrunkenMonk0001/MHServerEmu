@@ -1,5 +1,5 @@
 ﻿using Gazillion;
-using MHServerEmu.Common.Logging;
+using MHServerEmu.Core.Logging;
 using MHServerEmu.Frontend;
 using MHServerEmu.Games.Common;
 using MHServerEmu.Games.Entities;
@@ -10,8 +10,8 @@ using MHServerEmu.Games.GameData.Prototypes;
 using MHServerEmu.Games.Network;
 using MHServerEmu.Games.Powers;
 using MHServerEmu.Games.Properties;
-using MHServerEmu.Networking;
 using MHServerEmu.Games.Regions;
+using MHServerEmu.Core.Network;
 
 namespace MHServerEmu.Games.Events
 {

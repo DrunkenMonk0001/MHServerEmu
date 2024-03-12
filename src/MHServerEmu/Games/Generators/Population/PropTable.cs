@@ -1,12 +1,12 @@
-﻿using MHServerEmu.Games.GameData.Prototypes;
-using MHServerEmu.Games.GameData;
-using MHServerEmu.Common.Logging;
-using MHServerEmu.Games.Regions;
-using MHServerEmu.Games.GameData.Prototypes.Markers;
+﻿using MHServerEmu.Core.Extensions;
+using MHServerEmu.Core.Helpers;
+using MHServerEmu.Core.Logging;
+using MHServerEmu.Core.System.Random;
 using MHServerEmu.Games.Common;
-using MHServerEmu.Common;
-using MHServerEmu.Common.Extensions;
-using MHServerEmu.Common.Helpers;
+using MHServerEmu.Games.GameData;
+using MHServerEmu.Games.GameData.Prototypes;
+using MHServerEmu.Games.GameData.Prototypes.Markers;
+using MHServerEmu.Games.Regions;
 
 namespace MHServerEmu.Games.Generators.Population
 {

@@ -1,10 +1,8 @@
-﻿using MHServerEmu.Common;
-using MHServerEmu.Common.Extensions;
-using MHServerEmu.Common.Logging;
-using MHServerEmu.Games.Entities;
+﻿using MHServerEmu.Core.Extensions;
+using MHServerEmu.Core.Logging;
+using MHServerEmu.Core.System.Random;
 using MHServerEmu.Games.GameData;
 using MHServerEmu.Games.GameData.Prototypes;
-using MHServerEmu.Games.MetaGame;
 using MHServerEmu.Games.Properties;
 using MHServerEmu.Games.Regions;
 

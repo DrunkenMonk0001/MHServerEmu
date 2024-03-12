@@ -1,6 +1,7 @@
 ﻿using Gazillion;
-using MHServerEmu.Common;
-using MHServerEmu.Common.Config;
+using MHServerEmu.Core.Config;
+using MHServerEmu.Core.Network;
+using MHServerEmu.Core.System;
 using MHServerEmu.Frontend;
 using MHServerEmu.Games.Entities;
 using MHServerEmu.Games.Entities.Avatars;
@@ -11,7 +12,6 @@ using MHServerEmu.Games.GameData.Prototypes;
 using MHServerEmu.Games.Network;
 using MHServerEmu.Games.Powers;
 using MHServerEmu.Games.Regions;
-using MHServerEmu.Networking;
 using MHServerEmu.PlayerManagement.Accounts.DBModels;
 
 namespace MHServerEmu.Games

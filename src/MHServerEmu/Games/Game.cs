@@ -2,8 +2,9 @@
 using System.Diagnostics;
 using System.Globalization;
 using Gazillion;
-using MHServerEmu.Common;
-using MHServerEmu.Common.Logging;
+using MHServerEmu.Core.Logging;
+using MHServerEmu.Core.Network;
+using MHServerEmu.Core.System.Random;
 using MHServerEmu.Frontend;
 using MHServerEmu.Games.Common;
 using MHServerEmu.Games.Entities;
@@ -17,12 +18,11 @@ using MHServerEmu.Games.Powers;
 using MHServerEmu.Games.Properties;
 using MHServerEmu.Games.Regions;
 using MHServerEmu.Grouping;
-using MHServerEmu.Networking;
 using MHServerEmu.PlayerManagement.Accounts;
 
 namespace MHServerEmu.Games
 {
-    public partial class Game : IMessageHandler
+    public partial class Game
     {
         private static readonly Logger Logger = LogManager.CreateLogger();
 
@@ -266,7 +266,7 @@ namespace MHServerEmu.Games
                     break;
 
                 default:
-                    Logger.Warn($"Received unhandled message {(ClientToGameServerMessage)message.Id} (id {message.Id})");
+                    Logger.Warn($"HandleQueuedMessage(): Unhandled message [{message.Id}] {(ClientToGameServerMessage)message.Id}");
                     break;
             }
         }

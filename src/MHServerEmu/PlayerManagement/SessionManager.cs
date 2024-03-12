@@ -1,11 +1,13 @@
 ﻿using Gazillion;
 using MHServerEmu.Auth;
-using MHServerEmu.Common.Config;
-using MHServerEmu.Common;
-using MHServerEmu.Common.Logging;
+using MHServerEmu.Core.Config;
+using MHServerEmu.Core.Logging;
 using MHServerEmu.PlayerManagement.Accounts;
 using MHServerEmu.PlayerManagement.Accounts.DBModels;
 using MHServerEmu.Frontend;
+using MHServerEmu.Core.Network;
+using MHServerEmu.Core.Helpers;
+using MHServerEmu.Core.System;
 
 namespace MHServerEmu.PlayerManagement
 {
@@ -72,7 +74,7 @@ namespace MHServerEmu.PlayerManagement
             }
 
             // Try to decrypt the token
-            if (Cryptography.TryDecryptToken(credentials.EncryptedToken.ToByteArray(), session.Key,
+            if (CryptographyHelper.TryDecryptToken(credentials.EncryptedToken.ToByteArray(), session.Key,
                 credentials.Iv.ToByteArray(), out byte[] decryptedToken) == false)
             {
                 Logger.Warn($"Failed to decrypt token for sessionId {session.Id}");
@@ -81,7 +83,7 @@ namespace MHServerEmu.PlayerManagement
             }
 
             // Verify the token
-            if (Cryptography.VerifyToken(decryptedToken, session.Token) == false)
+            if (CryptographyHelper.VerifyToken(decryptedToken, session.Token) == false)
             {
                 Logger.Warn($"Failed to verify token for sessionId {session.Id}");
                 lock (_sessionLock) _sessionDict.Remove(session.Id);    // invalidate session after a failed login attempt
