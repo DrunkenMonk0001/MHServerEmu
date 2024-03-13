@@ -2,6 +2,7 @@
 using Google.ProtocolBuffers;
 using MHServerEmu.Core.Extensions;
 using MHServerEmu.Core.Logging;
+using MHServerEmu.Core.VectorMath;
 using MHServerEmu.Frontend;
 using MHServerEmu.Games.Common;
 using MHServerEmu.Games.GameData;
@@ -141,11 +142,11 @@ namespace MHServerEmu.Games.Entities
         {
             Type = (RegionTransitionType)stream.ReadRawInt32();
 
-            Region = stream.ReadPrototypeEnum<Prototype>();
-            Area = stream.ReadPrototypeEnum<Prototype>();
-            Cell = stream.ReadPrototypeEnum<Prototype>();
-            Entity = stream.ReadPrototypeEnum<Prototype>();
-            Target = stream.ReadPrototypeEnum<Prototype>();
+            Region = stream.ReadPrototypeRef<Prototype>();
+            Area = stream.ReadPrototypeRef<Prototype>();
+            Cell = stream.ReadPrototypeRef<Prototype>();
+            Entity = stream.ReadPrototypeRef<Prototype>();
+            Target = stream.ReadPrototypeRef<Prototype>();
 
             Unk2 = stream.ReadRawInt32();
 
@@ -186,11 +187,11 @@ namespace MHServerEmu.Games.Entities
         {
             stream.WriteRawInt32((int)Type);
 
-            stream.WritePrototypeEnum<Prototype>(Region);
-            stream.WritePrototypeEnum<Prototype>(Area);
-            stream.WritePrototypeEnum<Prototype>(Cell);
-            stream.WritePrototypeEnum<Prototype>(Entity);
-            stream.WritePrototypeEnum<Prototype>(Target);
+            stream.WritePrototypeRef<Prototype>(Region);
+            stream.WritePrototypeRef<Prototype>(Area);
+            stream.WritePrototypeRef<Prototype>(Cell);
+            stream.WritePrototypeRef<Prototype>(Entity);
+            stream.WritePrototypeRef<Prototype>(Target);
 
             stream.WriteRawInt32(Unk2);
 

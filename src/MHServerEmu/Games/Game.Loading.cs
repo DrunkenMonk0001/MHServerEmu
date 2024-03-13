@@ -2,6 +2,7 @@
 using MHServerEmu.Core.Config;
 using MHServerEmu.Core.Network;
 using MHServerEmu.Core.System;
+using MHServerEmu.Core.VectorMath;
 using MHServerEmu.Frontend;
 using MHServerEmu.Games.Entities;
 using MHServerEmu.Games.Entities.Avatars;
@@ -30,7 +31,7 @@ namespace MHServerEmu.Games
                 .SetGamestarttime(1)
                 .Build()));
 
-            messageList.Add(new(NetMessageServerVersion.CreateBuilder().SetVersion(ServerManager.GameVersion).Build()));
+            messageList.Add(new(NetMessageServerVersion.CreateBuilder().SetVersion(Version).Build()));
             messageList.Add(new(LiveTuningManager.LiveTuningData.ToNetMessageLiveTuningUpdate()));
             messageList.Add(new(NetMessageReadyForTimeSync.DefaultInstance));
 
@@ -67,8 +68,8 @@ namespace MHServerEmu.Games
             DBAccount account = client.Session.Account;
             List<GameMessage> messageList = new();
 
-            Common.Vector3 entrancePosition = new(client.StartPositon);
-            Common.Orientation entranceOrientation = new(client.StartOrientation);
+            Vector3 entrancePosition = new(client.StartPositon);
+            Orientation entranceOrientation = new(client.StartOrientation);
             entrancePosition.Z += 42; // TODO project to floor
 
             EnterGameWorldArchive avatarEnterGameWorldArchive = new((ulong)account.Player.Avatar.ToEntityId(), entrancePosition, entranceOrientation.Yaw, 350f);
