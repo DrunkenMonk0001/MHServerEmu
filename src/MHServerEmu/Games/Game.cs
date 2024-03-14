@@ -1,5 +1,4 @@
-﻿using System.Collections.Concurrent;
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Globalization;
 using Gazillion;
 using Google.ProtocolBuffers;
@@ -32,8 +31,9 @@ namespace MHServerEmu.Games
         public const int TickRate = 20;                 // Ticks per second based on client behavior
         public const long TickTime = 1000 / TickRate;   // ms per tick
 
+        private readonly NetStructGameOptions _gameOptions;
         private readonly object _gameLock = new();
-        private readonly Queue<(FrontendClient, GameMessage)> _messageQueue = new();
+        private readonly CoreNetworkMailbox<FrontendClient> _mailbox = new();
         private readonly Stopwatch _tickWatch = new();
 
         private int _tickCount;
@@ -45,7 +45,6 @@ namespace MHServerEmu.Games
         public EventManager EventManager { get; }
         public EntityManager EntityManager { get; }
         public RegionManager RegionManager { get; }
-        public ConcurrentDictionary<FrontendClient, Player> PlayerDict { get; } = new();
 
         public ulong CurrentRepId { get => ++_currentRepId; }
         // We use a dictionary property instead of AccessMessageHandlerHash(), which is essentially just a getter
@@ -56,6 +55,33 @@ namespace MHServerEmu.Games
         public Game(ulong id)
         {
             Id = id;
+
+            // Initialize game options
+            _gameOptions = NetStructGameOptions.CreateBuilder()
+                .SetTeamUpSystemEnabled(ConfigManager.GameOptions.TeamUpSystemEnabled)
+                .SetAchievementsEnabled(ConfigManager.GameOptions.AchievementsEnabled)
+                .SetOmegaMissionsEnabled(ConfigManager.GameOptions.OmegaMissionsEnabled)
+                .SetVeteranRewardsEnabled(ConfigManager.GameOptions.VeteranRewardsEnabled)
+                .SetMultiSpecRewardsEnabled(ConfigManager.GameOptions.MultiSpecRewardsEnabled)
+                .SetGiftingEnabled(ConfigManager.GameOptions.GiftingEnabled)
+                .SetCharacterSelectV2Enabled(ConfigManager.GameOptions.CharacterSelectV2Enabled)
+                .SetCommunityNewsV2Enabled(ConfigManager.GameOptions.CommunityNewsV2Enabled)
+                .SetLeaderboardsEnabled(ConfigManager.GameOptions.LeaderboardsEnabled)
+                .SetNewPlayerExperienceEnabled(ConfigManager.GameOptions.NewPlayerExperienceEnabled)
+                .SetServerTimeOffsetUTC(-7)
+                .SetUseServerTimeOffset(true)  // Although originally this was set to false, it needs to be true because auto offset doesn't work past 2019
+                .SetMissionTrackerV2Enabled(ConfigManager.GameOptions.MissionTrackerV2Enabled)
+                .SetGiftingAccountAgeInDaysRequired(ConfigManager.GameOptions.GiftingAccountAgeInDaysRequired)
+                .SetGiftingAvatarLevelRequired(ConfigManager.GameOptions.GiftingAvatarLevelRequired)
+                .SetGiftingLoginCountRequired(ConfigManager.GameOptions.GiftingLoginCountRequired)
+                .SetInfinitySystemEnabled(ConfigManager.GameOptions.InfinitySystemEnabled)
+                .SetChatBanVoteAccountAgeInDaysRequired(ConfigManager.GameOptions.ChatBanVoteAccountAgeInDaysRequired)
+                .SetChatBanVoteAvatarLevelRequired(ConfigManager.GameOptions.ChatBanVoteAvatarLevelRequired)
+                .SetChatBanVoteLoginCountRequired(ConfigManager.GameOptions.ChatBanVoteLoginCountRequired)
+                .SetIsDifficultySliderEnabled(ConfigManager.GameOptions.IsDifficultySliderEnabled)
+                .SetOrbisTrophiesEnabled(ConfigManager.GameOptions.OrbisTrophiesEnabled)
+                .SetPlatformType((int)Platforms.PC)
+                .Build();
 
             // The game uses 16 bits of the current UTC time in seconds as the initial replication id
             _currentRepId = (ulong)(DateTime.UtcNow.Ticks / TimeSpan.TicksPerSecond) & 0xFFFF;
@@ -86,12 +112,11 @@ namespace MHServerEmu.Games
                 lock (_gameLock)     // lock to prevent state from being modified mid-update
                 {
                     // Handle all queued messages
-                    // TODO: CoreNetworkMailbox
-                    while (_messageQueue.Count > 0)
+                    while (_mailbox.HasMessages)
                     {
-                        var queuedMessage = _messageQueue.Dequeue();
-                        PlayerConnection connection = NetworkManager.GetPlayerConnection(queuedMessage.Item1);
-                        connection.ReceiveMessage(queuedMessage.Item2);
+                        var message = _mailbox.PopNextMessage();
+                        PlayerConnection connection = NetworkManager.GetPlayerConnection(message.Item1);
+                        connection.ReceiveMessage(message.Item2);
                     }
 
                     // Update event manager
@@ -114,7 +139,7 @@ namespace MHServerEmu.Games
         {
             lock (_gameLock)
             {
-                _messageQueue.Enqueue(new(client, message));
+                _mailbox.Post(client, message);
             }
         }
 
@@ -128,11 +153,11 @@ namespace MHServerEmu.Games
             lock (_gameLock)
             {
                 client.GameId = Id;
-                PlayerConnection connection = NetworkManager.AddPlayer(client);
-                foreach (IMessage message in GetBeginLoadingMessages(connection))
-                    SendMessage(connection, message);
+                PlayerConnection playerConnection = NetworkManager.AddPlayer(client);
+                foreach (IMessage message in GetBeginLoadingMessages(playerConnection))
+                    SendMessage(playerConnection, message);
 
-                Logger.Trace($"Player {client.Session.Account} added to game 0x{Id:X16}");
+                Logger.Trace($"Player {client.Session.Account} added to {this}");
             }
         }
 
@@ -141,22 +166,22 @@ namespace MHServerEmu.Games
             lock (_gameLock)
             {
                 NetworkManager.RemovePlayer(client);
-                Logger.Trace($"Player {client.Session.Account} removed from game 0x{Id:X16}");
+                Logger.Trace($"Player {client.Session.Account} removed from {this}");
             }
         }
 
-        public void MovePlayerToRegion(PlayerConnection connection, RegionPrototypeId region, PrototypeId waypointDataRef)
+        public void MovePlayerToRegion(PlayerConnection playerConnetion, RegionPrototypeId region, PrototypeId waypointDataRef)
         {
             lock (_gameLock)
             {
                 foreach (IMessage message in GetExitGameMessages())
-                    SendMessage(connection, message);
+                    SendMessage(playerConnetion, message);
 
-                connection.FrontendClient.Session.Account.Player.Region = region;
-                connection.FrontendClient.Session.Account.Player.Waypoint = waypointDataRef;
+                playerConnetion.Account.Player.Region = region;
+                playerConnetion.Account.Player.Waypoint = waypointDataRef;
 
-                foreach (IMessage message in GetBeginLoadingMessages(connection))
-                    SendMessage(connection, message);
+                foreach (IMessage message in GetBeginLoadingMessages(playerConnetion))
+                    SendMessage(playerConnetion, message);
             }
         }
 
@@ -172,8 +197,8 @@ namespace MHServerEmu.Games
                 foreach (IMessage message in GetExitGameMessages())
                     SendMessage(connection, message);
 
-                connection.FrontendClient.Session.Account.Player.Region = worldEntity.Region.PrototypeId;
-                connection.FrontendClient.EntityToTeleport = worldEntity;
+                connection.Account.Player.Region = worldEntity.Region.PrototypeId;
+                connection.EntityToTeleport = worldEntity;
 
                 foreach (IMessage message in GetBeginLoadingMessages(connection))
                     SendMessage(connection, message);
@@ -185,7 +210,7 @@ namespace MHServerEmu.Games
             foreach (IMessage message in GetFinishLoadingMessages(playerConnection))
                 SendMessage(playerConnection, message);
 
-            playerConnection.FrontendClient.IsLoading = false;
+            playerConnection.IsLoading = false;
         }
 
         /// <summary>
@@ -204,11 +229,9 @@ namespace MHServerEmu.Games
             NetworkManager.BroadcastMessage(message);
         }
 
-        private List<IMessage> GetBeginLoadingMessages(PlayerConnection connection)
+        private List<IMessage> GetBeginLoadingMessages(PlayerConnection playerConnection)
         {
-            FrontendClient client = connection.FrontendClient;
-
-            DBAccount account = client.Session.Account;
+            DBAccount account = playerConnection.Account;
             List<IMessage> messageList = new();
 
             // Add server info messages
@@ -223,7 +246,15 @@ namespace MHServerEmu.Games
             messageList.Add(NetMessageReadyForTimeSync.DefaultInstance);
 
             // Load local player data
-            messageList.AddRange(LoadPlayerEntityMessages(account));
+            messageList.Add(NetMessageLocalPlayer.CreateBuilder()
+                .SetLocalPlayerEntityId(playerConnection.Player.BaseData.EntityId)
+                .SetGameOptions(_gameOptions)
+                .Build());
+
+            messageList.Add(playerConnection.Player.ToNetMessageEntityCreate());
+
+            messageList.AddRange(playerConnection.Player.AvatarList.Select(avatar => avatar.ToNetMessageEntityCreate()));
+
             messageList.Add(NetMessageReadyAndLoadedOnGameServer.DefaultInstance);
 
             // Before changing to the actual destination region the game seems to first change into a transitional region
@@ -238,9 +269,9 @@ namespace MHServerEmu.Games
                 .Build());
 
             // Run region generation as a task
-            Task.Run(() => GetRegionAsync(connection, account.Player.Region));
-            client.AOI.LoadedCellCount = 0;
-            client.IsLoading = true;
+            Task.Run(() => GetRegionAsync(playerConnection, account.Player.Region));
+            playerConnection.AOI.LoadedCellCount = 0;
+            playerConnection.IsLoading = true;
             return messageList;
         }
 
@@ -252,96 +283,26 @@ namespace MHServerEmu.Games
 
         private List<IMessage> GetFinishLoadingMessages(PlayerConnection playerConnection)
         {
-            FrontendClient client = playerConnection.FrontendClient;
-
-            DBAccount account = client.Session.Account;
+            DBAccount account = playerConnection.Account;
             List<IMessage> messageList = new();
 
-            Vector3 entrancePosition = new(client.StartPositon);
-            Orientation entranceOrientation = new(client.StartOrientation);
+            Vector3 entrancePosition = new(playerConnection.StartPositon);
+            Orientation entranceOrientation = new(playerConnection.StartOrientation);
             entrancePosition.Z += 42; // TODO project to floor
 
-            EnterGameWorldArchive avatarEnterGameWorldArchive = new((ulong)account.Player.Avatar.ToEntityId(), entrancePosition, entranceOrientation.Yaw, 350f);
+            EnterGameWorldArchive avatarEnterGameWorldArchive = new((ulong)playerConnection.Player.CurrentAvatar.BaseData.EntityId, entrancePosition, entranceOrientation.Yaw, 350f);
             messageList.Add(NetMessageEntityEnterGameWorld.CreateBuilder()
                 .SetArchiveData(avatarEnterGameWorldArchive.Serialize())
                 .Build());
 
-            client.AOI.Update(entrancePosition);
-            messageList.AddRange(client.AOI.Messages);
+            playerConnection.AOI.Update(entrancePosition);
+            messageList.AddRange(playerConnection.AOI.Messages);
 
             // Load power collection
-            messageList.AddRange(PowerLoader.LoadAvatarPowerCollection(account.Player.Avatar.ToEntityId()));
+            messageList.AddRange(PowerLoader.LoadAvatarPowerCollection(playerConnection));
 
             // Dequeue loading screen
             messageList.Add(NetMessageDequeueLoadingScreen.DefaultInstance);
-
-            return messageList;
-        }
-
-        private List<IMessage> LoadPlayerEntityMessages(DBAccount account)
-        {
-            List<IMessage> messageList = new();
-
-            // NetMessageLocalPlayer (set local player entity id and game options)
-            messageList.Add(NetMessageLocalPlayer.CreateBuilder()
-                .SetLocalPlayerEntityId(14646212)
-                .SetGameOptions(NetStructGameOptions.CreateBuilder()
-                    .SetTeamUpSystemEnabled(ConfigManager.GameOptions.TeamUpSystemEnabled)
-                    .SetAchievementsEnabled(ConfigManager.GameOptions.AchievementsEnabled)
-                    .SetOmegaMissionsEnabled(ConfigManager.GameOptions.OmegaMissionsEnabled)
-                    .SetVeteranRewardsEnabled(ConfigManager.GameOptions.VeteranRewardsEnabled)
-                    .SetMultiSpecRewardsEnabled(ConfigManager.GameOptions.MultiSpecRewardsEnabled)
-                    .SetGiftingEnabled(ConfigManager.GameOptions.GiftingEnabled)
-                    .SetCharacterSelectV2Enabled(ConfigManager.GameOptions.CharacterSelectV2Enabled)
-                    .SetCommunityNewsV2Enabled(ConfigManager.GameOptions.CommunityNewsV2Enabled)
-                    .SetLeaderboardsEnabled(ConfigManager.GameOptions.LeaderboardsEnabled)
-                    .SetNewPlayerExperienceEnabled(ConfigManager.GameOptions.NewPlayerExperienceEnabled)
-                    .SetServerTimeOffsetUTC(-7)
-                    .SetUseServerTimeOffset(true)  // Although originally this was set to false, it needs to be true because auto offset doesn't work past 2019
-                    .SetMissionTrackerV2Enabled(ConfigManager.GameOptions.MissionTrackerV2Enabled)
-                    .SetGiftingAccountAgeInDaysRequired(ConfigManager.GameOptions.GiftingAccountAgeInDaysRequired)
-                    .SetGiftingAvatarLevelRequired(ConfigManager.GameOptions.GiftingAvatarLevelRequired)
-                    .SetGiftingLoginCountRequired(ConfigManager.GameOptions.GiftingLoginCountRequired)
-                    .SetInfinitySystemEnabled(ConfigManager.GameOptions.InfinitySystemEnabled)
-                    .SetChatBanVoteAccountAgeInDaysRequired(ConfigManager.GameOptions.ChatBanVoteAccountAgeInDaysRequired)
-                    .SetChatBanVoteAvatarLevelRequired(ConfigManager.GameOptions.ChatBanVoteAvatarLevelRequired)
-                    .SetChatBanVoteLoginCountRequired(ConfigManager.GameOptions.ChatBanVoteLoginCountRequired)
-                    .SetIsDifficultySliderEnabled(ConfigManager.GameOptions.IsDifficultySliderEnabled)
-                    .SetOrbisTrophiesEnabled(ConfigManager.GameOptions.OrbisTrophiesEnabled)
-                    .SetPlatformType((int)Platforms.PC))
-                .Build());
-
-            // Create and initialize player entity
-            Player player = new(new EntityBaseData());
-            player.InitializeFromDBAccount(account);
-            messageList.Add(player.ToNetMessageEntityCreate());
-
-            // Avatars
-            PrototypeId currentAvatarId = (PrototypeId)account.CurrentAvatar.Prototype;
-            ulong avatarEntityId = player.BaseData.EntityId + 1;
-            ulong avatarRepId = player.PartyId.ReplicationId + 1;
-
-            List<Avatar> avatarList = new();
-            uint librarySlot = 0;
-            foreach (PrototypeId avatarId in GameDatabase.DataDirectory.IteratePrototypesInHierarchy(typeof(AvatarPrototype),
-                PrototypeIterateFlags.NoAbstract | PrototypeIterateFlags.ApprovedOnly))
-            {
-                if (avatarId == (PrototypeId)6044485448390219466) continue;   //zzzBrevikOLD.prototype
-
-                Avatar avatar = new(avatarEntityId, avatarRepId);
-                avatarEntityId++;
-                avatarRepId += 2;
-
-                avatar.InitializeFromDBAccount(avatarId, account);
-
-                avatar.BaseData.InvLoc = (avatarId == currentAvatarId)
-                    ? new(player.BaseData.EntityId, (PrototypeId)9555311166682372646, 0)                // Entity/Inventory/PlayerInventories/PlayerAvatarInPlay.prototype
-                    : new(player.BaseData.EntityId, (PrototypeId)5235960671767829134, librarySlot++);   // Entity/Inventory/PlayerInventories/PlayerAvatarLibrary.prototype
-
-                avatarList.Add(avatar);
-            }
-
-            messageList.AddRange(avatarList.Select(avatar => avatar.ToNetMessageEntityCreate()));
 
             return messageList;
         }

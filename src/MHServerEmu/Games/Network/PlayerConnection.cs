@@ -15,6 +15,7 @@ using MHServerEmu.Games.Properties;
 using MHServerEmu.Games.Regions;
 using MHServerEmu.Grouping;
 using MHServerEmu.PlayerManagement.Accounts;
+using MHServerEmu.PlayerManagement.Accounts.DBModels;
 
 namespace MHServerEmu.Games.Network
 {
@@ -30,11 +31,31 @@ namespace MHServerEmu.Games.Network
 
         private static readonly Logger Logger = LogManager.CreateLogger();
 
+        private readonly FrontendClient _frontendClient;
         private readonly List<IMessage> _pendingMessageList = new();
         private readonly PowerMessageHandler _powerMessageHandler;
 
         public Game Game { get; }
-        public FrontendClient FrontendClient { get; }   // todo: move everything game-related from FrontendClient to here and remove this getter
+        public DBAccount Account { get; }
+
+        public Region Region { get => Game.RegionManager.GetRegion(Account.Player.Region); }
+
+        // Player State
+        public Player Player { get; }
+
+        public bool IsLoading { get; set; } = true;     // This is true by default because the player manager queues the first loading screen
+        public Vector3 LastPosition { get; set; }
+        public ulong MagikUltimateEntityId { get; set; }
+        public bool IsThrowing { get; set; } = false;
+        public PrototypeId ThrowingPower { get; set; }
+        public PrototypeId ThrowingCancelPower { get; set; }
+        public Entity ThrowingObject { get; set; }
+
+        public AreaOfInterest AOI { get; }
+        public Vector3 StartPositon { get; internal set; }
+        public Orientation StartOrientation { get; internal set; }
+        public WorldEntity EntityToTeleport { get; internal set; }
+
 
         /// <summary>
         /// Constructs a new <see cref="PlayerConnection"/>.
@@ -42,8 +63,32 @@ namespace MHServerEmu.Games.Network
         public PlayerConnection(Game game, FrontendClient frontendClient)
         {
             Game = game;
-            FrontendClient = frontendClient;
+            _frontendClient = frontendClient;
+            Account = _frontendClient.Session.Account;
+            AOI = new(this);
             _powerMessageHandler = new(Game);
+
+            // Create player and avatar entities
+            Player = new(new EntityBaseData());
+            Player.InitializeFromDBAccount(Account);
+
+            ulong avatarEntityId = Player.BaseData.EntityId + 1;
+            ulong avatarRepId = Player.PartyId.ReplicationId + 1;
+            foreach (PrototypeId avatarId in GameDatabase.DataDirectory.IteratePrototypesInHierarchy(typeof(AvatarPrototype),
+                PrototypeIterateFlags.NoAbstract | PrototypeIterateFlags.ApprovedOnly))
+            {
+                if (avatarId == (PrototypeId)6044485448390219466) continue;   //zzzBrevikOLD.prototype
+
+                Avatar avatar = new(avatarEntityId, avatarRepId);
+                avatar.BaseData.InvLoc = new(Player.BaseData.EntityId, PrototypeId.Invalid, 0);
+                avatarEntityId++;
+                avatarRepId += 2;
+
+                avatar.InitializeFromDBAccount(avatarId, Account);
+                Player.AvatarList.Add(avatar);
+            }
+
+            Player.SetAvatar((PrototypeId)Account.CurrentAvatar.Prototype);
         }
 
         #region NetClient Implementation
@@ -72,7 +117,7 @@ namespace MHServerEmu.Games.Network
         public void FlushMessages()
         {
             if (_pendingMessageList.Any() == false) return;
-            FrontendClient.SendMessages(MuxChannel, _pendingMessageList);
+            _frontendClient.SendMessages(MuxChannel, _pendingMessageList);
             _pendingMessageList.Clear();
         }
 
@@ -130,9 +175,6 @@ namespace MHServerEmu.Games.Network
                 case ClientToGameServerMessage.NetMessageTryCancelPower:
                 case ClientToGameServerMessage.NetMessageTryCancelActivePower:
                 case ClientToGameServerMessage.NetMessageContinuousPowerUpdateToServer:
-                case ClientToGameServerMessage.NetMessageAbilitySlotToAbilityBar:       // TODO: Move ability bar message handling to avatar entity
-                case ClientToGameServerMessage.NetMessageAbilityUnslotFromAbilityBar:
-                case ClientToGameServerMessage.NetMessageAbilitySwapInAbilityBar:
                 case ClientToGameServerMessage.NetMessageAssignStolenPower:
                     _powerMessageHandler.ReceiveMessage(this, message); break;
 
@@ -154,6 +196,21 @@ namespace MHServerEmu.Games.Network
                 case ClientToGameServerMessage.NetMessageSwitchAvatar:
                     if (message.TryDeserialize<NetMessageSwitchAvatar>(out var switchAvatar))
                         OnSwitchAvatar(switchAvatar);
+                    break;
+
+                case ClientToGameServerMessage.NetMessageAbilitySlotToAbilityBar:
+                    if (message.TryDeserialize<NetMessageAbilitySlotToAbilityBar>(out var slotToAbilityBar))
+                        OnAbilitySlotToAbilityBar(slotToAbilityBar);
+                    break;
+
+                case ClientToGameServerMessage.NetMessageAbilityUnslotFromAbilityBar:
+                    if (message.TryDeserialize<NetMessageAbilityUnslotFromAbilityBar>(out var unslotFromAbilityBar))
+                        OnAbilityUnslotFromAbilityBar(unslotFromAbilityBar);
+                    break;
+
+                case ClientToGameServerMessage.NetMessageAbilitySwapInAbilityBar:
+                    if (message.TryDeserialize<NetMessageAbilitySwapInAbilityBar>(out var swapInAbilityBar))
+                        OnAbilitySwapInAbilityBar(swapInAbilityBar);
                     break;
 
                 case ClientToGameServerMessage.NetMessageSetPlayerGameplayOptions:
@@ -184,22 +241,22 @@ namespace MHServerEmu.Games.Network
 
         private void OnChangeCameraSettings(NetMessageChangeCameraSettings cameraSettings)
         {
-            FrontendClient.AOI.InitPlayerView((PrototypeId)cameraSettings.CameraSettings);
+            AOI.InitPlayerView((PrototypeId)cameraSettings.CameraSettings);
         }
 
         private void OnUpdateAvatarState(NetMessageUpdateAvatarState updateAvatarState)
         {
             UpdateAvatarStateArchive avatarState = new(updateAvatarState.ArchiveData);
             //Vector3 oldPosition = client.LastPosition;
-            FrontendClient.LastPosition = avatarState.Position;
-            FrontendClient.AOI.Region.Visited();
+            LastPosition = avatarState.Position;
+            AOI.Region.Visited();
             // AOI
-            if (FrontendClient.IsLoading == false && FrontendClient.AOI.ShouldUpdate(avatarState.Position))
+            if (IsLoading == false && AOI.ShouldUpdate(avatarState.Position))
             {
-                if (FrontendClient.AOI.Update(avatarState.Position))
+                if (AOI.Update(avatarState.Position))
                 {
                     //Logger.Trace($"AOI[{client.AOI.Messages.Count}][{client.AOI.LoadedEntitiesCount}]");
-                    foreach (IMessage message in FrontendClient.AOI.Messages)
+                    foreach (IMessage message in AOI.Messages)
                         SendMessage(message);
                 }
             }
@@ -212,30 +269,30 @@ namespace MHServerEmu.Games.Network
 
         private void OnCellLoaded(NetMessageCellLoaded cellLoaded)
         {
-            FrontendClient.AOI.OnCellLoaded(cellLoaded.CellId);
-            Logger.Info($"Received CellLoaded message cell[{cellLoaded.CellId}] loaded [{FrontendClient.AOI.LoadedCellCount}/{FrontendClient.AOI.CellsInRegion}]");
+            AOI.OnCellLoaded(cellLoaded.CellId);
+            Logger.Info($"Received CellLoaded message cell[{cellLoaded.CellId}] loaded [{AOI.LoadedCellCount}/{AOI.CellsInRegion}]");
 
-            if (FrontendClient.IsLoading)
+            if (IsLoading)
             {
                 Game.EventManager.KillEvent(this, EventEnum.FinishCellLoading);
-                if (FrontendClient.AOI.LoadedCellCount == FrontendClient.AOI.CellsInRegion)
+                if (AOI.LoadedCellCount == AOI.CellsInRegion)
                     Game.FinishLoading(this);
                 else
                 {
                     // set timer 5 seconds for wait client answer
-                    Game.EventManager.AddEvent(this, EventEnum.FinishCellLoading, 5000, FrontendClient.AOI.CellsInRegion);
-                    FrontendClient.AOI.ForceCellLoad();
+                    Game.EventManager.AddEvent(this, EventEnum.FinishCellLoading, 5000, AOI.CellsInRegion);
+                    AOI.ForceCellLoad();
                 }
             }
         }
 
         private void OnAdminCommand(NetMessageAdminCommand command)
         {
-            if (FrontendClient.Session.Account.UserLevel < AccountUserLevel.Admin)
+            if (Account.UserLevel < AccountUserLevel.Admin)
             {
                 // Naughty hacker here, TODO: handle this properly
                 SendMessage(NetMessageAdminCommandResponse.CreateBuilder()
-                    .SetResponse($"{FrontendClient.Session.Account.PlayerName} is not in the sudoers file. This incident will be reported.").Build());
+                    .SetResponse($"{Account.PlayerName} is not in the sudoers file. This incident will be reported.").Build());
                 return;
             }
 
@@ -251,10 +308,10 @@ namespace MHServerEmu.Games.Network
 
             if (Game.EntityManager.TryGetEntityById(performPreInteractPower.IdTarget, out Entity interactObject))
             {
-                if (Game.EventManager.HasEvent(this, EventEnum.OnPreInteractPowerEnd) == false)
+                if (Game.EventManager.HasEvent(this, EventEnum.PreInteractPowerEnd) == false)
                 {
-                    Game.EventManager.AddEvent(this, EventEnum.OnPreInteractPower, 0, interactObject);
-                    Game.EventManager.AddEvent(this, EventEnum.OnPreInteractPowerEnd, 1000, interactObject); // ChargingTimeMS    
+                    Game.EventManager.AddEvent(this, EventEnum.PreInteractPower, 0, interactObject);
+                    Game.EventManager.AddEvent(this, EventEnum.PreInteractPowerEnd, 1000, interactObject); // ChargingTimeMS    
                 }
             }
         }
@@ -290,7 +347,7 @@ namespace MHServerEmu.Games.Network
                         return;
                     }
 
-                    var currentRegion = (PrototypeId)FrontendClient.Session.Account.Player.Region;
+                    var currentRegion = (PrototypeId)Account.Player.Region;
                     if (currentRegion != teleport.Destinations[0].Region)
                     {
                         teleport.TeleportClient(this);
@@ -299,7 +356,7 @@ namespace MHServerEmu.Games.Network
 
                     if (Game.EntityManager.GetTransitionInRegion(teleport.Destinations[0], teleport.RegionId) is not Transition target) return;
 
-                    if (FrontendClient.AOI.CheckTargeCell(target))
+                    if (AOI.CheckTargeCell(target))
                     {
                         teleport.TeleportClient(this);
                         return;
@@ -319,16 +376,16 @@ namespace MHServerEmu.Games.Network
                     Logger.Trace($"Teleporting to areaid {areaid} cellid {cellid}");
 
                     SendMessage(NetMessageEntityPosition.CreateBuilder()
-                        .SetIdEntity((ulong)FrontendClient.Session.Account.Player.Avatar.ToEntityId())
+                        .SetIdEntity(Player.CurrentAvatar.BaseData.EntityId)
                         .SetFlags(64)
                         .SetPosition(targetPos.ToNetStructPoint3())
                         .SetOrientation(targetRot.ToNetStructPoint3())
                         .SetCellId(cellid)
                         .SetAreaId(areaid)
-                        .SetEntityPrototypeId((ulong)FrontendClient.Session.Account.Player.Avatar)
+                        .SetEntityPrototypeId((ulong)Player.CurrentAvatar.BaseData.PrototypeId)
                         .Build());
 
-                    FrontendClient.LastPosition = targetPos;
+                    LastPosition = targetPos;
                 }
                 else
                     Game.EventManager.AddEvent(this, EventEnum.UseInteractableObject, 0, interactableObject);
@@ -374,9 +431,44 @@ namespace MHServerEmu.Games.Network
 
             // A hack for changing avatar in-game
             //client.Session.Account.CurrentAvatar.Costume = 0;  // reset costume on avatar switch
-            FrontendClient.Session.Account.Player.Avatar = (AvatarPrototypeId)switchAvatar.AvatarPrototypeId;
-            ChatHelper.SendMetagameMessage(FrontendClient, $"Changing avatar to {FrontendClient.Session.Account.Player.Avatar}.");
-            Game.MovePlayerToRegion(this, FrontendClient.Session.Account.Player.Region, FrontendClient.Session.Account.Player.Waypoint);
+            Player.SetAvatar((PrototypeId)switchAvatar.AvatarPrototypeId);
+            ChatHelper.SendMetagameMessage(_frontendClient, $"Changing avatar to {Account.Player.Avatar}.");
+            Game.MovePlayerToRegion(this, Account.Player.Region, Account.Player.Waypoint);
+        }
+
+        private void OnAbilitySlotToAbilityBar(NetMessageAbilitySlotToAbilityBar slotToAbilityBar)
+        {
+            var abilityKeyMapping = Player.CurrentAvatar.AbilityKeyMappings[0];
+            PrototypeId prototypeRefId = (PrototypeId)slotToAbilityBar.PrototypeRefId;
+            AbilitySlot slotNumber = (AbilitySlot)slotToAbilityBar.SlotNumber;
+            Logger.Trace($"NetMessageAbilitySlotToAbilityBar: {GameDatabase.GetFormattedPrototypeName(prototypeRefId)} to {slotNumber}");
+
+            // Set
+            abilityKeyMapping.SetAbilityInAbilitySlot(prototypeRefId, slotNumber);
+        }
+
+        private void OnAbilityUnslotFromAbilityBar(NetMessageAbilityUnslotFromAbilityBar unslotFromAbilityBar)
+        {
+            var abilityKeyMapping = Player.CurrentAvatar.AbilityKeyMappings[0];
+            AbilitySlot slotNumber = (AbilitySlot)unslotFromAbilityBar.SlotNumber;
+            Logger.Trace($"NetMessageAbilityUnslotFromAbilityBar: from {slotNumber}");
+
+            // Remove by assigning invalid id
+            abilityKeyMapping.SetAbilityInAbilitySlot(PrototypeId.Invalid, slotNumber);
+        }
+
+        private void OnAbilitySwapInAbilityBar(NetMessageAbilitySwapInAbilityBar swapInAbilityBar)
+        {
+            var abilityKeyMapping = Player.CurrentAvatar.AbilityKeyMappings[0];
+            AbilitySlot slotA = (AbilitySlot)swapInAbilityBar.SlotNumberA;
+            AbilitySlot slotB = (AbilitySlot)swapInAbilityBar.SlotNumberB;
+            Logger.Trace($"NetMessageAbilitySwapInAbilityBar: {slotA} and {slotB}");
+
+            // Swap
+            PrototypeId prototypeA = abilityKeyMapping.GetAbilityInAbilitySlot(slotA);
+            PrototypeId prototypeB = abilityKeyMapping.GetAbilityInAbilitySlot(slotB);
+            abilityKeyMapping.SetAbilityInAbilitySlot(prototypeB, slotA);
+            abilityKeyMapping.SetAbilityInAbilitySlot(prototypeA, slotB);
         }
 
         private void OnSetPlayerGameplayOptions(NetMessageSetPlayerGameplayOptions setPlayerGameplayOptions)
