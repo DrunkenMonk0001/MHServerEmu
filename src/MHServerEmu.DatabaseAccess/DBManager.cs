@@ -1,11 +1,10 @@
-﻿using System.Data.SQLite;
-using Dapper;
+﻿using Dapper;
+using System.Data.SQLite;
 using MHServerEmu.Core.Helpers;
 using MHServerEmu.Core.Logging;
-using MHServerEmu.Games.GameData;
-using MHServerEmu.PlayerManagement.Accounts.DBModels;
+using MHServerEmu.DatabaseAccess.Models;
 
-namespace MHServerEmu.PlayerManagement.Accounts
+namespace MHServerEmu.DatabaseAccess
 {
     /// <summary>
     /// Provides access to the account database.
@@ -143,7 +142,13 @@ namespace MHServerEmu.PlayerManagement.Accounts
                 {
                     try
                     {
+                        // Update saved player entity
                         connection.Execute(@"UPDATE Player SET RawRegion=@RawRegion, RawAvatar=@RawAvatar, RawWaypoint=@RawWaypoint, AOIVolume=@AOIVolume WHERE AccountId=@AccountId", account.Player, transaction);
+
+                        // Insert any new avatar entities
+                        connection.Execute(@"INSERT OR IGNORE INTO Avatar (AccountId, RawPrototype) VALUES (@AccountId, @RawPrototype)", account.Avatars.Values, transaction);
+
+                        // Update all avatar entities
                         connection.Execute(@"UPDATE Avatar SET RawCostume=@RawCostume, RawAbilityKeyMapping=@RawAbilityKeyMapping WHERE AccountId=@AccountId AND RawPrototype=@RawPrototype", account.Avatars.Values, transaction);
 
                         transaction.Commit();
@@ -190,7 +195,7 @@ namespace MHServerEmu.PlayerManagement.Accounts
 
             var avatars = connection.Query<DBAvatar>("SELECT * FROM Avatar WHERE AccountId = @AccountId", @params);
             foreach (DBAvatar avatar in avatars)
-                account.Avatars.Add((PrototypeId)avatar.Prototype, avatar);
+                account.Avatars.Add(avatar.RawPrototype, avatar);
         }
     }
 }

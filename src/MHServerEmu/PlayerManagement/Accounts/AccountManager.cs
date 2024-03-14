@@ -7,17 +7,11 @@ using MHServerEmu.Core.Helpers;
 using MHServerEmu.Games.Entities.Avatars;
 using MHServerEmu.Games.GameData;
 using MHServerEmu.Games.Regions;
-using MHServerEmu.PlayerManagement.Accounts.DBModels;
+using MHServerEmu.DatabaseAccess;
+using MHServerEmu.DatabaseAccess.Models;
 
 namespace MHServerEmu.PlayerManagement.Accounts
 {
-    public enum AccountUserLevel : byte
-    {
-        User,
-        Moderator,
-        Admin
-    }
-
     public static class AccountManager
     {
         public static bool IsInitialized { get; }
@@ -41,9 +35,9 @@ namespace MHServerEmu.PlayerManagement.Accounts
                 startingAvatar = AvatarPrototypeId.BlackCat;
 
             DefaultAccount = new(ConfigManager.DefaultPlayerData.PlayerName,
-                startingRegion,
-                startingWaypoint,
-                startingAvatar,
+                (long)startingRegion,
+                (long)startingWaypoint,
+                (long)startingAvatar,
                 ConfigManager.DefaultPlayerData.AOIVolume
             );
 

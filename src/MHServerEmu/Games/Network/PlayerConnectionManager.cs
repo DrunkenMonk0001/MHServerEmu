@@ -51,8 +51,7 @@ namespace MHServerEmu.Games.Network
                 if (_connectionDict.TryGetValue(frontendClient, out PlayerConnection playerConnection) == false)
                     Logger.WarnReturn(false, $"RemovePlayer(): Not found");
 
-                // Update DBAccount
-                playerConnection.Player.SaveToDBAccount(playerConnection.Account);
+                playerConnection.UpdateDBAccount();
                 return true;
             }
         }
@@ -115,6 +114,18 @@ namespace MHServerEmu.Games.Network
             {
                 foreach (PlayerConnection connection in _connectionDict.Values)
                     connection.FlushMessages();
+            }
+        }
+
+
+        public IEnumerable<PlayerConnection> TempRemoveMeIterateConnections()
+        {
+            // TEMPORARY METHOD FOR REGION CLEANUP, MAY CAUSE DEADLOCKS
+            // TODO: Get players in regions by checking player entities
+            lock (_connectionLock)
+            {
+                foreach (PlayerConnection connection in _connectionDict.Values)
+                    yield return connection;
             }
         }
     }

@@ -1,12 +1,12 @@
 ﻿using MHServerEmu.Core.Collisions;
 using MHServerEmu.Core.Logging;
 using MHServerEmu.Core.Network;
+using MHServerEmu.DatabaseAccess.Models;
 using MHServerEmu.Frontend;
 using MHServerEmu.Games.Entities;
 using MHServerEmu.Games.GameData;
 using MHServerEmu.Grouping;
 using MHServerEmu.PlayerManagement;
-using MHServerEmu.PlayerManagement.Accounts;
 
 namespace MHServerEmu.Commands
 {
@@ -198,7 +198,7 @@ namespace MHServerEmu.Commands
             foreach (var worldEntity in playerConnection.AOI.Region.IterateEntitiesInVolume(near, new()))
             {
                 string name = worldEntity.PrototypeName;
-                ulong entityId = worldEntity.BaseData.EntityId;
+                ulong entityId = worldEntity.Id;
                 string status = string.Empty;
                 if (playerConnection.AOI.EntityLoaded(entityId) == false) status += "[H]";
                 if (worldEntity is Transition) status += "[T]";
