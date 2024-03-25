@@ -1,5 +1,6 @@
 ﻿using System.Text;
 using Google.ProtocolBuffers;
+using MHServerEmu.Core.Extensions;
 using MHServerEmu.Core.Logging;
 using MHServerEmu.Core.VectorMath;
 
@@ -27,6 +28,11 @@ namespace MHServerEmu.Core.Serialization
         // C# coded stream implementation is buffered, so we have to use the same stream for the whole archive
         private readonly CodedOutputStream _cos;
         private readonly CodedInputStream _cis;
+
+        // Bool encoding (see EncodeBoolIntoByte() for details)
+        private byte _encodedBitBuffer = 0;
+        private byte _encodedBitsRead = 0;
+        private long _lastBitEncodedOffset = 0;
 
         public ArchiveSerializeType SerializeType { get; }
 
@@ -96,8 +102,17 @@ namespace MHServerEmu.Core.Serialization
             ReadHeader();
         }
 
+        /// <summary>
+        /// Returns the <see cref="MemoryStream"/> instance that acts as the AutoBuffer for this <see cref="Archive"/>.
+        /// </summary>
+        /// <remarks>
+        /// AutoBuffer is the name of the data structure that backs archives in the client.
+        /// </remarks>
         public MemoryStream AccessAutoBuffer() => _bufferStream;
 
+        /// <summary>
+        /// Writes the header for this <see cref="Archive"/>. Returns <see langword="true"/> if successful.
+        /// </summary>
         private bool WriteHeader()
         {
             bool success = true;
@@ -110,6 +125,9 @@ namespace MHServerEmu.Core.Serialization
             return success;
         }
 
+        /// <summary>
+        /// Reads this <see cref="Archive"/>'s header. Returns <see langword="true"/> if successful.
+        /// </summary>
         private bool ReadHeader()
         {
             bool success = true;
@@ -124,11 +142,55 @@ namespace MHServerEmu.Core.Serialization
 
         #region Transfer
 
+        /// <summary>
+        /// Transfers a <see cref="bool"/> value to or from this <see cref="Archive"/> instance. Returns <see langword="true"/> if successful.
+        /// </summary>
         public bool Transfer(ref bool ioData)
         {
-            throw new NotImplementedException();
+            // TODO: FavorSpeed
+
+            if (IsPacking)
+            {
+                byte? lastBitEncoded = GetLastBitEncoded();
+                byte bitBuffer = lastBitEncoded == null ? (byte)0 : (byte)lastBitEncoded;
+
+                byte numEncodedBits = EncodeBoolIntoByte(ref bitBuffer, ioData);
+                if (numEncodedBits == 0)
+                    return Logger.ErrorReturn(false, "Transfer(): Bool encoding failed");
+
+                if (lastBitEncoded == null)
+                {
+                    _lastBitEncodedOffset = _cos.Position;
+                    WriteSingleByte(bitBuffer);
+                }
+                else
+                {
+                    _bufferStream.WriteByteAt(_lastBitEncodedOffset, bitBuffer);
+                    if (numEncodedBits >= 5)
+                        _lastBitEncodedOffset = 0;
+                }
+            }
+            else
+            {
+                if (_encodedBitBuffer == 0)
+                    ReadSingleByte(ref _encodedBitBuffer);
+
+                if (DecodeBoolFromByte(ref _encodedBitBuffer, ref ioData, out byte numRemainingBits) == false)
+                    return Logger.ErrorReturn(false, "Transfer(): Bool decoding failed");
+
+                if (numRemainingBits == 0)
+                {
+                    _encodedBitBuffer = 0;
+                    _encodedBitsRead = 0;
+                }
+            }
+
+            return true;
         }
 
+        /// <summary>
+        /// Transfers a <see cref="ushort"/> value to or from this <see cref="Archive"/> instance. Returns <see langword="true"/> if successful.
+        /// </summary>
         public bool Transfer(ref ushort ioData)
         {
             if (IsPacking)
@@ -145,6 +207,9 @@ namespace MHServerEmu.Core.Serialization
             }
         }
 
+        /// <summary>
+        /// Transfers an <see cref="int"/> value to or from this <see cref="Archive"/> instance. Returns <see langword="true"/> if successful.
+        /// </summary>
         public bool Transfer(ref int ioData)
         {
             // TODO: FavorSpeed
@@ -163,11 +228,17 @@ namespace MHServerEmu.Core.Serialization
             }
         }
 
+        /// <summary>
+        /// Transfers a <see cref="uint"/> value to or from this <see cref="Archive"/> instance. Returns <see langword="true"/> if successful.
+        /// </summary>
         public bool Transfer(ref uint ioData)
         {
             return Transfer_(ref ioData);
         }
 
+        /// <summary>
+        /// Transfers a <see cref="long"/> value to or from this <see cref="Archive"/> instance. Returns <see langword="true"/> if successful.
+        /// </summary>
         public bool Transfer(ref long ioData)
         {
             // TODO: FavorSpeed
@@ -186,11 +257,17 @@ namespace MHServerEmu.Core.Serialization
             }
         }
 
+        /// <summary>
+        /// Transfers a <see cref="ulong"/> value to or from this <see cref="Archive"/> instance. Returns <see langword="true"/> if successful.
+        /// </summary>
         public bool Transfer(ref ulong ioData)
         {
             return Transfer_(ref ioData);
         }
 
+        /// <summary>
+        /// Transfers a <see cref="float"/> value to or from this <see cref="Archive"/> instance. Returns <see langword="true"/> if successful.
+        /// </summary>
         public bool Transfer(ref float ioData)
         {
             // TODO: FavorSpeed
@@ -209,11 +286,17 @@ namespace MHServerEmu.Core.Serialization
             }
         }
 
+        /// <summary>
+        /// Transfers an <see cref="ISerialize"/> instance to or from this <see cref="Archive"/> instance. Returns <see langword="true"/> if successful.
+        /// </summary>
         public bool Transfer(ref ISerialize ioData)
         {
             return ioData.Serialize(this);
         }
 
+        /// <summary>
+        /// Transfers a <see cref="Vector3"/> instance to or from this <see cref="Archive"/> instance. Returns <see langword="true"/> if successful.
+        /// </summary>
         public bool Transfer(ref Vector3 ioData)
         {
             // TODO: FavorSpeed
@@ -252,6 +335,9 @@ namespace MHServerEmu.Core.Serialization
             }
         }
 
+        /// <summary>
+        /// Transfers a <see cref="float"/> value to or from this <see cref="Archive"/> instance with the specified precision. Returns <see langword="true"/> if successful.
+        /// </summary>
         public bool TransferFloatFixed(ref float ioData, int precision)
         {
             precision = precision < 0 ? 1 : 1 << precision;
@@ -270,6 +356,9 @@ namespace MHServerEmu.Core.Serialization
             }
         }
 
+        /// <summary>
+        /// Transfers a <see cref="Vector3"/> instance to or from this <see cref="Archive"/> instance with the specified precision. Returns <see langword="true"/> if successful.
+        /// </summary>
         public bool TransferVectorFixed(ref Vector3 ioData, int precision)
         {
             bool success = true;
@@ -305,6 +394,9 @@ namespace MHServerEmu.Core.Serialization
             }
         }
 
+        /// <summary>
+        /// Transfers an <see cref="Orientation"/> instance to or from this <see cref="Archive"/> instance with the specified precision. Returns <see langword="true"/> if successful.
+        /// </summary>
         public bool TransferOrientationFixed(ref Orientation ioData, bool yawOnly, int precision)
         {
             bool success = true;
@@ -354,30 +446,39 @@ namespace MHServerEmu.Core.Serialization
             }
         }
 
+        /// <summary>
+        /// Transfers a <see cref="string"/> instance to or from this <see cref="Archive"/> instance. Returns <see langword="true"/> if successful.
+        /// </summary>
         public bool Transfer(ref string ioData)
         {
             bool success = true;
 
             if (IsPacking)
             {
-                uint length = (uint)ioData.Length;
-                success &= Transfer_(ref length);
+                if (ioData == null) return false;
 
-                using (BinaryWriter writer = new(_bufferStream))
-                    writer.Write(Encoding.UTF8.GetBytes(ioData));
+                byte[] bytes = Encoding.UTF8.GetBytes(ioData);
+
+                uint size = (uint)bytes.Length;
+                success &= Transfer_(ref size);
+
+                _cos.WriteRawBytes(bytes);
+                _cos.Flush();
             }
             else
             {
-                uint length = 0;
-                success &= Transfer_(ref length);
+                uint size = 0;
+                success &= Transfer_(ref size);
 
-                using (BinaryReader reader = new(_bufferStream))
-                    ioData = Encoding.UTF8.GetString(reader.ReadBytes((int)length));
+                ioData = Encoding.UTF8.GetString(_cis.ReadRawBytes((int)size));
             }
 
             return success;
         }
 
+        /// <summary>
+        /// The underlying method that transfers 32-bit values to or from this <see cref="Archive"/> instance. Returns <see langword="true"/> if successful.
+        /// </summary>
         private bool Transfer_(ref uint ioData)
         {
             // TODO: Archive::HasError()
@@ -390,6 +491,9 @@ namespace MHServerEmu.Core.Serialization
                 return ReadVarint(ref ioData);
         }
 
+        /// <summary>
+        /// The underlying method that transfers 64-bit values to or from this <see cref="Archive"/> instance. Returns <see langword="true"/> if successful.
+        /// </summary>
         private bool Transfer_(ref ulong ioData)
         {
             // TODO: Archive::HasError()
@@ -406,6 +510,9 @@ namespace MHServerEmu.Core.Serialization
 
         #region Stream IO
 
+        /// <summary>
+        /// Writes the provided <see cref="byte"/> value at the current position in the underlying stream. Returns <see langword="true"/> if successful.
+        /// </summary>
         public bool WriteSingleByte(byte value)
         {
             _cos.WriteRawByte(value);
@@ -413,6 +520,9 @@ namespace MHServerEmu.Core.Serialization
             return true;
         }
 
+        /// <summary>
+        /// Reads a <see cref="byte"/> value at the current position in the underlying stream. Returns <see langword="true"/> if successful.
+        /// </summary>
         public bool ReadSingleByte(ref byte ioData)
         {
             try
@@ -434,18 +544,29 @@ namespace MHServerEmu.Core.Serialization
 
         // These methods are also used for FavorSpeed (disk mode).
 
+        /// <summary>
+        /// Writes the provided <see cref="uint"/> value at the current position in the underlying stream. Returns <see langword="true"/> if successful.
+        /// </summary>
         public bool WriteUnencodedStream(uint value)
         {
             _cos.WriteRawBytes(BitConverter.GetBytes(value));
+            _cos.Flush();
             return true;
         }
 
+        /// <summary>
+        /// Writes the provided <see cref="ulong"/> value at the current position in the underlying stream. Returns <see langword="true"/> if successful.
+        /// </summary>
         public bool WriteUnencodedStream(ulong value)
         {
             _cos.WriteRawBytes(BitConverter.GetBytes(value));
+            _cos.Flush();
             return true;
         }
 
+        /// <summary>
+        /// Reads a <see cref="uint"/> value at the current position in the underlying stream. Returns <see langword="true"/> if successful.
+        /// </summary>
         public bool ReadUnencodedStream(ref uint value)
         {
             try
@@ -460,6 +581,9 @@ namespace MHServerEmu.Core.Serialization
             }
         }
 
+        /// <summary>
+        /// Reads a <see cref="ulong"/> value at the current position in the underlying stream. Returns <see langword="true"/> if successful.
+        /// </summary>
         public bool ReadUnencodedStream(ref ulong value)
         {
             try
@@ -474,6 +598,9 @@ namespace MHServerEmu.Core.Serialization
             }
         }
 
+        /// <summary>
+        /// Writes the provided <see cref="uint"/> value as varint at the current position in the underlying stream. Returns <see langword="true"/> if successful.
+        /// </summary>
         public bool WriteVarint(uint value)
         {
             _cos.WriteRawVarint32(value);
@@ -481,6 +608,9 @@ namespace MHServerEmu.Core.Serialization
             return true;
         }
 
+        /// <summary>
+        /// Writes the provided <see cref="ulong"/> value as varint at the current position in the underlying stream. Returns <see langword="true"/> if successful.
+        /// </summary>
         public bool WriteVarint(ulong ioData)
         {
             _cos.WriteRawVarint64(ioData);
@@ -488,6 +618,9 @@ namespace MHServerEmu.Core.Serialization
             return true;
         }
 
+        /// <summary>
+        /// Reads a 32-bit varint value at the current position in the underlying stream. Returns <see langword="true"/> if successful.
+        /// </summary>
         public bool ReadVarint(ref uint value)
         {
             try
@@ -502,6 +635,9 @@ namespace MHServerEmu.Core.Serialization
             }
         }
 
+        /// <summary>
+        /// Reads a 64-bit varint value at the current position in the underlying stream. Returns <see langword="true"/> if successful.
+        /// </summary>
         public bool ReadVarint(ref ulong ioData)
         {
             try
@@ -514,6 +650,70 @@ namespace MHServerEmu.Core.Serialization
                 Logger.ErrorException(e, nameof(ReadVarint));
                 return false;
             }
+        }
+
+        #endregion
+
+        #region Bool Encoding
+
+        /// <summary>
+        /// Returns the last bit buffer containing encoded bools. Returns <see langword="null"/> if there is no active buffer or read failed.
+        /// </summary>
+        private byte? GetLastBitEncoded()
+        {
+            if (_lastBitEncodedOffset == 0) return null;
+
+            if (_bufferStream.ReadByteAt(_lastBitEncodedOffset, out byte lastBitEncoded) == false)
+                return Logger.ErrorReturn<byte?>(null, $"GetLastBitEncoded(): Failed to get last bit encoded");
+                
+            return lastBitEncoded;
+        }
+
+        /// <summary>
+        /// Encodes a <see cref="bool"/> value into the provided bit buffer. Returns the number of bits encoded in the buffer. Returns 0 if the buffer is full.
+        /// </summary>
+        private byte EncodeBoolIntoByte(ref byte bitBuffer, bool value)
+        {
+            // Examples
+            // Bits  | Num Encoded  Hex     Values
+            // 10000 | 001          0x81    true
+            // 00000 | 001          0x1     false
+            // 11000 | 010          0xC2    true, true
+            // 01000 | 010          0x42    false, true
+            // 00000 | 011          0x3     false, false, false
+            // 10100 | 011          0xA3    true, false, true
+            // 11111 | 101          0xFD    true, true, true, true, true
+
+            byte numEncodedBits = (byte)(bitBuffer & 0x7); // 00000 111
+            if (numEncodedBits >= 5)
+                return 0;   // Bit buffer is full
+
+            // Encode a new bit and update the number of encoded bits
+            bitBuffer |= (byte)(Convert.ToUInt32(value) << (7 - numEncodedBits));
+            bitBuffer &= 0xF8; // 11111 000
+            bitBuffer |= ++numEncodedBits;
+
+            return numEncodedBits;
+        }
+
+        /// <summary>
+        /// Decodes a <see cref="bool"/> value from the provided bit buffer. Returns <see langword="true"/> if successful.
+        /// </summary>
+        private bool DecodeBoolFromByte(ref byte bitBuffer, ref bool value, out byte numRemainingBits)
+        {
+            numRemainingBits = (byte)(bitBuffer & 0x7);
+
+            if (numRemainingBits > 5 || _encodedBitsRead > 5 || numRemainingBits - _encodedBitsRead > 5)
+                return false;
+
+            // Decode a bit and update the number of encoded bits
+            value = (bitBuffer & 1 << 7 - _encodedBitsRead) != 0;
+
+            bitBuffer &= 0xF8;
+            bitBuffer |= --numRemainingBits;
+            _encodedBitsRead++;
+
+            return true;
         }
 
         #endregion
