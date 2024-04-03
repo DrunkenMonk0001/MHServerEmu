@@ -108,9 +108,10 @@ namespace MHServerEmu.Games.Regions
 
         public Region EmptyRegion(RegionPrototypeId prototype)
         {
-            Region region = new(prototype, 1038711701,
+            Region region = new(prototype, 1210027349,
              Array.Empty<byte>(),
              new(10, DifficultyTier.Normal));
+            region.Bound = Aabb.Zero;
             return region;
         }
 
@@ -168,7 +169,7 @@ namespace MHServerEmu.Games.Regions
         // OLD
         public Region GetRegion(RegionPrototypeId prototype)
         {
-            //  prototype = (RegionPrototypeId)7735172603194383419;
+            //prototype = RegionPrototypeId.NPEAvengersTowerHUBRegion;
             lock (_managerLock)
             {
                 if (_regionDict.TryGetValue(prototype, out Region region) == false)
@@ -552,17 +553,13 @@ namespace MHServerEmu.Games.Regions
                     // Widget: UI/MetaGame/MissionName.prototype
                     // Context: Missions/Prototypes/PVEEndgame/PatrolMidtown/Events/MidtownEventMegaSentinel.prototype
                     var missionTextWidget = archive.UIDataProvider.GetWidget<UIWidgetMissionText>((PrototypeId)7164846210465729875, (PrototypeId)10490887443555427166);
-                    missionTextWidget.MissionName = (LocaleStringId)8188822000559654203;
-                    missionTextWidget.MissionObjectiveName = LocaleStringId.Invalid;
+                    missionTextWidget.SetText((LocaleStringId)8188822000559654203, LocaleStringId.Invalid);
 
                     // Widget: UI/MetaGame/TimeRemainingStoryMode2.prototype
                     // Context: Missions/Prototypes/PVEEndgame/PatrolMidtown/Events/MidtownEventMegaSentinel.prototype
                     var genericFractionWidget = archive.UIDataProvider.GetWidget<UIWidgetGenericFraction>((PrototypeId)11932510257277768241, (PrototypeId)10490887443555427166);
-                    genericFractionWidget.CurrentCount = 1;
-                    genericFractionWidget.TotalCount = 1;
-                    genericFractionWidget.TimeStart = 0;
-                    genericFractionWidget.TimeEnd = (long)Clock.GameTime.TotalMilliseconds + 251550;
-                    genericFractionWidget.TimePaused = false;
+                    genericFractionWidget.SetCount(1, 1);
+                    genericFractionWidget.SetTimeRemaining(251550);
 
                     break;
             }
