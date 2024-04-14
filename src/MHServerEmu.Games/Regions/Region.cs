@@ -217,15 +217,17 @@ namespace MHServerEmu.Games.Regions
             if (regionProto.MetaGames.HasValue())
                 foreach (var metaGameRef in regionProto.MetaGames)
                 {
-                    MetaGame metagame = Game.EntityManager.CreateMetaGame(metaGameRef, Id);
-                    RegisterMetaGame(metagame);
+                    EntitySettings metaSettings = new();
+                    metaSettings.RegionId = Id;
+                    metaSettings.EntityRef = metaGameRef;
+                    MetaGame metagame = Game.EntityManager.CreateEntity(metaSettings) as MetaGame;                    
                 }
 
             if (settings.GenerateAreas)
             {
                 if (GenerateAreas(settings.GenerateLog) == false)
                 {
-                    Logger.Error($"Failed to generate areas for\n  region: {this}\n    seed: {RandomSeed}");
+                    Logger.Warn($"Failed to generate areas for\n  region: {this}\n    seed: {RandomSeed}");
                     return false;
                 }
             }
@@ -744,8 +746,8 @@ namespace MHServerEmu.Games.Regions
             {
                 if (playerConnection.EntityToTeleport != null) // TODO change teleport without reload Region
                 {
-                    Vector3 position = new(playerConnection.EntityToTeleport.Location.GetPosition());
-                    Orientation orientation = new(playerConnection.EntityToTeleport.Location.GetOrientation());
+                    Vector3 position = new(playerConnection.EntityToTeleport.RegionLocation.GetPosition());
+                    Orientation orientation = new(playerConnection.EntityToTeleport.RegionLocation.GetOrientation());
                     if (playerConnection.EntityToTeleport.EntityPrototype is TransitionPrototype teleportEntity
                         && teleportEntity.SpawnOffset > 0) teleportEntity.CalcSpawnOffset(orientation, position);
                     playerConnection.StartPositon = position;
@@ -828,6 +830,17 @@ namespace MHServerEmu.Games.Regions
             }
 
             return false;
+        }
+
+        public int GetAreaLevel(Area area)
+        {
+            if (RegionPrototype.LevelUseAreaOffset) return area.GetAreaLevel();
+            return RegionLevel;
+        }
+
+        public bool HasKeyword(KeywordPrototype keywordProto)
+        {            
+            return keywordProto != null && RegionPrototype.HasKeyword(keywordProto);
         }
 
     }

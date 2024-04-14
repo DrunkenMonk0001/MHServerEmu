@@ -1,7 +1,9 @@
 ﻿using Google.ProtocolBuffers;
 using MHServerEmu.Core.Extensions;
 using MHServerEmu.Core.Logging;
+using MHServerEmu.Core.Serialization;
 using MHServerEmu.Core.System;
+using MHServerEmu.Games.Common;
 using MHServerEmu.Games.Entities;
 
 namespace MHServerEmu.Games.Missions
@@ -16,13 +18,13 @@ namespace MHServerEmu.Games.Missions
         Skipped = 5
     }
 
-    public class MissionObjective
+    public class MissionObjective : ISerialize
     {
         // Relevant protobuf: NetMessageMissionObjectiveUpdate
 
         private static readonly Logger Logger = LogManager.CreateLogger();
 
-        private uint _prototypeIndex;
+        private byte _prototypeIndex;
 
         private MissionObjectiveState _objectiveState;
         private TimeSpan _objectiveStateExpireTime;
@@ -37,18 +39,18 @@ namespace MHServerEmu.Games.Missions
         public Mission Mission { get; }
         public Game Game { get => Mission.Game; }
 
-        public uint PrototypeIndex { get => _prototypeIndex; }
+        public byte PrototypeIndex { get => _prototypeIndex; }
         public MissionObjectiveState State { get => _objectiveState; }
         public TimeSpan TimeExpire { get => _objectiveStateExpireTime; }
         public TimeSpan TimeRemainingForObjective { get => _objectiveStateExpireTime - Clock.GameTime; }
 
-        public MissionObjective(Mission mission, uint prototypeIndex)
+        public MissionObjective(Mission mission, byte prototypeIndex)
         {
             Mission = mission;
             _prototypeIndex = prototypeIndex;
         }
 
-        public MissionObjective(uint prototypeIndex, MissionObjectiveState objectiveState, TimeSpan objectiveStateExpireTime,
+        public MissionObjective(byte prototypeIndex, MissionObjectiveState objectiveState, TimeSpan objectiveStateExpireTime,
             IEnumerable<InteractionTag> interactedEntities, ushort currentCount, ushort requiredCount, ushort failCurrentCount, 
             ushort failRequiredCount)
         {
@@ -60,6 +62,55 @@ namespace MHServerEmu.Games.Missions
             _requiredCount = requiredCount;
             _failCurrentCount = failCurrentCount;
             _failRequiredCount = failRequiredCount;
+        }
+
+        public bool Serialize(Archive archive)
+        {
+            bool success = true;
+
+            success &= Serializer.Transfer(archive, ref _prototypeIndex);
+
+            int state = (int)_objectiveState;
+            success &= Serializer.Transfer(archive, ref state);
+            _objectiveState = (MissionObjectiveState)state;
+
+            success &= Serializer.Transfer(archive, ref _objectiveStateExpireTime);
+
+            uint numInteractedEntities = (uint)_interactedEntityList.Count;
+            success &= Serializer.Transfer(archive, ref numInteractedEntities);
+
+            if (archive.IsPacking)
+            {
+                foreach (InteractionTag tag in _interactedEntityList)
+                {
+                    ulong entityId = tag.EntityId;
+                    ulong regionId = tag.RegionId;
+                    success &= Serializer.Transfer(archive, ref entityId);
+                    success &= Serializer.Transfer(archive, ref regionId);
+                    // timestamp - ignored in replication
+                }
+            }
+            else
+            {
+                _interactedEntityList.Clear();
+
+                for (uint i = 0; i < numInteractedEntities; i++)
+                {
+                    ulong entityId = 0;
+                    ulong regionId = 0;
+                    success &= Serializer.Transfer(archive, ref entityId);
+                    success &= Serializer.Transfer(archive, ref regionId);
+                    // timestamp - ignored in replication
+                }
+            }
+
+            // Counts are serialized only in replication
+            success &= Serializer.Transfer(archive, ref _currentCount);
+            success &= Serializer.Transfer(archive, ref _requiredCount);
+            success &= Serializer.Transfer(archive, ref _failCurrentCount);
+            success &= Serializer.Transfer(archive, ref _failRequiredCount);
+
+            return success;
         }
 
         public void Decode(CodedInputStream stream)
