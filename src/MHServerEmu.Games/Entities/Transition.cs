@@ -3,13 +3,12 @@ using Google.ProtocolBuffers;
 using MHServerEmu.Core.Extensions;
 using MHServerEmu.Core.Logging;
 using MHServerEmu.Core.VectorMath;
-using MHServerEmu.Frontend;
 using MHServerEmu.Games.Common;
+using MHServerEmu.Games.Entities.PowerCollections;
 using MHServerEmu.Games.GameData;
 using MHServerEmu.Games.GameData.Prototypes;
 using MHServerEmu.Games.Generators.Regions;
 using MHServerEmu.Games.Network;
-using MHServerEmu.Games.Powers;
 using MHServerEmu.Games.Properties;
 using MHServerEmu.Games.Regions;
 
@@ -46,7 +45,7 @@ namespace MHServerEmu.Games.Entities
             Properties = properties;
             TrackingContextMap = new();
             ConditionCollection = new(this);
-            PowerCollection = new();
+            PowerCollection = new(this);
             UnkEvent = 0;
 
             TransitionName = "";
@@ -58,7 +57,7 @@ namespace MHServerEmu.Games.Entities
         public Transition(EntityBaseData baseData, ByteString archiveData) : base(baseData, archiveData) { }
 
         public Transition(EntityBaseData baseData, EntityTrackingContextMap trackingContextMap, ConditionCollection conditionCollection,
-            List<PowerCollectionRecord> powerCollection, int unkEvent, 
+            PowerCollection powerCollection, int unkEvent, 
             string transitionName, List<Destination> destinations) : base(baseData)
         {
             TrackingContextMap = trackingContextMap;
