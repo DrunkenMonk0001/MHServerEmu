@@ -1,4 +1,5 @@
-﻿using MHServerEmu.Core.Collisions;
+﻿using MHServerEmu.Core.Collections;
+using MHServerEmu.Core.Collisions;
 using MHServerEmu.Core.Extensions;
 using MHServerEmu.Core.Logging;
 using MHServerEmu.Core.System.Random;
@@ -749,8 +750,8 @@ namespace MHServerEmu.Games.Generators.Regions
 
         }
 
-        public bool IsValid() => Edge.Length() > 0 && ConnectionList.Any();
-        public float GetLength() => Edge.Length();
+        public bool IsValid() => Edge.Length > 0 && ConnectionList.Any();
+        public float GetLength() => Edge.Length;
 
     }
 

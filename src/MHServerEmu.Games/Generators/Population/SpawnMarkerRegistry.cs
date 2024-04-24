@@ -1,4 +1,5 @@
-﻿using MHServerEmu.Core.Collisions;
+﻿using MHServerEmu.Core.Collections;
+using MHServerEmu.Core.Collisions;
 using MHServerEmu.Core.Logging;
 using MHServerEmu.Core.System.Random;
 using MHServerEmu.Core.VectorMath;
@@ -102,7 +103,7 @@ namespace MHServerEmu.Games.Generators.Population
                 {
                     var filterRef = GameDatabase.GetDataRefByPrototypeGuid(entityMarker.FilterGuid);
 
-                    if (cell.GetRegion().CheckMarkerFilter(filterRef))
+                    if (cell.Region.CheckMarkerFilter(filterRef))
                     {
                         if (entityMarker.EntityGuid == 0) continue;
                         var markerRef = GameDatabase.GetDataRefByPrototypeGuid(entityMarker.EntityGuid);

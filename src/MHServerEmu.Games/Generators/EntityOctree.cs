@@ -1,7 +1,8 @@
-﻿using MHServerEmu.Games.Entities.Avatars;
-using MHServerEmu.Games.Entities;
-using System.Collections;
+﻿using System.Collections;
 using MHServerEmu.Core.Collisions;
+using MHServerEmu.Games.Common.SpatialPartitions;
+using MHServerEmu.Games.Entities;
+using MHServerEmu.Games.Entities.Avatars;
 
 namespace MHServerEmu.Games.Generators
 {
@@ -120,7 +121,7 @@ namespace MHServerEmu.Games.Generators
 
         public static bool DoesSphereContainAvatar(Sphere sphere, Avatar avatar)
         {
-            if (avatar != null && sphere.Intersects(avatar.RegionLocation.GetPosition())) return true;
+            if (avatar != null && sphere.Intersects(avatar.RegionLocation.Position)) return true;
             return false;
         }
 
