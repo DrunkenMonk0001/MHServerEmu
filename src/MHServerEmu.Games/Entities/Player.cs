@@ -89,7 +89,9 @@ namespace MHServerEmu.Games.Entities
         public GameplayOptions GameplayOptions { get => _gameplayOptions; }
         public AchievementState AchievementState { get => _achievementState; }
 
-        
+        public bool IsFullscreenMoviePlaying { get => Properties[PropertyEnum.FullScreenMoviePlaying]; }
+        public bool IsOnLoadingScreen { get; set; }
+
         // Avatars
         public Avatar CurrentAvatar { get; private set; }
         public List<Avatar> AvatarList { get; } = new();    // temp until we implement inventories
@@ -449,10 +451,10 @@ namespace MHServerEmu.Games.Entities
                 dbAvatar.RawCostume = avatar.Properties[PropertyEnum.CostumeCurrent];
 
                 // Encode key mapping
-                var abilityKeyMapping = avatar.AbilityKeyMappings[0];
+                var abilityKeyMapping = avatar.CurrentAbilityKeyMapping;
 
                 BoolEncoder boolEncoder = new();
-                boolEncoder.EncodeBool(abilityKeyMapping.ShouldPersist);
+                abilityKeyMapping.EncodeBools(boolEncoder);
                 boolEncoder.Cook();
 
                 using (MemoryStream ms = new())

@@ -7,6 +7,7 @@ using MHServerEmu.DatabaseAccess.Models;
 using MHServerEmu.Frontend;
 using MHServerEmu.Games.Entities;
 using MHServerEmu.Games.Entities.Avatars;
+using MHServerEmu.Games.Entities.Locomotion;
 using MHServerEmu.Games.Entities.Options;
 using MHServerEmu.Games.Events;
 using MHServerEmu.Games.GameData;
@@ -202,7 +203,8 @@ namespace MHServerEmu.Games.Network
                 case ClientToGameServerMessage.NetMessageRequestInterestInAvatarEquipment:  OnRequestInterestInAvatarEquipment(message); break;
                 case ClientToGameServerMessage.NetMessageOmegaBonusAllocationCommit:        OnOmegaBonusAllocationCommit(message); break;
                 case ClientToGameServerMessage.NetMessageChangeCameraSettings:              OnChangeCameraSettings(message); break;
-                case ClientToGameServerMessage.NetMessagePlayKismetSeqDone:                 OnNetMessagePlayKismetSeqDone(message); break;
+                case ClientToGameServerMessage.NetMessagePlayKismetSeqDone:                 OnPlayKismetSeqDone(message); break;
+                case ClientToGameServerMessage.NetMessageNotifyLoadingScreenFinished:       OnNotifyLoadingScreenFinished(message); break;
 
                 // Power Messages
                 case ClientToGameServerMessage.NetMessageTryActivatePower:
@@ -242,7 +244,12 @@ namespace MHServerEmu.Games.Network
             }
         }
 
-        private bool OnNetMessagePlayKismetSeqDone(MailboxMessage message)
+        private void OnNotifyLoadingScreenFinished(MailboxMessage message)
+        {
+            Player.IsOnLoadingScreen = false;
+        }
+
+        private bool OnPlayKismetSeqDone(MailboxMessage message)
         {
             var playKismetSeqDone = message.As<NetMessagePlayKismetSeqDone>();
             if (playKismetSeqDone == null) return Logger.WarnReturn(false, $"OnNetMessagePlayKismetSeqDone(): Failed to retrieve message");
@@ -268,6 +275,28 @@ namespace MHServerEmu.Games.Network
                     foreach (IMessage aoiMessage in AOI.Messages)
                         SendMessage(aoiMessage);
                 }
+            }
+            
+            Avatar currentAvatar = Player.CurrentAvatar;
+            if (currentAvatar.IsInWorld == false) return true;
+
+            bool canMove = currentAvatar.CanMove;
+            bool canRotate = currentAvatar.CanRotate;
+            Vector3 position = currentAvatar.RegionLocation.Position;
+            Orientation orientation = currentAvatar.RegionLocation.Orientation;
+
+            if (canMove || canRotate) {
+                position = avatarState.Position;
+                orientation = avatarState.Orientation;
+                currentAvatar.ChangeRegionPosition(canMove ? position : null, canRotate ? orientation : null);
+                currentAvatar.UpdateNavigationInfluence();
+            }
+
+            if (avatarState.FieldFlags.HasFlag(LocomotionMessageFlags.NoLocomotionState) == false && currentAvatar.Locomotor != null)
+            {
+                LocomotionState locomotionState = new(currentAvatar.Locomotor.LastSyncState);
+                locomotionState.StateFrom(avatarState.LocomotionState); // LocomotionState.SerializeFrom
+                currentAvatar.Locomotor.SetSyncState(locomotionState, position, orientation);
             }
 
             /* Logger spam
@@ -366,23 +395,23 @@ namespace MHServerEmu.Games.Network
                         teleport.TeleportToLastTown(this);
                         return true;
                     }
-                    if (teleport.Destinations.Count == 0 || teleport.Destinations[0].Type == RegionTransitionType.Waypoint) return true;
-                    Logger.Trace($"Destination entity {teleport.Destinations[0].EntityRef}");
+                    if (teleport.DestinationList.Count == 0 || teleport.DestinationList[0].Type == RegionTransitionType.Waypoint) return true;
+                    Logger.Trace($"Destination entity {teleport.DestinationList[0].EntityRef}");
 
-                    if (teleport.Destinations[0].Type == RegionTransitionType.TowerUp ||
-                        teleport.Destinations[0].Type == RegionTransitionType.TowerDown)
+                    if (teleport.DestinationList[0].Type == RegionTransitionType.TowerUp ||
+                        teleport.DestinationList[0].Type == RegionTransitionType.TowerDown)
                     {
-                        teleport.TeleportToEntity(this, teleport.Destinations[0].EntityId);
+                        teleport.TeleportToEntity(this, teleport.DestinationList[0].EntityId);
                         return true;
                     }
 
-                    if (RegionDataRef != teleport.Destinations[0].RegionRef)
+                    if (RegionDataRef != teleport.DestinationList[0].RegionRef)
                     {
                         teleport.TeleportClient(this);
                         return true;
                     }
 
-                    if (Game.EntityManager.GetTransitionInRegion(teleport.Destinations[0], teleport.RegionId) is not Transition target) return true;
+                    if (Game.EntityManager.GetTransitionInRegion(teleport.DestinationList[0], teleport.RegionId) is not Transition target) return true;
 
                     if (AOI.CheckTargeCell(target))
                     {
@@ -487,7 +516,7 @@ namespace MHServerEmu.Games.Network
             var slotToAbilityBar = message.As<NetMessageAbilitySlotToAbilityBar>();
             if (slotToAbilityBar == null) return Logger.WarnReturn(false, $"OnAbilitySlotToAbilityBar(): Failed to retrieve message");
 
-            var abilityKeyMapping = Player.CurrentAvatar.AbilityKeyMappings[0];
+            var abilityKeyMapping = Player.CurrentAvatar.CurrentAbilityKeyMapping;
             PrototypeId prototypeRefId = (PrototypeId)slotToAbilityBar.PrototypeRefId;
             AbilitySlot slotNumber = (AbilitySlot)slotToAbilityBar.SlotNumber;
             Logger.Trace($"NetMessageAbilitySlotToAbilityBar: {GameDatabase.GetFormattedPrototypeName(prototypeRefId)} to {slotNumber}");
@@ -502,7 +531,7 @@ namespace MHServerEmu.Games.Network
             var unslotFromAbilityBar = message.As<NetMessageAbilityUnslotFromAbilityBar>();
             if (unslotFromAbilityBar == null) return Logger.WarnReturn(false, $"OnAbilityUnslotFromAbilityBar(): Failed to retrieve message");
 
-            var abilityKeyMapping = Player.CurrentAvatar.AbilityKeyMappings[0];
+            var abilityKeyMapping = Player.CurrentAvatar.CurrentAbilityKeyMapping;
             AbilitySlot slotNumber = (AbilitySlot)unslotFromAbilityBar.SlotNumber;
             Logger.Trace($"NetMessageAbilityUnslotFromAbilityBar: from {slotNumber}");
 
@@ -516,7 +545,7 @@ namespace MHServerEmu.Games.Network
             var swapInAbilityBar = message.As<NetMessageAbilitySwapInAbilityBar>();
             if (swapInAbilityBar == null) return Logger.WarnReturn(false, $"OnAbilitySwapInAbilityBar(): Failed to retrieve message");
 
-            var abilityKeyMapping = Player.CurrentAvatar.AbilityKeyMappings[0];
+            var abilityKeyMapping = Player.CurrentAvatar.CurrentAbilityKeyMapping;
             AbilitySlot slotA = (AbilitySlot)swapInAbilityBar.SlotNumberA;
             AbilitySlot slotB = (AbilitySlot)swapInAbilityBar.SlotNumberB;
             Logger.Trace($"NetMessageAbilitySwapInAbilityBar: {slotA} and {slotB}");

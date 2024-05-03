@@ -39,6 +39,21 @@ namespace MHServerEmu.Games.Entities
 
         }
 
+        public override bool CanRotate
+        {
+            get
+            {
+                Player ownerPlayer = GetOwnerOfType<Player>();
+                if ( IsInKnockback || IsInKnockdown || IsInKnockup 
+                    || IsImmobilized || IsImmobilizedByHitReact || IsSystemImmobilized 
+                    || IsStunned || IsMesmerized ||
+                    (ownerPlayer != null && ownerPlayer.IsFullscreenMoviePlaying || ownerPlayer.IsOnLoadingScreen)
+                    || NPCAmbientLock)
+                    return false;
+                return true;
+            }
+        }
+
         // New
         public Agent(Game game) : base(game) { }
 
@@ -93,7 +108,7 @@ namespace MHServerEmu.Games.Entities
             Condition condition = new();
             condition.InitializeFromPowerMixinPrototype(1, startPowerRef, 0, TimeSpan.Zero);
             condition.StartTime = Clock.GameTime;
-            ConditionCollection.AddCondition(condition);
+            _conditionCollection.AddCondition(condition);
 
             AssignPower(startPowerRef, new());
             
