@@ -1,36 +1,22 @@
 ﻿using MHServerEmu.Core.Collections;
 using MHServerEmu.Core.Logging;
-using MHServerEmu.Core.VectorMath;
 using MHServerEmu.Games.Entities.Inventories;
 using MHServerEmu.Games.Entities.Items;
 using MHServerEmu.Games.Entities.Locomotion;
 using MHServerEmu.Games.Entities.Physics;
 using MHServerEmu.Games.GameData;
 using MHServerEmu.Games.GameData.Prototypes;
-using MHServerEmu.Games.Generators.Population;
 using MHServerEmu.Games.Network;
-using MHServerEmu.Games.Properties;
 using MHServerEmu.Games.Regions;
 
 namespace MHServerEmu.Games.Entities
 {
-    public class EntitySettings
+    [Flags]
+    public enum GetEntityFlags
     {
-        public ulong Id;
-        public PrototypeId EntityRef;
-        public ulong RegionId;
-        public Vector3 Position;
-        public Orientation Orientation;
-        public bool OverrideSnapToFloor;
-        public bool OverrideSnapToFloorValue;
-        public bool EnterGameWorld;
-        public bool HotspotSkipCollide;
-        public PropertyCollection Properties;
-        public Cell Cell;
-        public List<EntitySelectorActionPrototype> Actions;
-        public PrototypeId ActionsTarget;
-        public SpawnSpec SpawnSpec;
-        public float LocomotorHeightOverride;
+        None                = 0,
+        DestroyedOnly       = 1 << 0,
+        UnpackedOnly        = 1 << 1
     }
 
     public enum EntityCollection
@@ -52,10 +38,13 @@ namespace MHServerEmu.Games.Entities
 
         private readonly Game _game;
         private readonly Dictionary<ulong, Entity> _entityDict = new();
+        private readonly Queue<ulong> _entityDeletionQueue = new();
 
         private ulong _nextEntityId = 1000;
         private ulong GetNextEntityId() { return _nextEntityId++; }
         public ulong PeekNextEntityId() { return _nextEntityId; }
+
+        public bool IsDestroyingAllEntities { get; private set; } = false;
 
         public PhysicsManager PhysicsManager { get; set; }
         public EntityInvasiveCollection AllEntities { get; private set; }
@@ -69,11 +58,6 @@ namespace MHServerEmu.Games.Entities
             AllEntities = new(EntityCollection.All);
             SimulatedEntities = new(EntityCollection.Simulated);
             LocomotionEntities = new(EntityCollection.Locomotion);
-        }
-
-        public void PhysicsResolveEntities()
-        {
-            PhysicsManager.ResolveEntities();
         }
 
         public Entity CreateEntity(EntitySettings settings)
@@ -123,17 +107,9 @@ namespace MHServerEmu.Games.Entities
             }
         }
 
-        public WorldEntity CreateWorldEntityEmpty(ulong regionId, PrototypeId prototypeId, Vector3 position, Orientation orientation)
-        {
-            EntityBaseData baseData = new (GetNextEntityId(), prototypeId, position, orientation);
-            WorldEntity worldEntity = new (baseData, AOINetworkPolicyValues.AOIChannelProximity, new(_game.CurrentRepId));
-            worldEntity.RegionId = regionId;
-            _entityDict.Add(baseData.EntityId, worldEntity);
-            return worldEntity;
-        }
-
         public Item CreateInvItem(PrototypeId itemProto, InventoryLocation invLoc, PrototypeId rarity, int itemLevel, float itemVariation, int seed, AffixSpec[] affixSpec, bool isNewItem) {
 
+            // REMOVEME - Used for the bowling ball hack
             EntityBaseData baseData = new()
             {
                 ReplicationPolicy = AOINetworkPolicyValues.AOIChannelOwner,
@@ -159,32 +135,50 @@ namespace MHServerEmu.Games.Entities
             return item;
         }
 
-        public void DestroyEntity(Entity entity)
+        public bool DestroyEntity(Entity entity)
         {
-            // TODO 
-            entity.Status = EntityStatus.Destroyed;
+            if (entity == null) return Logger.WarnReturn(false, "DestroyEntity(): entity == null");
+
+            if (entity.TestStatus(EntityStatus.PendingDestroy)) return Logger.WarnReturn(false,
+                $"DestroyEntity(): Entity already marked as PendingDestroy, this means that something was using an entity reference even though it was pending destroy which needs to be fixed! Entity: {entity}");
+
+            if (entity.TestStatus(EntityStatus.Destroyed)) return Logger.WarnReturn(false,
+                $"DestroyEntity(): Entity already marked as Destroy, this means that something was using an entity reference even though it was destroyed which needs to be fixed! Entity: {entity}");
+
+            entity.SetStatus(EntityStatus.PendingDestroy, true);
+
+            // Destroy entities belonging to this entity
+            entity.DestroyContained();
+
+            // Remove this entity from the inventory it is in
+            if (entity.InventoryLocation.IsValid)
+                entity.ChangeInventoryLocation(null);
+
+            // Finish destruction
+            entity.SetStatus(EntityStatus.PendingDestroy, false);
+            entity.SetStatus(EntityStatus.Destroyed, true);
+            _entityDeletionQueue.Enqueue(entity.Id);    // Enqueue entity for deletion at the end of the next frame
+
+            // Remove entity from the game
             entity.ExitGame();
-            // TODO  clear all contained
 
-            ulong entityId = entity.Id;
-            if (_entityDict.ContainsKey(entityId))
-                _entityDict.Remove(entityId);
-            else
-                Logger.Warn($"Unknown entity id '{entityId}' to destroy");
+            // TODO: Remove dbId lookup
+
+            return true;
         }
 
-        public Entity GetEntityById(ulong entityId)
+        public T GetEntity<T>(ulong entityId, GetEntityFlags flags = GetEntityFlags.None) where T : Entity
         {
-            if (_entityDict.TryGetValue(entityId, out Entity entity)) return entity;
-            return null;
+            // NOTE: This public method is used to prevent destroyed entities from being accessed externally.
+            flags &= ~GetEntityFlags.DestroyedOnly;
+            return GetEntity(entityId, flags) as T;
         }
 
-        public T GetEntity<T>(ulong entityId) where T : Entity
+        public Entity GetEntityByPrototypeId(PrototypeId prototype)
         {
-            return GetEntityById(entityId) as T;
+            // REMOVEME - Used for the bowling ball hack
+            return _entityDict.Values.FirstOrDefault(entity => entity.BaseData.EntityPrototypeRef == prototype);
         }
-
-        public Entity GetEntityByPrototypeId(PrototypeId prototype) => _entityDict.Values.FirstOrDefault(entity => entity.BaseData.EntityPrototypeRef == prototype);
 
         public Transition GetTransitionInRegion(Destination destination, ulong regionId)
         {
@@ -204,38 +198,95 @@ namespace MHServerEmu.Games.Entities
             return default;
         }
 
-        public bool TryGetEntityById(ulong entityId, out Entity entity) => _entityDict.TryGetValue(entityId, out entity);
-        public ulong GetPropertyCollectionReplicationId(ulong entityId) => _entityDict[entityId].Properties.ReplicationId;
-        public bool TryGetPropertyCollectionReplicationId(ulong entityId, out ulong replicationId)
-        {
-            if (_entityDict.TryGetValue(entityId, out Entity entity))
-            {
-                replicationId = entity.Properties.ReplicationId;
-                return true;
-            }
-
-            replicationId = 0;
-            return false;
-        }
-
-        public IEnumerable<Entity> GetEntities()
+        public IEnumerable<Entity> IterateEntities()
         {
             foreach (var entity in _entityDict.Values)
                 yield return entity;
         }
 
-        public IEnumerable<Entity> GetEntities(Cell cell)
+        public IEnumerable<Entity> IterateEntities(Cell cell)
         {
             foreach (var entity in _entityDict.Values)
                 if (entity is WorldEntity worldEntity && worldEntity.Cell == cell)
                     yield return entity;
         }
 
-        public IEnumerable<Entity> GetEntities(Region region)
+        public IEnumerable<Entity> IterateEntities(Region region)
         {
             foreach (var entity in _entityDict.Values)
                 if (entity is WorldEntity worldEntity && worldEntity.Region == region)
                     yield return entity;
+        }
+
+        public void PhysicsResolveEntities()
+        {
+            PhysicsManager.ResolveEntities();
+        }
+
+        public void LocomoteEntities()
+        {
+            foreach (var entity in LocomotionEntities.Iterate())
+                if (entity is WorldEntity worldEntity)
+                    worldEntity?.Locomotor.Locomote();
+        }
+
+        public void ProcessDeferredLists()
+        {
+            // TODO: ProcessCondemnedPowerList()
+            ProcessDestroyed();
+        }
+
+        private Entity GetEntity(ulong entityId, GetEntityFlags flags)
+        {
+            if (entityId == Entity.InvalidId) return Logger.WarnReturn<Entity>(null, "GetEntity(): entityId == Entity.InvalidId");
+
+            if (_entityDict.TryGetValue(entityId, out Entity entity) && ValidateEntityForGet(entity, flags))
+                return entity;
+
+            // It appears there should be some kind of fallback to packed entities, but this code is not present in the client.
+            //if (flags.HasFlag(GetEntityFlags.DestroyedOnly) == false && flags.HasFlag(GetEntityFlags.UnpackedOnly) == false)
+            //    return null;    // TODO: TryUnpackArchivedEntity(entityId);
+
+            return null;
+        }
+
+        private bool ValidateEntityForGet(Entity entity, GetEntityFlags flags)
+        {
+            if (entity == null) return false;
+            return entity.TestStatus(EntityStatus.Destroyed) == flags.HasFlag(GetEntityFlags.DestroyedOnly);
+        }
+
+        private bool ProcessDestroyed()
+        {
+            if (_game == null) return Logger.WarnReturn(false, "ProcessDestroyed(): _game == null");
+
+            // Delete all destroyed entities
+            while (_entityDeletionQueue.Count != 0)
+            {
+                ulong entityId = _entityDeletionQueue.Dequeue();
+
+                if (_entityDict.TryGetValue(entityId, out Entity entity) == false)
+                    Logger.Warn($"ProcessDestroyed(): Failed to get entity for enqueued id {entityId}");
+                else
+                    DeleteEntity(entity);
+            }
+
+            return true;
+        }
+
+        private bool DeleteEntity(Entity entity)
+        {
+            if (entity == null) return Logger.WarnReturn(false, "DeleteEntity(): entity == null");
+            _entityDict.Remove(entity.Id);
+            entity.OnDeallocate();
+            return true;
+        }
+
+        private PrototypeId GetVisibleParentRef(PrototypeId invisibleId)
+        {
+            WorldEntityPrototype invisibleProto = GameDatabase.GetPrototype<WorldEntityPrototype>(invisibleId);
+            if (invisibleProto.VisibleByDefault == false) return GetVisibleParentRef(invisibleProto.ParentDataRef);
+            return invisibleId;
         }
 
         #region HardCodeRank
@@ -651,19 +702,5 @@ namespace MHServerEmu.Games.Entities
         };
 
         #endregion
-
-        private PrototypeId GetVisibleParentRef(PrototypeId invisibleId)
-        {
-            WorldEntityPrototype invisibleProto = GameDatabase.GetPrototype<WorldEntityPrototype>(invisibleId);
-            if (invisibleProto.VisibleByDefault == false) return GetVisibleParentRef(invisibleProto.ParentDataRef);
-            return invisibleId;
-        }
-
-        public void LocomoteEntities()
-        {
-            foreach (var entity in LocomotionEntities.Iterate())
-                if (entity is WorldEntity worldEntity)
-                    worldEntity?.Locomotor.Locomote();
-        }
     }
 }

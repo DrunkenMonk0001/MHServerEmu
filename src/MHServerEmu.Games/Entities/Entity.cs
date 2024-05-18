@@ -76,6 +76,8 @@ namespace MHServerEmu.Games.Entities
 
     public class Entity : ISerialize
     {
+        public const ulong InvalidId = 0;
+
         private static readonly Logger Logger = LogManager.CreateLogger();
 
         protected EntityFlags _flags;
@@ -98,9 +100,11 @@ namespace MHServerEmu.Games.Entities
         }
 
         public DateTime DeadTime { get; private set; }
-        public EntityPrototype EntityPrototype { get => GameDatabase.GetPrototype<EntityPrototype>(BaseData.EntityPrototypeRef); }
+        public EntityPrototype Prototype { get => GameDatabase.GetPrototype<EntityPrototype>(BaseData.EntityPrototypeRef); }
         public string PrototypeName { get => GameDatabase.GetFormattedPrototypeName(BaseData.EntityPrototypeRef); }
         public PrototypeId PrototypeDataRef { get => BaseData.EntityPrototypeRef; }
+
+        public InventoryCollection InventoryCollection { get; } = new();
         public InventoryLocation InventoryLocation { get; private set; } = new();
         public ulong OwnerId { get => InventoryLocation.ContainerId; }
 
@@ -249,6 +253,11 @@ namespace MHServerEmu.Games.Entities
 
         public override string ToString()
         {
+            return $"{nameof(Id)}={Id}, {nameof(Prototype)}={Prototype}";
+        }
+
+        public string ToStringVerbose()
+        {
             StringBuilder sb = new();
             BuildString(sb);
             return sb.ToString();
@@ -259,6 +268,16 @@ namespace MHServerEmu.Games.Entities
             //CancelScheduledLifespanExpireEvent();
             //CancelDestroyEvent();
             Game?.EntityManager?.DestroyEntity(this);
+        }
+
+        public bool DestroyContained()
+        {
+            if (Game == null) return Logger.WarnReturn(false, "DestroyContained(): Game == null");
+
+            foreach (Inventory inventory in InventoryCollection)
+                inventory.DestroyContained();
+
+            return true;
         }
 
         public bool IsDestroyed()
@@ -328,7 +347,7 @@ namespace MHServerEmu.Games.Entities
 
         public Entity GetOwner()
         {
-            return Game.EntityManager.GetEntityById(OwnerId);
+            return Game.EntityManager.GetEntity<Entity>(OwnerId);
         }
 
         public T GetOwnerOfType<T>() where T : Entity
@@ -341,6 +360,12 @@ namespace MHServerEmu.Games.Entities
                 owner = owner.GetOwner();
             }
             return null;
+        }
+
+        public T GetSelfOrOwnerOfType<T>() where T : Entity
+        {
+            if (this is T typedOwner) return typedOwner;
+            return GetOwnerOfType<T>();
         }
 
         public Entity GetRootOwner()
@@ -356,7 +381,7 @@ namespace MHServerEmu.Games.Entities
 
         public bool CanBePlayerOwned()
         {
-            var prototype = EntityPrototype;
+            var prototype = Prototype;
             if (prototype is AvatarPrototype) return true;
             if (prototype is AgentTeamUpPrototype) return true;
             if (prototype is MissilePrototype) return IsMissilePlayerOwned;
@@ -374,14 +399,106 @@ namespace MHServerEmu.Games.Entities
             return false;
         }
 
+        public Inventory GetInventoryByRef(PrototypeId invProtoRef)
+        {
+            return InventoryCollection.GetInventoryByRef(invProtoRef);
+        }
+
+        public Inventory GetOwnerInventory()
+        {
+            Entity container = Game.EntityManager.GetEntity<Entity>(InventoryLocation.ContainerId);
+            if (container == null) return null;
+            return container.GetInventoryByRef(InventoryLocation.InventoryRef);
+        }
+
+        public InventoryResult CanChangeInventoryLocation(Inventory destInventory)
+        {
+            PropertyEnum propertyEnum = PropertyEnum.Invalid;
+            return CanChangeInventoryLocation(destInventory, ref propertyEnum);
+        }
+
+        public InventoryResult CanChangeInventoryLocation(Inventory destInventory, ref PropertyEnum propertyRestriction)
+        {
+            InventoryResult result = destInventory.PassesContainmentFilter(PrototypeDataRef);
+            if (result != InventoryResult.Success) return result;
+
+            return destInventory.PassesEquipmentRestrictions(this, ref propertyRestriction);
+        }
+
+        public InventoryResult ChangeInventoryLocation(Inventory destination, uint destSlot = Inventory.InvalidSlot)
+        {
+            ulong? stackEntityId = null;
+            return ChangeInventoryLocation(destination, destSlot, ref stackEntityId, true);
+        }
+
+        public InventoryResult ChangeInventoryLocation(Inventory destInventory, uint destSlot, ref ulong? stackEntityId, bool allowStacking)
+        {
+            allowStacking &= IsInGame;
+
+            // If we have a valid destination, it means we are adding or moving, so we need to verify that this entity matches the destination inventory
+            if (destInventory != null)
+            {
+                InventoryResult destInventoryResult = CanChangeInventoryLocation(destInventory);
+                if (destInventoryResult != InventoryResult.Success) return Logger.WarnReturn(destInventoryResult,
+                    $"ChangeInventoryLocation(): result=[{destInventoryResult}] allowStacking=[{allowStacking}] destSlot=[{destSlot}] destInventory=[{destInventory}] entity=[{Id}]");
+            }
+
+            return Inventory.ChangeEntityInventoryLocation(this, destInventory, destSlot, ref stackEntityId, allowStacking);
+        }
+
+        public bool ValidateInventorySlot(Inventory inventory, uint slot)
+        {
+            // this literally does nothing
+            return true;
+        }
+
+        public bool CanStack()
+        {
+            if (MaxStackSize < 2) return false;
+            if (CurrentStackSize > MaxStackSize) Logger.WarnReturn(false, "CanStack(): CurrentStackSize > MaxStackSize");
+            if (CurrentStackSize == MaxStackSize) return false;
+            return true;
+        }
+
+        public virtual bool IsAutoStackedWhenAddedToInventory()
+        {
+            return CanStack();
+        }
+
+        public bool CanStackOnto(Entity other, bool isAdding = false)
+        {
+            if (CanStack() == false || other.CanStack() == false) return false;
+            if (PrototypeDataRef != other.PrototypeDataRef) return false;
+            if (isAdding && CurrentStackSize + other.CurrentStackSize > other.MaxStackSize) return false;
+            return true;
+        }
+
+        public void OnOtherEntityAddedToMyInventory(Entity entity, InventoryLocation invLoc, bool unpackedArchivedEntity)
+        {
+        }
+
+        public void OnOtherEntityRemovedFromMyInventory(Entity entity, InventoryLocation invLoc)
+        {
+        }
+
+        public void OnDetachedFromDestroyedContainer()
+        {
+        }
+
+        public void OnDeallocate()
+        {
+        }
+
+        // NOTE: TestStatus and SetStatus can be potentially replaced with an indexer property
+
         public bool TestStatus(EntityStatus status)
         {
             return Status.HasFlag(status);
         }
 
-        public void SetStatus(EntityStatus status, bool set)
+        public void SetStatus(EntityStatus status, bool value)
         {
-            if (set) Status |= status;
+            if (value) Status |= status;
             else Status &= ~status;
         }
 

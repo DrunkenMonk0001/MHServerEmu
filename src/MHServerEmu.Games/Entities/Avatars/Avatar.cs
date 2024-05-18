@@ -5,6 +5,7 @@ using MHServerEmu.Core.Logging;
 using MHServerEmu.Core.Serialization;
 using MHServerEmu.DatabaseAccess.Models;
 using MHServerEmu.Games.Common;
+using MHServerEmu.Games.Entities.Inventories;
 using MHServerEmu.Games.Entities.PowerCollections;
 using MHServerEmu.Games.GameData;
 using MHServerEmu.Games.GameData.Calligraphy;
@@ -35,7 +36,7 @@ namespace MHServerEmu.Games.Entities.Avatars
 
         public Agent CurrentTeamUpAgent { get; set; } = null;
 
-        public AvatarPrototype AvatarPrototype { get => EntityPrototype as AvatarPrototype; }
+        public AvatarPrototype AvatarPrototype { get => Prototype as AvatarPrototype; }
         public int PrestigeLevel { get => Properties[PropertyEnum.AvatarPrestigeLevel]; }
 
         public override bool IsMovementAuthoritative => false;
@@ -332,6 +333,31 @@ namespace MHServerEmu.Games.Entities.Avatars
             }
 
             return Properties[PropertyEnum.OmegaSpec, omegaBonusRef];
+        }
+
+        public InventoryResult GetEquipmentInventoryAvailableStatus(PrototypeId invProtoRef)
+        {
+            AvatarPrototype avatarProto = AvatarPrototype;
+            if (avatarProto == null) return Logger.WarnReturn(InventoryResult.UnknownFailure, "GetEquipmentInventoryAvailableStatus(): avatarProto == null");
+
+            foreach (AvatarEquipInventoryAssignmentPrototype equipInvEntryProto in avatarProto.EquipmentInventories)
+            {
+                if (equipInvEntryProto == null)
+                {
+                    Logger.Warn("GetEquipmentInventoryAvailableStatus(): equipInvEntryProto == null");
+                    continue;
+                }
+
+                if (equipInvEntryProto.Inventory == invProtoRef)
+                {
+                    if (CharacterLevel < equipInvEntryProto.UnlocksAtCharacterLevel)
+                        return InventoryResult.InvalidEquipmentInventoryNotUnlocked;
+                    else
+                        return InventoryResult.Success;
+                }
+            }
+
+            return InventoryResult.UnknownFailure;
         }
 
         protected override void BuildString(StringBuilder sb)

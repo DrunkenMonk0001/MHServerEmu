@@ -2,8 +2,9 @@
 using MHServerEmu.Core.Extensions;
 using MHServerEmu.Core.Logging;
 using MHServerEmu.Core.System;
+using MHServerEmu.Games.Entities.Inventories;
+using MHServerEmu.Games.Entities.Items;
 using MHServerEmu.Games.Entities.Locomotion;
-using MHServerEmu.Games.Entities.PowerCollections;
 using MHServerEmu.Games.GameData;
 using MHServerEmu.Games.GameData.Prototypes;
 using MHServerEmu.Games.GameData.Tables;
@@ -16,7 +17,7 @@ namespace MHServerEmu.Games.Entities
     {
         private static readonly Logger Logger = LogManager.CreateLogger();
 
-        public AgentPrototype AgentPrototype { get => EntityPrototype as AgentPrototype; }
+        public AgentPrototype AgentPrototype { get => Prototype as AgentPrototype; }
         public override bool IsTeamUpAgent { get => AgentPrototype is AgentTeamUpPrototype; }
 
         public override bool IsSummonedPet
@@ -164,6 +165,12 @@ namespace MHServerEmu.Games.Entities
                 info.InitNonProgressionPower(powerProtoRef);
 
             return info.IsValid;
+        }
+
+        public InventoryResult CanEquip(Item item, ref PropertyEnum propertyRestriction)
+        {
+            // TODO
+            return InventoryResult.Success;     // Bypass property restrictions
         }
 
         // Old
