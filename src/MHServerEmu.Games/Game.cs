@@ -76,11 +76,22 @@ namespace MHServerEmu.Games
             AdminCommandManager = new(this);
             NetworkManager = new(this);
             EventManager = new(this);
+            RegionManager = new();
             EntityManager = new(this);
-            RegionManager = new(EntityManager);
-            RegionManager.Initialize(this);
 
             Random = new();
+
+            Initialize();
+        }
+
+        public bool Initialize()
+        {
+            bool success = true;
+
+            success &= RegionManager.Initialize(this);
+            success &= EntityManager.Initialize();
+
+            return success;
         }
 
         public void Run()
@@ -234,7 +245,10 @@ namespace MHServerEmu.Games
                 NetworkManager.Update();                            // Add / remove clients
                 NetworkManager.ReceiveAllPendingMessages();         // Process input
                 NetworkManager.ProcessPendingPlayerConnections();   // Load pending players
+
                 UpdateFixedTime();                                  // Update simulation state
+
+                RegionManager.ProcessPendingRegions();              // Process any regions pending shutdowns (TODO: Add generation here as well)
             }
         }
 
