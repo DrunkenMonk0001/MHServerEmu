@@ -103,7 +103,7 @@ namespace MHServerEmu.Games.Entities
         public EntityBaseData BaseData { get; set; } = new();
         public ulong Id { get => BaseData.EntityId; set => BaseData.EntityId = value; }
         public ulong DatabaseUniqueId { get => BaseData.DbId; set => BaseData.DbId = value; }
-        public AOINetworkPolicyValues ReplicationPolicy { get; set; }
+        public AOINetworkPolicyValues InterestPolicies { get => BaseData.InterestPolicies; set => BaseData.InterestPolicies = value; }
 
         public ulong RegionId { get; set; } = 0;
         public Game Game { get; set; } 
@@ -275,7 +275,7 @@ namespace MHServerEmu.Games.Entities
         public NetMessageEntityCreate ToNetMessageEntityCreate()
         {
             ByteString archiveData;
-            using (Archive archive = new Archive(ArchiveSerializeType.Replication, (ulong)ReplicationPolicy))
+            using (Archive archive = new Archive(ArchiveSerializeType.Replication, (ulong)InterestPolicies))
             {
                 Serialize(archive);
                 archiveData = archive.ToByteString();
@@ -287,9 +287,15 @@ namespace MHServerEmu.Games.Entities
                 .Build();
         }
 
+        public void TEMP_ReplacePrototype(PrototypeId prototypeRef)
+        {
+            // Temp method for hacks that replace entity prototype after creation - use with caution and remove this later
+            Prototype = prototypeRef.As<EntityPrototype>();
+            PrototypeDataRef = prototypeRef;
+        }
+
         protected virtual void BuildString(StringBuilder sb)
         {
-            sb.AppendLine($"{nameof(ReplicationPolicy)}: {ReplicationPolicy}");
             sb.AppendLine($"{nameof(Properties)}: {Properties}");
         }
 

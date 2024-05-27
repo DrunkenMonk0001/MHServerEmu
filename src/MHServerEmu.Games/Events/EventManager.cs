@@ -122,7 +122,7 @@ namespace MHServerEmu.Games.Events
 
         private void OnUseInteractableObject(PlayerConnection playerConnection, Entity interactObject)
         {
-            var proto = interactObject.BaseData.EntityPrototypeRef;
+            var proto = interactObject.PrototypeDataRef;
             Logger.Trace($"UseInteractableObject {GameDatabase.GetPrototypeName(proto)}");
 
             Player player = playerConnection.Player;
@@ -172,8 +172,7 @@ namespace MHServerEmu.Games.Events
                 bowlingBall = _game.EntityManager.CreateEntity(ballSettings);
 
                 bowlingBall.BaseData.FieldFlags = EntityCreateMessageFlags.HasNonProximityInterest | EntityCreateMessageFlags.HasInvLoc;
-                bowlingBall.BaseData.ReplicationPolicy = AOINetworkPolicyValues.AOIChannelOwner;
-                bowlingBall.BaseData.InterestPolicies = AOINetworkPolicyValues.AOIChannelOwner;
+                bowlingBall.InterestPolicies = AOINetworkPolicyValues.AOIChannelOwner;
 
                 playerConnection.SendMessage(bowlingBall.ToNetMessageEntityCreate());
 
@@ -206,8 +205,7 @@ namespace MHServerEmu.Games.Events
         private void OnPreInteractPower(PlayerConnection playerConnection, Entity interactObject)
         {
             ulong avatarEntityId = playerConnection.Player.CurrentAvatar.Id;
-            PrototypeId proto = interactObject.BaseData.EntityPrototypeRef;
-            var world = GameDatabase.GetPrototype<WorldEntityPrototype>(proto);
+            var world = interactObject.Prototype as WorldEntityPrototype;
             if (world == null) return;
             var preIteractPower = world.PreInteractPower;
             if (preIteractPower == PrototypeId.Invalid) return;
@@ -243,11 +241,10 @@ namespace MHServerEmu.Games.Events
         private void OnPreInteractPowerEnd(PlayerConnection playerConnection, Entity interactObject)
         {
             ulong avatarEntityId = playerConnection.Player.CurrentAvatar.Id;
-            PrototypeId proto = interactObject.BaseData.EntityPrototypeRef;
-            var world = GameDatabase.GetPrototype<WorldEntityPrototype>(proto);
+            var world = interactObject.Prototype as WorldEntityPrototype;
             if (world == null) return;
-            PrototypeId preIteractPower = world.PreInteractPower;
-            if (preIteractPower == 0) return;
+            PrototypeId preInteractPower = world.PreInteractPower;
+            if (preInteractPower == 0) return;
             Logger.Trace($"OnPreInteractPowerEnd");
 
             playerConnection.SendMessage(NetMessageOnPreInteractPowerEnd.CreateBuilder()
@@ -257,7 +254,7 @@ namespace MHServerEmu.Games.Events
 
             playerConnection.SendMessage(NetMessagePowerCollectionUnassignPower.CreateBuilder()
                 .SetEntityId(avatarEntityId)
-                .SetPowerProtoId((ulong)preIteractPower)
+                .SetPowerProtoId((ulong)preInteractPower)
                 .Build());
         }
 
