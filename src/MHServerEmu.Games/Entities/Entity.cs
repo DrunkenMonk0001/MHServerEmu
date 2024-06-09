@@ -9,6 +9,8 @@ using MHServerEmu.Games.Common;
 using MHServerEmu.Games.Entities.Avatars;
 using MHServerEmu.Games.Entities.Inventories;
 using MHServerEmu.Games.Entities.Locomotion;
+using MHServerEmu.Games.Events;
+using MHServerEmu.Games.Events.Templates;
 using MHServerEmu.Games.GameData;
 using MHServerEmu.Games.GameData.Prototypes;
 using MHServerEmu.Games.Network;
@@ -129,7 +131,6 @@ namespace MHServerEmu.Games.Entities
             }
         }
 
-        public DateTime DeathTime { get; private set; }
         public EntityPrototype Prototype { get; private set; }
         public string PrototypeName { get => GameDatabase.GetFormattedPrototypeName(PrototypeDataRef); }
         public AOINetworkPolicyValues CompatibleReplicationChannels { get => Prototype.RepNetwork; }
@@ -241,8 +242,7 @@ namespace MHServerEmu.Games.Entities
             Prototype = PrototypeDataRef.As<EntityPrototype>();
             if (Prototype == null) return Logger.WarnReturn(false, "Initialize(): Prototype == null");
 
-            // Is this correct? Should the flag NOT be set?
-            if (settings.OptionFlags.HasFlag(EntitySettingsOptionFlags.EnterGame) == false)
+            if (settings.OptionFlags.HasFlag(EntitySettingsOptionFlags.EnterGame))
             {
                 BasePosition = settings.Position;
                 BaseOrientation = settings.Orientation;
@@ -494,28 +494,31 @@ namespace MHServerEmu.Games.Entities
             return true;
         }
 
-        public bool IsAlive()
-        {
-            if (IsDead == false) return true;
+        #region Death Hack
 
-            // Respawn entity if needed
-            if (DateTime.Now.Subtract(DeathTime).TotalMinutes >= 1)
-            {
-                _flags &= ~EntityFlags.IsDead;
-                Properties[PropertyEnum.Health] = Properties[PropertyEnum.HealthMaxOther];
-                Properties[PropertyEnum.IsDead] = false;
-                return true;
-            }
+        private class RespawnEvent : CallMethodEvent<Entity>
+            { protected override CallbackDelegate GetCallback() => t => t.Respawn(); }
 
-            return false;
-        }
-
-        // Test death for respawning
         public void Kill()
         {
+            ExitGame();
             _flags |= EntityFlags.IsDead;
-            DeathTime = DateTime.Now;
+
+            EventPointer<RespawnEvent> eventPointer = new();
+            Game.GameEventScheduler.ScheduleEvent(eventPointer, TimeSpan.FromSeconds(15));
+            eventPointer.Get().Initialize(this);
         }
+
+        public void Respawn()
+        {
+            Logger.Debug($"Respawn(): {this}");
+            _flags &= ~EntityFlags.IsDead;
+            Properties[PropertyEnum.Health] = Properties[PropertyEnum.HealthMaxOther];
+            Properties[PropertyEnum.IsDead] = false;
+            EnterGame();
+        }
+
+        #endregion
 
         public bool IsAPrototype(PrototypeId protoRef)
         {
@@ -545,6 +548,18 @@ namespace MHServerEmu.Games.Entities
 
         public virtual void OnDeallocate()
         {
+        }
+
+        public virtual void OnChangePlayerAOI(Player player, InterestTrackOperation operation,
+            AOINetworkPolicyValues newInterestPolicies, AOINetworkPolicyValues previousInterestPolicies)
+        {
+            // TODO: InterestReferences
+        }
+
+        public virtual void OnPostAOIAddOrRemove(Player player, InterestTrackOperation operation,
+            AOINetworkPolicyValues newInterestPolicies, AOINetworkPolicyValues previousInterestPolicies)
+        {
+
         }
 
         #endregion
