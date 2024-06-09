@@ -119,16 +119,9 @@ namespace MHServerEmu.Games.Network
             {
                 SendMessage(NetMessageEnvironmentUpdate.CreateBuilder().SetFlags(1).Build());
 
-                // Mini map
-                using (Archive archive = new(ArchiveSerializeType.Replication, (ulong)AOINetworkPolicyValues.DefaultPolicy))
-                {
-                    LowResMap lowResMap = new(Region.RegionPrototype.AlwaysRevealFullMap);
-                    Serializer.Transfer(archive, ref lowResMap);
-
-                    SendMessage(NetMessageUpdateMiniMap.CreateBuilder()
-                        .SetArchiveData(archive.ToByteString())
-                        .Build());
-                }
+                // Mini map (TODO: keep track of the map server-side)
+                LowResMap lowResMap = new(Region.RegionPrototype.AlwaysRevealFullMap);
+                SendMessage(ArchiveMessageBuilder.BuildUpdateMiniMapMessage(lowResMap));
             }
 
             _lastUpdatePosition.Set(position);
@@ -389,7 +382,7 @@ namespace MHServerEmu.Games.Network
         private void AddEntity(Entity entity, AOINetworkPolicyValues interestPolicies)
         {
             _trackedEntities.Add(entity.Id, new(_currentFrame, interestPolicies));
-            SendMessage(entity.ToNetMessageEntityCreate());
+            SendMessage(ArchiveMessageBuilder.BuildEntityCreateMessage(entity, interestPolicies));
         }
 
         private void RemoveEntity(Entity entity)
@@ -398,7 +391,7 @@ namespace MHServerEmu.Games.Network
             SendMessage(NetMessageEntityDestroy.CreateBuilder().SetIdEntity(entity.Id).Build());
         }
 
-        private bool ModifyEntity(Entity entity, AOINetworkPolicyValues newInterestPolicies)
+        private bool ModifyEntity(Entity entity, AOINetworkPolicyValues newInterestPolicies, EntitySettings settings = null)
         {
             // No entity to modify
             if (_trackedEntities.TryGetValue(entity.Id, out EntityInterestStatus interestStatus) == false)
@@ -426,10 +419,8 @@ namespace MHServerEmu.Games.Network
                     .SetCurrentpolicies((uint)newInterestPolicies);
 
                 // Remove world entities from the game world that are no longer in proximity on the client
-                /*
                 if (removedInterestPolicies.HasFlag(AOINetworkPolicyValues.AOIChannelProximity) && entity is WorldEntity)
                     changeAoiPolicies.SetExitGameWorld(true);
-                */
 
                 // entityPrototypeId field seems to be unused
 
@@ -438,11 +429,9 @@ namespace MHServerEmu.Games.Network
 
             entity.OnChangePlayerAOI(_playerConnection.Player, InterestTrackOperation.Modify, newInterestPolicies, previousInterestPolicies);
 
-            // Entities that already exist on the client and don't have a proximity policy enter game world when they gain a proximity policy
-            if (addedInterestPolicies.HasFlag(AOINetworkPolicyValues.AOIChannelProximity))
-            {
-                // TODO: NetMessageEntityEnterGameWorld
-            }
+            // World entities that already exist on the client and don't have a proximity policy enter game world when they gain a proximity policy
+            if (addedInterestPolicies.HasFlag(AOINetworkPolicyValues.AOIChannelProximity) && entity is WorldEntity worldEntity)
+                SendMessage(ArchiveMessageBuilder.BuildEntityEnterGameWorldMessage(worldEntity, settings));
 
             entity.OnPostAOIAddOrRemove(_playerConnection.Player, InterestTrackOperation.Modify, newInterestPolicies, previousInterestPolicies);
 

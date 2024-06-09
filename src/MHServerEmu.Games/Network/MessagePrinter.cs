@@ -12,6 +12,7 @@ using MHServerEmu.Games.Entities.Locomotion;
 using MHServerEmu.Games.GameData;
 using MHServerEmu.Games.GameData.Calligraphy;
 using MHServerEmu.Games.GameData.Prototypes;
+using MHServerEmu.Games.Network.LegacyArchives;
 using MHServerEmu.Games.Powers;
 using MHServerEmu.Games.Properties;
 using MHServerEmu.Games.Regions;
@@ -279,7 +280,23 @@ namespace MHServerEmu.Games.Network
         private static string PrintNetMessageAddCondition(IMessage message)
         {
             var addCondition = (NetMessageAddCondition)message;
-            return $"ArchiveData: {new AddConditionArchive(addCondition.ArchiveData)}";
+
+            StringBuilder sb = new();
+
+            using (Archive archive = new(ArchiveSerializeType.Replication, addCondition.ArchiveData))
+            {
+                sb.AppendLine($"ReplicationPolicy: {archive.GetReplicationPolicyEnum()}");
+
+                ulong entityId = 0;
+                Serializer.Transfer(archive, ref entityId);
+                sb.AppendLine($"entityId: {entityId}");
+
+                Condition condition = new();
+                condition.Serialize(archive, null);
+                sb.AppendLine($"condition: {condition}");
+            }
+
+            return sb.ToString();
         }
 
         [PrintMethod(typeof(NetMessageSetProperty))]
@@ -304,13 +321,18 @@ namespace MHServerEmu.Games.Network
         {
             var updateMiniMap = (NetMessageUpdateMiniMap)message;
 
+            StringBuilder sb = new();
+
             using (Archive archive = new(ArchiveSerializeType.Replication, updateMiniMap.ArchiveData))
             {
-                MiniMapArchive miniMapArchive = new();
-                miniMapArchive.ReplicationPolicy = archive.GetReplicationPolicyEnum();
-                miniMapArchive.Serialize(archive);
-                return $"ArchiveData: {miniMapArchive}";
+                sb.AppendLine($"ReplicationPolicy: {archive.GetReplicationPolicyEnum()}");
+
+                LowResMap lowResMap = new();
+                Serializer.Transfer(archive, ref lowResMap);
+                sb.AppendLine($"lowResMap: {lowResMap}");
             }
+
+            return sb.ToString();
         }
 
         [PrintMethod(typeof(NetMessagePowerCollectionAssignPower))]
