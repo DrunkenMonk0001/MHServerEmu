@@ -6,6 +6,7 @@ using MHServerEmu.Core.Helpers;
 using MHServerEmu.Core.Logging;
 using MHServerEmu.Core.VectorMath;
 using MHServerEmu.Games.Entities;
+using MHServerEmu.Games.Entities.Avatars;
 using MHServerEmu.Games.Entities.Inventories;
 using MHServerEmu.Games.GameData;
 using MHServerEmu.Games.GameData.Prototypes;
@@ -41,10 +42,10 @@ namespace MHServerEmu.Games.Network
         private float _viewOffset = 600.0f;
         private float _aoiVolume = AOIVolumeDefault;
 
-        private Aabb2 _cameraView;
-        private Aabb2 _entitiesVolume;
-        private Aabb2 _visibleVolume;
-        private Aabb2 _invisibleVolume;
+        private Aabb2 _cameraView = new();
+        private Aabb2 _entitiesVolume = new();
+        private Aabb2 _visibleVolume = new();
+        private Aabb2 _invisibleVolume = new();
         private PrototypeId _lastCameraSetting;
 
         public Region Region { get; private set; }
@@ -176,10 +177,10 @@ namespace MHServerEmu.Games.Network
             return cellInterest.IsLoaded;
         }
 
-        public bool InterestedInEntity(ulong entityId)
+        public bool InterestedInEntity(ulong entityId, AOINetworkPolicyValues interestFilter = AOINetworkPolicyValues.DefaultPolicy)
         {
-            // TODO: Filter by channel
-            return _trackedEntities.ContainsKey(entityId);
+            AOINetworkPolicyValues interestPolicies = GetCurrentInterestPolicies(entityId);
+            return (interestPolicies & interestFilter) != AOINetworkPolicyValues.AOIChannelNone;
         }
 
         public bool OnCellLoaded(uint cellId)
@@ -393,7 +394,12 @@ namespace MHServerEmu.Games.Network
         private void AddEntity(Entity entity, AOINetworkPolicyValues interestPolicies, EntitySettings settings = null)
         {
             _trackedEntities.Add(entity.Id, new(_currentFrame, interestPolicies));
+
             SendMessage(ArchiveMessageBuilder.BuildEntityCreateMessage(entity, interestPolicies));
+
+            // Notify the client that we have finished sending everything needed for this avatar
+            if (entity is Avatar && interestPolicies.HasFlag(AOINetworkPolicyValues.AOIChannelProximity))
+                SendMessage(NetMessageFullInWorldHierarchyUpdateEnd.CreateBuilder().SetIdEntity(entity.Id).Build());
         }
 
         private void RemoveEntity(Entity entity)
@@ -489,9 +495,9 @@ namespace MHServerEmu.Games.Network
         /// <summary>
         /// Returns the current <see cref="AOINetworkPolicyValues"/> for the provided <see cref="Entity"/>.
         /// </summary>
-        private AOINetworkPolicyValues GetCurrentInterestPolicies(Entity entity)
+        private AOINetworkPolicyValues GetCurrentInterestPolicies(ulong entityId)
         {
-            if (_trackedEntities.TryGetValue(entity.Id, out EntityInterestStatus interestStatus) == false)
+            if (_trackedEntities.TryGetValue(entityId, out EntityInterestStatus interestStatus) == false)
                 return AOINetworkPolicyValues.AOIChannelNone;
 
             return interestStatus.InterestPolicies;
@@ -517,7 +523,7 @@ namespace MHServerEmu.Games.Network
             //      Add more filters here
 
             AOINetworkPolicyValues newInterestPolicies = AOINetworkPolicyValues.AOIChannelNone;
-            AOINetworkPolicyValues currentInterestPolicies = GetCurrentInterestPolicies(entity);
+            AOINetworkPolicyValues currentInterestPolicies = GetCurrentInterestPolicies(entity.Id);
 
             if (entity is WorldEntity worldEntity)
             {
