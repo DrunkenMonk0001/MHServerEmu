@@ -1,6 +1,7 @@
 ﻿using MHServerEmu.Core.Extensions;
 using MHServerEmu.Core.Logging;
 using MHServerEmu.Core.System.Time;
+using MHServerEmu.Games.Entities.Avatars;
 using MHServerEmu.Games.Entities.Inventories;
 using MHServerEmu.Games.Entities.Items;
 using MHServerEmu.Games.Entities.Locomotion;
@@ -54,6 +55,8 @@ namespace MHServerEmu.Games.Entities
             }
         }
 
+        public int PowerSpecIndexActive { get; internal set; }
+
         // New
         public Agent(Game game) : base(game) { }
 
@@ -86,11 +89,43 @@ namespace MHServerEmu.Games.Entities
             return true;
         }
 
-
         public override void OnEnteredWorld(EntitySettings settings)
         {
             base.OnEnteredWorld(settings);
-            RegionLocation.Cell.EnemySpawn(); // Calc Enemy
+            if (this is not Avatar)     // fix for avatar
+                RegionLocation.Cell.EnemySpawn(); // Calc Enemy
+        }
+
+        public override bool OnPowerAssigned(Power power)
+        {
+            if (base.OnPowerAssigned(power) == false) return false;
+
+            // Set rank for normal powers
+            if (power.IsNormalPower)
+            {
+                Properties[PropertyEnum.PowerRankBase, power.PrototypeDataRef] = 1;
+                Properties[PropertyEnum.PowerRankCurrentBest, power.PrototypeDataRef] = 1;
+            }
+
+            return true;
+        }
+
+        public override bool OnPowerUnassigned(Power power)
+        {
+            if (base.OnPowerUnassigned(power) == false) return false;
+
+            Properties.RemoveProperty(new(PropertyEnum.PowerRankBase, power.PrototypeDataRef));
+            Properties.RemoveProperty(new(PropertyEnum.PowerRankCurrentBest, power.PrototypeDataRef));
+
+            if (power.IsThrowablePower)
+            {
+                // TODO: clean up after throwing
+
+                Properties.RemoveProperty(PropertyEnum.ThrowableOriginatorEntity);
+                Properties.RemoveProperty(PropertyEnum.ThrowableOriginatorAssetRef);
+            }
+
+            return true;
         }
 
         public override void AppendStartAction(PrototypeId actionsTarget) // TODO rewrite this
@@ -179,6 +214,16 @@ namespace MHServerEmu.Games.Entities
         {
             // TODO
             return base.InitInventories(populateInventories);
+        }
+
+        internal int GetPowerRank(PrototypeId power)
+        {
+            throw new NotImplementedException();
+        }
+
+        internal int ComputePowerRank(PowerProgressionInfo powerInfo, int powerSpecIndexActive)
+        {
+            throw new NotImplementedException();
         }
     }
 }

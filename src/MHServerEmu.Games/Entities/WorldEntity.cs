@@ -1,4 +1,5 @@
 ﻿using System.Text;
+using Gazillion;
 using MHServerEmu.Core.Collisions;
 using MHServerEmu.Core.Helpers;
 using MHServerEmu.Core.Logging;
@@ -21,6 +22,30 @@ using MHServerEmu.Games.Regions;
 
 namespace MHServerEmu.Games.Entities
 {
+    public enum PowerMovementPreventionFlags
+    {
+        Forced = 0,
+        NonForced = 1,
+        Sync = 2,
+    }
+
+    [Flags]
+    public enum ChangePositionFlags
+    {
+        None                = 0,
+        Update              = 1 << 0,
+        DoNotSendToOwner    = 1 << 1,
+        DoNotSendToServer   = 1 << 2,
+        DoNotSendToClients  = 1 << 3,
+        Orientation         = 1 << 4,
+        Force               = 1 << 5,
+        Teleport            = 1 << 6,
+        HighFlying          = 1 << 7,
+        PhysicsResolve      = 1 << 8,
+        SkipAOI             = 1 << 9,
+        EnterWorld          = 1 << 10,
+    }
+
     public class WorldEntity : Entity
     {
         private static readonly Logger Logger = LogManager.CreateLogger();
@@ -88,7 +113,6 @@ namespace MHServerEmu.Games.Entities
             SpawnSpec = settings.SpawnSpec;
 
             // Old
-            InterestPolicies = AOINetworkPolicyValues.AOIChannelDiscovery;
             Properties[PropertyEnum.VariationSeed] = Game.Random.Next(1, 10000);
 
             int health = EntityHelper.GetRankHealth(proto);
@@ -113,11 +137,6 @@ namespace MHServerEmu.Games.Entities
 
         public override bool Serialize(Archive archive)
         {
-            // TODO: Remove this when we get rid of old entity constructors
-            if (_trackingContextMap == null) _trackingContextMap = new();
-            if (_conditionCollection == null) _conditionCollection = new(this);
-            if (_powerCollection == null) _powerCollection = new(this);
-
             bool success = base.Serialize(archive);
 
             if (archive.IsTransient)
@@ -247,10 +266,11 @@ namespace MHServerEmu.Games.Entities
 
             RegionLocation.Region = region;
             
-            if (ChangeRegionPosition(position, orientation))
+            if (ChangeRegionPosition(position, orientation, ChangePositionFlags.DoNotSendToClients | ChangePositionFlags.SkipAOI))
             {
                 // TODO: Everything else
                 OnEnteredWorld(settings);
+                NotifyPlayers(true, settings);
             }
         }
 
@@ -373,18 +393,40 @@ namespace MHServerEmu.Games.Entities
                     Locomotor.ClearOrientationSyncState();
             }
 
-            if (positionChanged || orientationChanged)
+            if (positionChanged == false && orientationChanged == false)
+                return false;
+
+            UpdateRegionBounds(); // Add to Quadtree
+            SendLocationChangeEvents(preChangeLocation, RegionLocation, flags);
+            if (RegionLocation.IsValid())
+                ExitWorldRegionLocation.Set(RegionLocation);
+
+            if (flags.HasFlag(ChangePositionFlags.DoNotSendToClients) == false)
             {
-                UpdateRegionBounds(); // Add to Quadtree
-                SendLocationChangeEvents(preChangeLocation, RegionLocation, flags);
-                if (RegionLocation.IsValid())
-                    ExitWorldRegionLocation.Set(RegionLocation);
-                return true;
+                bool excludeOwner = flags.HasFlag(ChangePositionFlags.DoNotSendToOwner);
+
+                var networkManager = Game.NetworkManager;
+                var interestedClients = networkManager.GetInterestedClients(this, AOINetworkPolicyValues.AOIChannelProximity, excludeOwner);
+                if (interestedClients.Any())
+                {
+                    var entityPositionMessageBuilder = NetMessageEntityPosition.CreateBuilder()
+                        .SetIdEntity(Id)
+                        .SetFlags((uint)flags);
+
+                    if (position != null) entityPositionMessageBuilder.SetPosition(position.ToNetStructPoint3());
+                    if (orientation != null) entityPositionMessageBuilder.SetOrientation(orientation.ToNetStructPoint3());
+
+                    networkManager.SendMessageToMultiple(interestedClients, entityPositionMessageBuilder.Build());
+                }
             }
 
-            // TODO send NetMessageEntityPosition position change to clients
+            if (flags.HasFlag(ChangePositionFlags.SkipAOI) == false)
+            {
+                // TODO: Notify if distance is far enough, similar to AOI updates
+                NotifyPlayers(true);
+            }
 
-            return false;
+            return true;
         }
 
         private void SendLocationChangeEvents(RegionLocation oldLocation, RegionLocation newLocation, ChangePositionFlags flags)
@@ -444,31 +486,34 @@ namespace MHServerEmu.Games.Entities
 
         public void ExitWorld()
         {
-            // TODO send packets for delete entities from world
-            if (IsInWorld)
-            {
-                bool exitStatus = !TestStatus(EntityStatus.ExitingWorld);
-                SetStatus(EntityStatus.ExitingWorld, true);
-                Physics.ReleaseCollisionId();
-                // TODO IsAttachedToEntity()
-                Physics.DetachAllChildren();
-                DisableNavigationInfluence();
+            if (IsInWorld == false) return;
 
-                var entityManager = Game.EntityManager;
-                if (entityManager == null) return;
-                entityManager.PhysicsManager?.OnExitedWorld(Physics);
-                OnExitedWorld();
-                var oldLocation = ClearWorldLocation();
-                SendLocationChangeEvents(oldLocation, RegionLocation, ChangePositionFlags.None);
-                ModifyCollectionMembership(EntityCollection.Simulated, false);
-                ModifyCollectionMembership(EntityCollection.Locomotion, false);
+            bool exitStatus = !TestStatus(EntityStatus.ExitingWorld);
+            SetStatus(EntityStatus.ExitingWorld, true);
+            Physics.ReleaseCollisionId();
+            // TODO IsAttachedToEntity()
+            Physics.DetachAllChildren();
+            DisableNavigationInfluence();
 
-                if (exitStatus)
-                    SetStatus(EntityStatus.ExitingWorld, false);
-            }
+            var entityManager = Game.EntityManager;
+            if (entityManager == null) return;
+            entityManager.PhysicsManager?.OnExitedWorld(Physics);
+            OnExitedWorld();
+            var oldLocation = ClearWorldLocation();
+            SendLocationChangeEvents(oldLocation, RegionLocation, ChangePositionFlags.None);
+            ModifyCollectionMembership(EntityCollection.Simulated, false);
+            ModifyCollectionMembership(EntityCollection.Locomotion, false);
+
+            if (exitStatus)
+                SetStatus(EntityStatus.ExitingWorld, false);
+
+            NotifyPlayers(false);
         }
 
-        public virtual void OnExitedWorld() { }
+        public virtual void OnExitedWorld()
+        {
+            PowerCollection?.OnOwnerExitedWorld();
+        }
 
         public RegionLocation ClearWorldLocation()
         {
@@ -519,9 +564,19 @@ namespace MHServerEmu.Games.Entities
                 return (ScriptRoleKeyEnum)(uint)Properties[PropertyEnum.ScriptRoleKey];
         }
 
+        public bool HasKeyword(PrototypeId keyword)
+        {
+            return HasKeyword(GameDatabase.GetPrototype<KeywordPrototype>(keyword));
+        }
+
         public bool HasKeyword(KeywordPrototype keywordProto)
         {
             return keywordProto != null && WorldEntityPrototype.HasKeyword(keywordProto);
+        }
+
+        internal bool HasConditionWithKeyword(PrototypeId keyword)
+        {
+            throw new NotImplementedException();
         }
 
         public AssetId GetOriginalWorldAsset() => GetOriginalWorldAsset(WorldEntityPrototype);
@@ -752,8 +807,45 @@ namespace MHServerEmu.Games.Entities
             throw new NotImplementedException();
         }
 
-        public virtual void OnLocomotionStateChanged(LocomotionState oldLocomotionState, LocomotionState newlocomotionState) { }
+        public virtual void OnLocomotionStateChanged(LocomotionState oldLocomotionState, LocomotionState newLocomotionState)
+        {
+            if (IsInWorld == false) return;
+
+            // Check if locomotion state requires updating
+            LocomotionState.CompareLocomotionStatesForSync(oldLocomotionState, newLocomotionState,
+                out bool syncRequired, out bool pathNodeSyncRequired, newLocomotionState.FollowEntityId != InvalidId);
+
+            if (syncRequired == false && pathNodeSyncRequired == false) return;
+
+            // Send locomotion update to interested clients
+            // NOTE: Avatars are locomoted on their local client independently, so they are excluded from locomotion updates.
+            var networkManager = Game.NetworkManager;
+            var interestedClients = networkManager.GetInterestedClients(this, AOINetworkPolicyValues.AOIChannelProximity, IsMovementAuthoritative == false);
+            if (interestedClients.Any() == false) return;
+
+            NetMessageLocomotionStateUpdate locomotionStateUpdateMessage = ArchiveMessageBuilder.BuildLocomotionStateUpdateMessage(
+                this, oldLocomotionState, newLocomotionState, pathNodeSyncRequired);
+            networkManager.SendMessageToMultiple(interestedClients, locomotionStateUpdateMessage);
+        }
+
         public virtual void OnPreGeneratePath(Vector3 start, Vector3 end, List<WorldEntity> entities) { }
+
+        public override void OnPostAOIAddOrRemove(Player player, InterestTrackOperation operation,
+            AOINetworkPolicyValues newInterestPolicies, AOINetworkPolicyValues previousInterestPolicies)
+        {
+            base.OnPostAOIAddOrRemove(player, operation, newInterestPolicies, previousInterestPolicies);
+
+            // Send our entire power collection when we gain proximity (enter game world)
+            if (previousInterestPolicies != AOINetworkPolicyValues.AOIChannelNone
+                && previousInterestPolicies.HasFlag(AOINetworkPolicyValues.AOIChannelProximity) == false
+                && newInterestPolicies.HasFlag(AOINetworkPolicyValues.AOIChannelProximity))
+            {
+                PowerCollection?.SendEntireCollection(player);
+            }
+        }
+
+        public virtual bool OnPowerAssigned(Power power) { return true; }
+        public virtual bool OnPowerUnassigned(Power power) { return true; }
 
         public bool OrientToward(Vector3 point, bool ignorePitch = false, ChangePositionFlags changeFlags = ChangePositionFlags.None)
         {
@@ -769,29 +861,20 @@ namespace MHServerEmu.Games.Entities
                 return ChangeRegionPosition(null, Orientation.FromDeltaVector(delta), changeFlags) == true;
             return false;
         }
-    }
 
-    public enum PowerMovementPreventionFlags
-    {
-        Forced = 0,
-        NonForced = 1,
-        Sync = 2,
-    }
+        internal float GetDefenseRating(DamageType damageType)
+        {
+            throw new NotImplementedException();
+        }
 
-    [Flags]
-    public enum ChangePositionFlags
-    {
-        None = 0,
-        Update = 1 << 0,
-        NoSendToOwner = 1 << 1,
-        NoSendToServer = 1 << 2,
-        NoSendToClients = 1 << 3,
-        Orientation = 1 << 4,
-        Force = 1 << 5,
-        Teleport = 1 << 6,
-        HighFlying = 1 << 7,
-        PhysicsResolve = 1 << 8,
-        SkipAOI = 1 << 9,
-        EnterWorld = 1 << 10,
+        internal float GetDamageReductionPct(float defenseRating, WorldEntity worldEntity, PowerPrototype powerProto)
+        {
+            throw new NotImplementedException();
+        }
+
+        internal float GetDistanceTo(WorldEntity other, bool edgeToEdge)
+        {
+            throw new NotImplementedException();
+        }
     }
 }
