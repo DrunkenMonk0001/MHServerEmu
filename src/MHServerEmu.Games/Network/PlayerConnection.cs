@@ -257,9 +257,8 @@ namespace MHServerEmu.Games.Network
             var avatar = Player.CurrentAvatar;
             Vector3 entrancePosition = avatar.FloorToCenter(StartPosition);
 
-            avatar.EnterWorld(AOI.Region, entrancePosition, StartOrientation);
-
             AOI.Update(entrancePosition, true);
+            avatar.EnterWorld(AOI.Region, entrancePosition, StartOrientation);
 
             Player.DequeueLoadingScreen();
 
@@ -562,17 +561,9 @@ namespace MHServerEmu.Games.Network
 
                 uint cellId = target.Properties[PropertyEnum.MapCellId];
                 uint areaId = target.Properties[PropertyEnum.MapAreaId];
-                Logger.Trace($"Teleporting to areaid {areaId} cellid {cellId}");
+                Logger.Trace($"Teleporting to areaId={areaId} cellId={cellId}");
 
-                SendMessage(NetMessageEntityPosition.CreateBuilder()
-                    .SetIdEntity(Player.CurrentAvatar.Id)
-                    .SetFlags((uint)ChangePositionFlags.Teleport)
-                    .SetPosition(targetPos.ToNetStructPoint3())
-                    .SetOrientation(targetRot.ToNetStructPoint3())
-                    .SetCellId(cellId)
-                    .SetAreaId(areaId)
-                    .SetEntityPrototypeId((ulong)Player.CurrentAvatar.PrototypeDataRef)
-                    .Build());
+                Player.CurrentAvatar.ChangeRegionPosition(targetPos, targetRot, ChangePositionFlags.Teleport);
 
                 LastPosition = targetPos;
             }
