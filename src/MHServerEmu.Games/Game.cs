@@ -16,8 +16,10 @@ using MHServerEmu.Games.Entities.Items;
 using MHServerEmu.Games.Events;
 using MHServerEmu.Games.GameData;
 using MHServerEmu.Games.GameData.Prototypes;
+using MHServerEmu.Games.Loot;
 using MHServerEmu.Games.MetaGames;
 using MHServerEmu.Games.Network;
+using MHServerEmu.Games.Powers;
 using MHServerEmu.Games.Regions;
 
 namespace MHServerEmu.Games
@@ -56,6 +58,7 @@ namespace MHServerEmu.Games
         public EntityManager EntityManager { get; }
         public RegionManager RegionManager { get; }
         public AdminCommandManager AdminCommandManager { get; }
+        public LootGenerator LootGenerator { get; }
 
         public TimeSpan FixedTimeBetweenUpdates { get; } = TimeSpan.FromMilliseconds(1000f / TargetFrameRate);
         public TimeSpan RealGameTime { get => (TimeSpan)_realGameTime; }
@@ -85,6 +88,7 @@ namespace MHServerEmu.Games
             NetworkManager = new(this);
             RegionManager = new();
             EntityManager = new(this);
+            LootGenerator = new(this);
 
             Random = new();
 
@@ -226,6 +230,18 @@ namespace MHServerEmu.Games
                 entity = new Entity(this);
 
             return entity;
+        }
+
+        public Power AllocatePower(PrototypeId powerProtoRef)
+        {
+            Type powerClassType = GameDatabase.DataDirectory.GetPrototypeClassType(powerProtoRef);
+
+            if (powerClassType == typeof(MissilePowerPrototype))
+                return new MissilePower(this, powerProtoRef);
+            else if (powerClassType == typeof(SummonPowerPrototype))
+                return new SummonPower(this, powerProtoRef);
+            else
+                return new Power(this, powerProtoRef);
         }
 
         public IEnumerable<Region> RegionIterator()
