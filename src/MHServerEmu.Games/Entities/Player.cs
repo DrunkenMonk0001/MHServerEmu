@@ -10,6 +10,7 @@ using MHServerEmu.Games.Achievements;
 using MHServerEmu.Games.Common;
 using MHServerEmu.Games.Entities.Avatars;
 using MHServerEmu.Games.Entities.Inventories;
+using MHServerEmu.Games.Entities.Items;
 using MHServerEmu.Games.Entities.Options;
 using MHServerEmu.Games.GameData;
 using MHServerEmu.Games.GameData.LiveTuning;
@@ -598,6 +599,91 @@ namespace MHServerEmu.Games.Entities
             return true;
         }
 
+        public bool RevealInventory(PrototypeId inventoryProtoRef)
+        {
+            // Validate inventory prototype
+            var inventoryPrototype = GameDatabase.GetPrototype<InventoryPrototype>(inventoryProtoRef);
+            if (inventoryPrototype == null) return Logger.WarnReturn(false, "RevealInventory(): inventoryPrototype == null");
+
+            // Skip reveal if this inventory does not require flagged visibility
+            if (inventoryPrototype.InventoryRequiresFlaggedVisibility() == false)
+                return true;
+
+            // Validate inventory
+            Inventory inventory = GetInventoryByRef(inventoryPrototype.DataRef);
+            if (inventory == null) return Logger.WarnReturn(false, "RevealInventory(): inventory == null");
+
+            // Skip reveal if already visible
+            if (inventory.VisibleToOwner) return true;
+
+            // Enable visibility
+            inventory.VisibleToOwner = true;
+
+            // Update interest for all contained entities
+            foreach (var entry in inventory)
+            {
+                var entity = Game.EntityManager.GetEntity<Entity>(entry.Id);
+                if (entity == null)
+                {
+                    Logger.Warn("RevealInventory(): entity == null");
+                    continue;
+                }
+
+                PlayerConnection.AOI.ConsiderEntity(entity);
+            }
+
+            return true;
+        }
+
+        public bool TrashItem(Item item)
+        {
+            // See CPlayer::RequestItemTrash for reference
+
+            // Make sure this player is allowed to destroy this item
+            if (item.PlayerCanDestroy(this) == false)
+                return false;
+
+            Avatar avatar = CurrentAvatar;
+
+            // Make sure there is an avatar in the world
+            if (avatar.IsInWorld == false)
+                return false;
+
+            // Destroy the item if it cannot be dropped
+            if (item.WouldBeDestroyedOnDrop)
+            {
+                item.Destroy();
+                return true;
+            }
+
+            // Drop item to the ground
+            Region region = avatar.Region;
+
+            // Find a position to drop, bail out if no space
+            if (region.ChooseRandomPositionNearPoint(avatar.Bounds, Navi.PathFlags.Walk, PositionCheckFlags.CheckCanBlockedEntity,
+                BlockingCheckFlags.CheckSpawns, 50f, 100f, out Vector3 dropPosition) == false)
+            {
+                return false;
+            }
+
+            // Remove the item from its inventory (no going back now)
+            item.ChangeInventoryLocation(null);
+
+            // Drop it
+            EntitySettings settings = new();
+            settings.OptionFlags |= EntitySettingsOptionFlags.IsNewOnServer;
+            settings.SourceEntityId = avatar.Id;
+            settings.SourcePosition = avatar.RegionLocation.Position;
+
+            if (item.EnterWorld(region, dropPosition, Orientation.Zero, settings) == false)
+            {
+                item.Destroy();     // We have to destroy this item because it's no longer in player's inventory
+                return Logger.WarnReturn(false, $"TrashItem(): Item {item} failed to enter world");
+            }
+
+            return true;
+        }
+
         protected override bool InitInventories(bool populateInventories)
         {
             bool success = base.InitInventories(populateInventories);
@@ -646,7 +732,20 @@ namespace MHServerEmu.Games.Entities
         public bool HasBadge(AvailableBadges badge) => _badges.Contains(badge);
 
 
-        #region Avatar Management
+        #region Avatar and Team-Up Management
+
+        public Avatar GetAvatar(PrototypeId avatarProtoRef, AvatarMode avatarMode = AvatarMode.Normal)
+        {
+            if (avatarProtoRef == PrototypeId.Invalid) return Logger.WarnReturn<Avatar>(null, "GetAvatar(): avatarProtoRef == PrototypeId.Invalid");
+
+            foreach (Avatar avatar in IterateAvatars())
+            {
+                if (avatar.PrototypeDataRef == avatarProtoRef)
+                    return avatar;
+            }
+
+            return null;
+        }
 
         public bool SwitchAvatar(PrototypeId avatarProtoRef, out Avatar prevAvatar)
         {
@@ -672,6 +771,16 @@ namespace MHServerEmu.Games.Entities
                 foreach (var entry in inventory)
                     yield return Game.EntityManager.GetEntity<Avatar>(entry.Id);
             }
+        }
+
+        public Agent GetTeamUpAgent(PrototypeId teamUpProtoRef)
+        {
+            if (teamUpProtoRef == PrototypeId.Invalid) return Logger.WarnReturn<Agent>(null, "GetTeamUpAgent(): teamUpProtoRef == PrototypeId.Invalid");
+
+            Inventory teamUpInv = GetInventory(InventoryConvenienceLabel.TeamUpLibrary);
+            if (teamUpInv == null) return Logger.WarnReturn<Agent>(null, "GetTeamUpAgent(): teamUpInv == null");
+
+            return teamUpInv.GetMatchingEntity(teamUpProtoRef) as Agent;
         }
 
         #endregion
