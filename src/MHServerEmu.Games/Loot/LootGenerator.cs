@@ -118,9 +118,10 @@ namespace MHServerEmu.Games.Loot
                 return Logger.WarnReturn<Item>(null, $"DropItem(): Provided itemProtoRef {GameDatabase.GetPrototypeName(itemProtoRef)} is not an item");
 
             // Pick a random point near source entity
-            source.Region.ChooseRandomPositionNearPoint(source.Bounds, PathFlags.Walk, PositionCheckFlags.CheckClearOfEntity,
+            source.Region.ChooseRandomPositionNearPoint(source.Bounds, PathFlags.Walk, PositionCheckFlags.PreferNoEntity,
                 BlockingCheckFlags.CheckSpawns, 50f, maxDistanceFromSource, out Vector3 dropPosition);
 
+            // Create entity
             EntitySettings settings = new();
             settings.EntityRef = itemProtoRef;
             settings.RegionId = source.RegionLocation.RegionId;
@@ -130,7 +131,14 @@ namespace MHServerEmu.Games.Loot
             settings.OptionFlags |= EntitySettingsOptionFlags.IsNewOnServer;    // needed for drop animation
             settings.ItemSpec = CreateItemSpec(itemProtoRef);
 
-            return Game.EntityManager.CreateEntity(settings) as Item;
+            Item item = Game.EntityManager.CreateEntity(settings) as Item;
+            if (item == null) return Logger.WarnReturn(item, "DropItem(): item == null");
+
+            // Set lifespan
+            TimeSpan expirationTime = item.GetExpirationTime();
+            item.InitLifespan(expirationTime);
+
+            return item;
         }
 
         /// <summary>
