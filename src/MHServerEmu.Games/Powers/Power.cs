@@ -293,7 +293,8 @@ namespace MHServerEmu.Games.Powers
 
         public bool PowerLOSCheck(RegionLocation regionLocation, Vector3 position, ulong targetId, out Vector3 resultPos, bool lOSCheckAlongGround)
         {
-            throw new NotImplementedException();
+            resultPos = Vector3.Zero;
+            return true;
         }
 
         public static int ComputeNearbyPlayers(Region region, Vector3 position, int min, bool combatActive, HashSet<ulong> nearbyPlayers = null)
@@ -319,12 +320,32 @@ namespace MHServerEmu.Games.Powers
 
         public bool IsInRange(WorldEntity target, RangeCheckType checkType)
         {
-            return true;
+            if (target == null) return Logger.WarnReturn(false, "IsInRange(): target == null");
+
+            PowerPrototype powerProto = Prototype;
+            if (powerProto == null) return Logger.WarnReturn(false, "IsInRange(): powerProto == null");
+            if (Owner == null) return Logger.WarnReturn(false, "IsInRange(): powerProto == null");
+
+            float range = GetRange();
+            Vector3 userPosition = Owner.RegionLocation.Position;
+            float userRadius = Owner.Bounds.Radius;
+            Vector3 targetPosition = target.RegionLocation.Position;
+            float targetRadius = target.Bounds.Radius;
+
+            return IsInRangeInternal(powerProto, range, userPosition, userRadius, targetPosition, checkType, targetRadius);
         }
 
-        public bool IsInRange(Vector3 position, RangeCheckType activation)
+        public bool IsInRange(Vector3 targetPosition, RangeCheckType checkType)
         {
-            return true;
+            PowerPrototype powerProto = Prototype;
+            if (powerProto == null) return Logger.WarnReturn(false, "IsInRange(): powerProto == null");
+            if (Owner == null) return Logger.WarnReturn(false, "IsInRange(): powerProto == null");
+
+            float range = GetRange();
+            Vector3 userPosition = Owner.RegionLocation.Position;
+            float userRadius = Owner.Bounds.Radius;
+
+            return IsInRangeInternal(powerProto, range, userPosition, userRadius, targetPosition, checkType, 0f);
         }
 
         #region State Accessors
@@ -677,6 +698,46 @@ namespace MHServerEmu.Games.Powers
         {
             if (Owner == null) return Logger.WarnReturn(0f, "GetApplicationRange(): Owner == null");
             return TargetsAOE() ? GetAOERadius() : GetRange();
+        }
+
+        public float GetProjectileSpeed(float distance)
+        {
+            PowerPrototype powerProto = Prototype;
+            if (powerProto == null) return Logger.WarnReturn(0f, "GetProjectileSpeed(): powerProto == null");
+            return GetProjectileSpeed(powerProto, Properties, Owner.Properties, distance);
+        }
+
+        public float GetProjectileSpeed(Vector3 userPosition, Vector3 targetPosition)
+        {
+            PowerPrototype powerProto = Prototype;
+            if (powerProto == null) return Logger.WarnReturn(0f, "GetProjectileSpeed(): powerProto == null");
+            return GetProjectileSpeed(powerProto, Properties, Owner.Properties, userPosition, targetPosition);
+        }
+
+        public static float GetProjectileSpeed(PowerPrototype powerProto, PropertyCollection powerProperties, PropertyCollection ownerProperties,
+            Vector3 userPosition, Vector3 targetPosition)
+        {
+            float distance = 0f;
+
+            if (powerProto.ProjectileTimeToImpactOverride > 0f)
+                distance = Vector3.Distance(userPosition, targetPosition);
+
+            return GetProjectileSpeed(powerProto, powerProperties, ownerProperties, distance);
+        }
+
+        public static float GetProjectileSpeed(PowerPrototype powerProto, PropertyCollection powerProperties, PropertyCollection ownerProperties, float distance)
+        {
+            float speed;
+
+            if (powerProto.ProjectileTimeToImpactOverride > 0f)
+                speed = distance / powerProto.ProjectileTimeToImpactOverride;
+            else
+                speed = powerProto.GetProjectilesSpeed(powerProperties, ownerProperties);
+
+            if (ownerProperties != null)
+                speed *= 1f + powerProperties[PropertyEnum.MissileSpeedBonus];
+
+            return speed;
         }
 
         public bool RequiresLineOfSight()
@@ -1124,10 +1185,89 @@ namespace MHServerEmu.Games.Powers
             return true;
         }
 
+        private static bool IsInRangeInternal(PowerPrototype powerProto, float range, Vector3 userPosition, float userRadius,
+            Vector3 targetPosition, RangeCheckType checkType, float targetRadius)
+        {
+            if (powerProto.Activation == PowerActivationType.Passive)
+                return true;
+
+            TargetingStylePrototype targetingPrototype = powerProto.GetTargetingStyle();
+            if (targetingPrototype == null) return Logger.WarnReturn(false, "IsInRangeInternal(): targetingPrototype == null");
+
+            if (targetingPrototype.TargetingShape == TargetingShapeType.Self)
+                return true;
+
+            if (powerProto.PowerCategory == PowerCategoryType.ProcEffect)
+                return true;
+
+            if (powerProto is MovementPowerPrototype movementPowerProto)
+            {
+                if (movementPowerProto.MoveToExactTargetLocation == false && targetingPrototype.NeedsTarget == false)
+                    return true;
+            }
+
+            // Distance to the edge of the target
+            float distance = Vector3.Distance2D(userPosition, targetPosition) - targetRadius;
+
+            // Why is this a separate thing and not baked into GetRange()?
+            if (checkType == RangeCheckType.Activation)
+                range -= powerProto.RangeActivationReduction;
+
+            // Range cannot be less than user radius. 5 appears to be additional padding
+            range = MathF.Max(userRadius, range) + 5f;
+
+            return (distance - range) <= 0f;
+        }
+
+        private bool CanBeUserCanceledNow()
+        {
+            return true;
+        }
+
         private bool SchedulePowerEnd(in PowerActivationSettings settings)
         {
-            // TODO: Calculate power length
-            return SchedulePowerEnd(TimeSpan.FromMilliseconds(500));
+            if (Owner == null) return Logger.WarnReturn(false, "SchedulePowerEnd(): Owner == null");
+
+            EndPowerFlags flags = EndPowerFlags.None;
+
+            if (Properties[PropertyEnum.PowerActiveUntilProjExpire])
+            {
+                if (Prototype is MissilePowerPrototype)
+                    return true;
+
+                float speed = GetProjectileSpeed(GetRange());
+                if (speed <= 0f) return Logger.WarnReturn(false, "SchedulePowerEnd(): speed <= 0f");
+
+                float distance = 2 * GetRange() * (1 + Properties[PropertyEnum.BounceCount]);
+                TimeSpan delay = TimeSpan.FromSeconds(distance / speed);
+
+                return SchedulePowerEnd(delay);
+            }
+
+            TimeSpan executionTime = GetFullExecutionTime() - GetChannelEndTime();
+
+            if (Prototype is MovementPowerPrototype movementPowerProto)
+            {
+                if (movementPowerProto.ConstantMoveTime == false && movementPowerProto.ChanneledMoveTime == false)
+                    executionTime += settings.MovementTime;
+            }
+
+            if (settings.Flags.HasFlag(PowerActivationSettingsFlags.Cancel) && CanBeUserCanceledNow())
+            {
+                TimeSpan activationTime = GetActivationTime();
+
+                float animSpeed = GetAnimSpeed();
+                float timeMult = animSpeed > 0f ? 1f / animSpeed : 0f;
+
+                TimeSpan adjustedTime = activationTime + (Prototype.NoInterruptPostWindowTime * timeMult);
+                if (adjustedTime < executionTime)
+                {
+                    flags |= EndPowerFlags.ExplicitCancel;
+                    executionTime = adjustedTime;
+                }
+            }
+
+            return SchedulePowerEnd(executionTime, flags);
         }
 
         private bool SchedulePowerEnd(TimeSpan delay, EndPowerFlags flags = EndPowerFlags.None, bool doNotReschedule = false)
@@ -1149,7 +1289,7 @@ namespace MHServerEmu.Games.Powers
                     return true;
                 }
 
-                scheduler.ScheduleEvent(_endPowerEvent, Clock.Max(delay, TimeSpan.FromMilliseconds(1)), _pendingEvents2);
+                scheduler.ScheduleEvent(_endPowerEvent, delay > TimeSpan.Zero ? delay : TimeSpan.FromMilliseconds(1), _pendingEvents2);
                 _endPowerEvent.Get().Initialize(this, flags);
             }
 
