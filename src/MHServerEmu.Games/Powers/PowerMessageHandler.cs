@@ -76,7 +76,7 @@ namespace MHServerEmu.Games.Powers
             PowerActivationSettings settings = new(avatar.RegionLocation.Position);
             settings.ApplyProtobuf(tryActivatePower);
 
-            avatar.ActivatePower(powerProtoRef, in settings);
+            avatar.ActivatePower(powerProtoRef, ref settings);
 
             return true;
         }
@@ -109,7 +109,7 @@ namespace MHServerEmu.Games.Powers
             if (powerRelease.HasTargetPosition)
                 settings.TargetPosition = new(powerRelease.TargetPosition);
 
-            power.ReleasePower(settings);
+            power.ReleaseVariableActivation(settings);
             return true;
         }
 
