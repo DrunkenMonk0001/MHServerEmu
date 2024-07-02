@@ -293,10 +293,8 @@ namespace MHServerEmu.Games.Powers
         }
 
         public PowerPositionSweepResult PowerPositionSweep(RegionLocation regionLocation, Vector3 targetPosition, ulong targetId,
-            out Vector3 resultPosition, bool forceDoNotMoveToExactTargetLocation = false, float rangeOverride = 0f)
+            ref Vector3? resultPosition, bool forceDoNotMoveToExactTargetLocation = false, float rangeOverride = 0f)
         {
-            resultPosition = new(targetPosition);
-
             if (Owner == null) return Logger.WarnReturn(PowerPositionSweepResult.Error, "PowerPositionSweep(): Owner == null");
 
             Region region = regionLocation.Region;
@@ -304,6 +302,8 @@ namespace MHServerEmu.Games.Powers
 
             PowerPrototype powerProto = Prototype;
             if (powerProto == null) return Logger.WarnReturn(PowerPositionSweepResult.Error, "PowerPositionSweep(): powerProto == null");
+
+            resultPosition = targetPosition;
             
             if (powerProto is MovementPowerPrototype movementPowerProto)
             {
@@ -315,8 +315,10 @@ namespace MHServerEmu.Games.Powers
                     bool doNotMoveToExactTargetLocation = forceDoNotMoveToExactTargetLocation || movementPowerProto.MoveToExactTargetLocation == false;
                     float range = Segment.IsNearZero(rangeOverride) ? GetRange() : rangeOverride;
 
-                    PointOnLineResult result = region.NaviMesh.FindPointOnLineToOccupy(ref resultPosition, regionLocation.Position, targetPosition, range,
+                    Vector3 findPoint = resultPosition.Value;
+                    PointOnLineResult result = region.NaviMesh.FindPointOnLineToOccupy(ref findPoint, regionLocation.Position, targetPosition, range,
                         Owner.Bounds, locomotor.PathFlags, movementPowerProto.BlockingCheckFlags, doNotMoveToExactTargetLocation);
+                    resultPosition = findPoint;
 
                     return result switch
                     {
@@ -328,17 +330,17 @@ namespace MHServerEmu.Games.Powers
                 }
             }
 
-            return PowerPositionSweepInternal(regionLocation, targetPosition, targetId, out resultPosition, false, false); ;
+            return PowerPositionSweepInternal(regionLocation, targetPosition, targetId, ref resultPosition, false, false);
         }
 
-        public bool PowerLOSCheck(RegionLocation regionLocation, Vector3 targetPosition, ulong targetId, out Vector3 resultPosition, bool losCheckAlongGround)
+        public bool PowerLOSCheck(RegionLocation regionLocation, Vector3 targetPosition, ulong targetId, ref Vector3? resultPosition, bool losCheckAlongGround)
         {
-            PowerPositionSweepResult result = PowerPositionSweepInternal(regionLocation, targetPosition, targetId, out resultPosition, true, losCheckAlongGround);
+            PowerPositionSweepResult result = PowerPositionSweepInternal(regionLocation, targetPosition, targetId, ref resultPosition, true, losCheckAlongGround);
 
             Logger.Debug($"PowerLOSCheck(): {result}");
 
             if (result == PowerPositionSweepResult.Clipped)
-                return Vector3.DistanceSquared(targetPosition, resultPosition) <= PowerPositionSweepPaddingSquared;
+                return Vector3.DistanceSquared(targetPosition, resultPosition.Value) <= PowerPositionSweepPaddingSquared;
 
             return result == PowerPositionSweepResult.Success;
         }
@@ -350,11 +352,6 @@ namespace MHServerEmu.Games.Powers
 
         public static bool ValidateAOETarget(WorldEntity target, PowerPrototype powerProto, WorldEntity user, Vector3 powerUserPosition,
             AlliancePrototype userAllianceProto, bool needsLineOfSight)
-        {
-            return true;
-        }
-
-        public static bool CanBeUsedInRegion(PowerPrototype powerProto, PropertyCollection powerProperties, Region region)
         {
             return true;
         }
@@ -1175,7 +1172,13 @@ namespace MHServerEmu.Games.Powers
 
         public bool IsSecondActivateOnRelease()
         {
-            return false;
+            PowerPrototype powerProto = Prototype;
+            if (powerProto == null) return Logger.WarnReturn(false, "IsSecondActivateOnRelease(): powerProto == null");
+
+            if (powerProto.ExtraActivation == null)
+                return false;
+
+            return Prototype.ExtraActivation is SecondaryActivateOnReleasePrototype;
         }
 
         public bool IsContinuous()
@@ -1212,6 +1215,70 @@ namespace MHServerEmu.Games.Powers
                 return false;
 
             // After facing many challenges, we have reached the end and earned our right to be a continuous power
+            return true;
+        }
+
+        public bool CanBeUsedInRegion(Region region)
+        {
+            PowerPrototype powerProto = Prototype;
+            if (powerProto == null) return Logger.WarnReturn(false, "CanBeUsedInRegino(): powerProto == null");
+            return CanBeUsedInRegion(powerProto, Properties, region);
+        }
+
+        public static bool CanBeUsedInRegion(PowerPrototype powerProto, PropertyCollection powerProperties, Region region)
+        {
+            if (region == null) return false;
+            RegionPrototype regionPrototype = region.RegionPrototype;
+            if (regionPrototype == null) return Logger.WarnReturn(false, "CanBeUsedInRegion(): regionPrototype == null");
+
+            PropertyCollection properties = powerProperties ?? powerProto.Properties;
+
+            // Check power properties
+            if (powerProto.Activation != PowerActivationType.Passive && properties != null)
+            {
+                // Check if we can use the power in the current region type (town / public / private / etc)
+                if (properties[PropertyEnum.PowerUsePreventIn, (int)regionPrototype.Behavior])
+                    return false;
+
+                // Check keywords that prevent powers from being used in regions
+                foreach (var kvp in properties.IteratePropertyRange(PropertyEnum.PowerUsePreventInRegionKwd))
+                {
+                    if (kvp.Value == false)
+                        continue;
+
+                    Property.FromParam(kvp.Key, 0, out PrototypeId regionKeywordRef);
+                    if (regionKeywordRef == PrototypeId.Invalid)
+                        Logger.Warn($"CanBeUsedInRegion(): Power has invalid PowerUsePreventInRegionKwd!\n Power Prototype: {powerProto}");
+
+                    if (regionPrototype.HasKeyword(regionKeywordRef.As<KeywordPrototype>()))
+                        return false;
+                }
+
+                // Check keywords that are required for a power to be used in a region
+                foreach (var kvp in properties.IteratePropertyRange(PropertyEnum.PowerUseRequiresRegionKwd))
+                {
+                    if (kvp.Value == false)
+                        continue;
+
+                    Property.FromParam(kvp.Key, 0, out PrototypeId regionKeywordRef);
+                    if (regionKeywordRef == PrototypeId.Invalid)
+                        Logger.Warn($"CanBeUsedInRegion(): Power has invalid PowerUseRequiresRegionKwd!\n Power Prototype: {powerProto}");
+
+                    if (regionPrototype.HasKeyword(regionKeywordRef.As<KeywordPrototype>()) == false)
+                        return false;
+                }
+            }
+
+            // Check region keyword blacklist
+            if (regionPrototype.PowerKeywordBlacklist.HasValue() && powerProto.Keywords.HasValue())
+            {
+                foreach (PrototypeId powerKeywordRef in regionPrototype.PowerKeywordBlacklist)
+                {
+                    if (powerProto.HasKeyword(powerKeywordRef.As<KeywordPrototype>()))
+                        return false;
+                }
+            }
+
             return true;
         }
 
@@ -1268,10 +1335,8 @@ namespace MHServerEmu.Games.Powers
         }
 
         private PowerPositionSweepResult PowerPositionSweepInternal(RegionLocation regionLocation, Vector3 targetPosition,
-            ulong targetId, out Vector3 resultPosition, bool losCheck, bool losCheckAlongGround)
+            ulong targetId, ref Vector3? resultPosition, bool losCheck, bool losCheckAlongGround)
         {
-            resultPosition = new(targetPosition);
-
             if (Owner == null) return Logger.WarnReturn(PowerPositionSweepResult.Error, "PowerPositionSweepInternal(): Owner == null");
 
             Region region = regionLocation.Region;
@@ -1286,11 +1351,11 @@ namespace MHServerEmu.Games.Powers
             NaviMesh naviMesh = region.NaviMesh;
 
             // Sweep settings
-            Vector3 fromPosition = new(regionLocation.Position);
-            Vector3 toPosition = new(targetPosition);
+            Vector3 fromPosition = regionLocation.Position;
+            Vector3 toPosition = targetPosition;
             float sweepRadius = 0f;
             PathFlags pathFlags = PathFlags.Power;
-            Vector3 resultNormal = null;
+            Vector3? resultNormal = null;
             float padding = PowerPositionSweepPadding;
             HeightSweepType heightSweepType = HeightSweepType.None;
             int maximumHeight = short.MaxValue;
@@ -1412,7 +1477,7 @@ namespace MHServerEmu.Games.Powers
                     if (movementPowerProto.IsHighFlyingPower == false && movementPowerProto.MovementHeightBonus == 0)
                         blockFlags |= 1 << (int)BoundsMovementPowerBlockType.Ground;
 
-                    WorldEntity firstHitEntity = region.SweepToFirstHitEntity(Owner.Bounds, resultPosition - fromPosition,
+                    WorldEntity firstHitEntity = region.SweepToFirstHitEntity(Owner.Bounds, resultPosition.Value - fromPosition,
                         ref resultPosition, new MovementPowerEntityCollideFunc(blockFlags));
 
                     if (firstHitEntity != null)

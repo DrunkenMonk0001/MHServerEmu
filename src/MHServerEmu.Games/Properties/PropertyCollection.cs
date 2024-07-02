@@ -219,19 +219,38 @@ namespace MHServerEmu.Games.Properties
         /// </summary>
         public bool RemovePropertyRange(PropertyEnum propertyEnum)
         {
-            List<PropertyId> toRemoveList = new();
+            // NOTE: Our current PropertyList implementation supports removal during iteration.
+            // If that ever changes, use a temporary id stack here like the client does.
+            bool removedAny = false;
+
             foreach (var kvp in this)
             {
-                if (kvp.Key.Enum == propertyEnum)
-                    toRemoveList.Add(kvp.Key);
+                if (kvp.Key.Enum != propertyEnum)
+                    continue;
+
+                RemoveProperty(kvp.Key);
+                removedAny = true;
             }
 
-            if (toRemoveList.Count == 0) return false;
+            return removedAny;
+        }
 
-            foreach (var propertyId in toRemoveList)
-                RemoveProperty(propertyId);
+        /// <summary>
+        /// Copies the <see cref="PropertyValue"/> with the specified <see cref="PropertyId"/> from the provided <see cref="PropertyCollection"/>.
+        /// </summary>
+        public void CopyProperty(PropertyCollection source, PropertyId id)
+        {
+            if (source._aggregateList.GetPropertyValue(id, out PropertyValue value))
+                SetPropertyValue(id, value);
+        }
 
-            return true;
+        /// <summary>
+        /// Copies all properties with the specified <see cref="PropertyEnum"/> from the provided <see cref="PropertyCollection"/>.
+        /// </summary>
+        public void CopyPropertyRange(PropertyCollection source, PropertyEnum propertyEnum)
+        {
+            foreach (var kvp in source.IteratePropertyRange(propertyEnum))
+                SetPropertyValue(kvp.Key, kvp.Value);
         }
 
         /// <summary>
