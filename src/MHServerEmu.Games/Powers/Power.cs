@@ -1,10 +1,12 @@
-﻿using MHServerEmu.Core.Collisions;
+﻿using Gazillion;
+using MHServerEmu.Core.Collisions;
 using MHServerEmu.Core.Extensions;
 using MHServerEmu.Core.Helpers;
 using MHServerEmu.Core.Logging;
 using MHServerEmu.Core.System.Time;
 using MHServerEmu.Core.VectorMath;
 using MHServerEmu.Games.Behavior;
+using MHServerEmu.Games.Behavior.StaticAI;
 using MHServerEmu.Games.Entities;
 using MHServerEmu.Games.Entities.Avatars;
 using MHServerEmu.Games.Entities.Locomotion;
@@ -277,16 +279,33 @@ namespace MHServerEmu.Games.Powers
 
             WorldEntity target = Game.EntityManager.GetEntity<WorldEntity>(settings.TargetEntityId);
 
-            // Set up variable activation time
+            // Charging (variable activation time) powers
             if (powerProto.ExtraActivation != null)
             {
-                if (powerProto.ExtraActivation is SecondaryActivateOnReleasePrototype secondaryActivation && secondaryActivation.MaxReleaseTimeMS > 0)
+                if (powerProto.ExtraActivation is SecondaryActivateOnReleasePrototype secondaryActivation)
                 {
-                    int variableActivationTimeMS = Math.Min((int)settings.VariableActivationTime.TotalMilliseconds, secondaryActivation.MaxReleaseTimeMS);
-                    float variableActivationTimePct = variableActivationTimeMS / (float)Math.Max(secondaryActivation.MinReleaseTimeMS, secondaryActivation.MaxReleaseTimeMS);
+                    // If this is not a release yet, send pre-activation message to clients
+                    if (settings.VariableActivationRelease == false)
+                    {
+                        var preActivatePower = NetMessagePreActivatePower.CreateBuilder()
+                            .SetIdUserEntity(Owner.Id)
+                            .SetPowerPrototypeId((ulong)PrototypeDataRef)
+                            .SetIdTargetEntity(settings.TargetEntityId)
+                            .SetTargetPosition(settings.TargetPosition.ToNetStructPoint3())
+                            .Build();
 
-                    Properties[PropertyEnum.VariableActivationTimeMS] = TimeSpan.FromMilliseconds(variableActivationTimeMS);
-                    Properties[PropertyEnum.VariableActivationTimePct] = variableActivationTimePct;
+                        Game.NetworkManager.SendMessageToInterested(preActivatePower, Owner, AOINetworkPolicyValues.AOIChannelProximity, true);
+                        return PowerUseResult.Success;
+                    }
+
+                    if (secondaryActivation.MaxReleaseTimeMS > 0)
+                    {
+                        int variableActivationTimeMS = Math.Min((int)settings.VariableActivationTime.TotalMilliseconds, secondaryActivation.MaxReleaseTimeMS);
+                        float variableActivationTimePct = variableActivationTimeMS / (float)Math.Max(secondaryActivation.MinReleaseTimeMS, secondaryActivation.MaxReleaseTimeMS);
+
+                        Properties[PropertyEnum.VariableActivationTimeMS] = TimeSpan.FromMilliseconds(variableActivationTimeMS);
+                        Properties[PropertyEnum.VariableActivationTimePct] = variableActivationTimePct;
+                    }
                 }
             }
             else if (powerProto.PowerCategory == PowerCategoryType.ComboEffect && settings.VariableActivationTime > TimeSpan.Zero
@@ -436,9 +455,11 @@ namespace MHServerEmu.Games.Powers
             return result;
         }
 
-        public void ReleaseVariableActivation(in PowerActivationSettings settings)
+        public void ReleaseVariableActivation(ref PowerActivationSettings settings)
         {
             Logger.Debug($"ReleaseVariableActivation(): {Prototype}");
+            settings.VariableActivationRelease = true;  // Mark power as release
+            Activate(ref settings);
         }
 
         public bool EndPower(EndPowerFlags flags)
@@ -488,7 +509,12 @@ namespace MHServerEmu.Games.Powers
 
             if (IsToggledOn() && Owner?.IsInWorld == true)
             {
-                // TODO
+                bool exitWorld = flags.HasFlag(EndPowerFlags.ExitWorld);
+                bool unassign = flags.HasFlag(EndPowerFlags.Unassign);
+                bool notEnoughEndurance = flags.HasFlag(EndPowerFlags.NotEnoughEndurance);
+
+                if ((exitWorld == false && unassign) || (exitWorld && HasEnduranceCostRecurring()) || notEnoughEndurance)
+                    SetToggleState(false, unassign);
             }
 
             if (Owner == null) return Logger.WarnReturn(false, "EndPower(): Owner == null");
@@ -561,8 +587,6 @@ namespace MHServerEmu.Games.Powers
         public bool PowerLOSCheck(RegionLocation regionLocation, Vector3 targetPosition, ulong targetId, ref Vector3? resultPosition, bool losCheckAlongGround)
         {
             PowerPositionSweepResult result = PowerPositionSweepInternal(regionLocation, targetPosition, targetId, ref resultPosition, true, losCheckAlongGround);
-
-            Logger.Debug($"PowerLOSCheck(): {result}");
 
             if (result == PowerPositionSweepResult.Clipped)
                 return Vector3.DistanceSquared(targetPosition, resultPosition.Value) <= PowerPositionSweepPaddingSquared;
@@ -675,6 +699,12 @@ namespace MHServerEmu.Games.Powers
         public static bool IsToggledOn(PowerPrototype powerProto, WorldEntity owner)
         {
             return owner.Properties[PropertyEnum.PowerToggleOn, powerProto.DataRef];
+        }
+
+        public bool HasEnduranceCostRecurring()
+        {
+            // TODO
+            return false;
         }
 
         public TimeSpan GetCooldownTimeRemaining()
@@ -1625,7 +1655,21 @@ namespace MHServerEmu.Games.Powers
 
         protected PowerUseResult ActivateInternal(in PowerActivationSettings settings)
         {
-            //TEMP_SendActivatePowerMessage(in settings);
+            // Send non-combo activations and combos triggered by the server
+            if (IsComboEffect() == false || settings.Flags.HasFlag(PowerActivationSettingsFlags.ServerCombo))
+            {
+                // Send message if there are any interested clients in proximity
+                PlayerConnectionManager networkManager = Owner.Game.NetworkManager;
+
+                // Owner is excluded from power activation messages unless explicitly flagged or this is a combo power triggered by the server (therefore the client is not aware of it)
+                bool skipOwner = settings.Flags.HasFlag(PowerActivationSettingsFlags.NotifyOwner) == false && settings.Flags.HasFlag(PowerActivationSettingsFlags.ServerCombo) == false;
+                IEnumerable<PlayerConnection> interestedClients = networkManager.GetInterestedClients(Owner, AOINetworkPolicyValues.AOIChannelProximity, skipOwner);
+                if (interestedClients.Any())
+                {
+                    NetMessageActivatePower activatePowerMessage = ArchiveMessageBuilder.BuildActivatePowerMessage(this, in settings);
+                    networkManager.SendMessageToMultiple(interestedClients, activatePowerMessage);
+                }
+            }
 
             PowerPrototype powerProto = Prototype;
             if (powerProto == null) return Logger.WarnReturn(PowerUseResult.GenericError, "ActivateInternal(): powerProto == null");
@@ -1639,9 +1683,12 @@ namespace MHServerEmu.Games.Powers
             return PowerUseResult.Success;
         }
 
-        protected virtual void EndPowerInternal(EndPowerFlags flags)
+        protected virtual bool EndPowerInternal(EndPowerFlags flags)
         {
-
+            PowerPrototype powerProto = Prototype;
+            if (powerProto == null) return Logger.WarnReturn(false, "EndPowerInternal(): powerProto == null");
+            powerProto.OnEndPower(this, Owner);
+            return true;
         }
 
         protected virtual bool OnEndPowerCheckTooEarly(EndPowerFlags flags)
@@ -1666,7 +1713,31 @@ namespace MHServerEmu.Games.Powers
 
         protected virtual void OnEndPowerSendCancel(EndPowerFlags flags)
         {
+            // Do not send updates for powers that were not interrupted
+            if (flags.HasFlag(EndPowerFlags.ExplicitCancel) == false && flags.HasFlag(EndPowerFlags.ClientRequest) == false)
+                return;
 
+            // Do not send updates when cleaning up
+            if (flags.HasFlag(EndPowerFlags.ExitWorld) || flags.HasFlag(EndPowerFlags.Unassign))
+                return;
+
+            // Send message if there are any interested clients in proximity
+            PlayerConnectionManager networkManager = Owner.Game.NetworkManager;
+
+            // The owner's client should have canceled the power it requested on its own
+            bool skipOwner = flags.HasFlag(EndPowerFlags.ClientRequest);
+            IEnumerable<PlayerConnection> interestedClients = networkManager.GetInterestedClients(Owner, AOINetworkPolicyValues.AOIChannelProximity, skipOwner);
+            if (interestedClients.Any() == false) return;
+
+            // NOTE: Although NetMessageCancelPower is not an archive, it uses power prototype enums
+            ulong powerPrototypeEnum = (ulong)DataDirectory.Instance.GetPrototypeEnumValue<PowerPrototype>(PrototypeDataRef);
+            var cancelPowerMessage = NetMessageCancelPower.CreateBuilder()
+                .SetIdAgent(Owner.Id)
+                .SetPowerPrototypeId(powerPrototypeEnum)
+                .SetEndPowerFlags((uint)flags)
+                .Build();
+
+            networkManager.SendMessageToMultiple(interestedClients, cancelPowerMessage);
         }
 
         protected virtual bool OnEndPowerCheckLoopEnd(EndPowerFlags flags)
@@ -2075,7 +2146,7 @@ namespace MHServerEmu.Games.Powers
         private void ComputeTimeForPowerMovement(MovementPowerPrototype movementPowerProto, ref PowerActivationSettings settings)
         {
             // TODO
-            Logger.Debug("ComputeTimeForPowerMovement()");
+            //Logger.Debug("ComputeTimeForPowerMovement()");
         }
 
         private void StartCharging()
@@ -2177,7 +2248,7 @@ namespace MHServerEmu.Games.Powers
         {
             PowerPrototype powerProto = Prototype;
 
-            if (powerProto.ActiveUntilCancelled == false || flags.HasFlag(EndPowerFlags.Flag6) || flags.HasFlag(EndPowerFlags.Flag7))
+            if (powerProto.ActiveUntilCancelled == false || flags.HasFlag(EndPowerFlags.ChanneledLoopEnd) || flags.HasFlag(EndPowerFlags.ChanneledMinTime))
             {
                 EventScheduler scheduler = Game.GameEventScheduler;
 
