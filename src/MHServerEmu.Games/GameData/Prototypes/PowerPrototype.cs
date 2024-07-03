@@ -1,5 +1,6 @@
 ﻿using MHServerEmu.Core.Extensions;
 using MHServerEmu.Core.Logging;
+using MHServerEmu.Core.VectorMath;
 using MHServerEmu.Games.Entities;
 using MHServerEmu.Games.Entities.Inventories;
 using MHServerEmu.Games.GameData.Calligraphy;
@@ -679,6 +680,34 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
         [DoNotCopy]
         public bool HasEvalEventTriggerChance { get => EvalEventTriggerChance != null; }
+
+        public float GetEventTriggerChance(PropertyCollection powerProperties, WorldEntity owner, WorldEntity target)
+        {
+            if (EvalEventTriggerChance == null)
+                return 1f;
+
+            EvalContextData contextData = new();
+            contextData.SetReadOnlyVar_PropertyCollectionPtr(EvalContext.Default, powerProperties);
+            contextData.SetReadOnlyVar_PropertyCollectionPtr(EvalContext.Entity, owner.Properties);
+            contextData.SetReadOnlyVar_EntityPtr(EvalContext.Var1, owner);
+            contextData.SetReadOnlyVar_EntityPtr(EvalContext.Var2, target);
+            Eval.InitTeamUpEvalContext(contextData, owner);
+
+            return Eval.RunFloat(EvalEventTriggerChance, contextData);
+        }
+
+        public float GetEventParam(PropertyCollection powerProperties, WorldEntity owner)
+        {
+            if (EvalEventParam == null)
+                return EventParam;
+
+            EvalContextData contextData = new();
+            contextData.SetReadOnlyVar_PropertyCollectionPtr(EvalContext.Default, powerProperties);
+            contextData.SetReadOnlyVar_PropertyCollectionPtr(EvalContext.Entity, owner.Properties);
+            contextData.SetReadOnlyVar_EntityPtr(EvalContext.Var1, owner);
+
+            return Eval.RunFloat(EvalEventParam, contextData);
+        }
     }
 
     public class SituationalTriggerPrototype : Prototype
@@ -821,6 +850,14 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public int RandomPositionRadius { get; protected set; }
         public bool DisableOrientationDuringPower { get; protected set; }
 
+        private Vector3 _positionOffset;
+
+        public override void PostProcess()
+        {
+            base.PostProcess();
+            _positionOffset = PositionOffset != null ? PositionOffset.ToVector3() : Vector3.Zero;
+        }
+
         public bool TargetsAOE()
         {
             return TargetingShape switch
@@ -833,6 +870,13 @@ namespace MHServerEmu.Games.GameData.Prototypes
                 or TargetingShapeType.WedgeArea => true,
                 _ => false,
             };
+        }
+
+        public Vector3 GetOwnerOrientedPositionOffset(WorldEntity owner)
+        {
+            if (owner != null && owner.IsInWorld)
+                return Transform3.BuildTransform(Vector3.Zero, owner.Orientation) * _positionOffset;
+            return _positionOffset;
         }
     }
 

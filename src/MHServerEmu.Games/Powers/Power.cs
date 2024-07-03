@@ -1,5 +1,6 @@
 ﻿using MHServerEmu.Core.Collisions;
 using MHServerEmu.Core.Extensions;
+using MHServerEmu.Core.Helpers;
 using MHServerEmu.Core.Logging;
 using MHServerEmu.Core.System.Time;
 using MHServerEmu.Core.VectorMath;
@@ -19,7 +20,7 @@ using MHServerEmu.Games.Regions;
 
 namespace MHServerEmu.Games.Powers
 {
-    public class Power
+    public partial class Power
     {
         private const float PowerPositionSweepPadding = Locomotor.MovementSweepPadding;
         private const float PowerPositionSweepPaddingSquared = PowerPositionSweepPadding * PowerPositionSweepPadding;
@@ -31,6 +32,7 @@ namespace MHServerEmu.Games.Powers
         private KeywordsMask _keywordsMask = new();
 
         private PowerActivationPhase _activationPhase = PowerActivationPhase.Inactive;
+        private PowerActivationSettings _lastActivationSettings;
 
         private readonly EventGroup _pendingEvents1 = new();
         private readonly EventGroup _pendingEvents2 = new();    // end power, channeling
@@ -50,6 +52,7 @@ namespace MHServerEmu.Games.Powers
         public float AnimSpeedCache { get; private set; } = -1f;
         public bool WasLastActivateInterrupted { get; private set; }
         public TimeSpan LastActivateGameTime { get; private set; }
+        public PowerActivationSettings LastActivationSettings { get => _lastActivationSettings; }
 
         public bool IsSituationalPower { get => _situationalComponent != null; }
 
@@ -267,7 +270,7 @@ namespace MHServerEmu.Games.Powers
 
         public PowerUseResult Activate(ref PowerActivationSettings settings)
         {
-            Logger.Debug($"Activate(): {Prototype}");
+            Logger.Trace($"Activate(): {Prototype}");
 
             PowerPrototype powerProto = Prototype;
             if (powerProto == null) return Logger.WarnReturn(PowerUseResult.GenericError, "Activate(): powerProto == null");
@@ -440,16 +443,78 @@ namespace MHServerEmu.Games.Powers
 
         public bool EndPower(EndPowerFlags flags)
         {
-            Logger.Debug($"EndPower(): {Prototype} (flags={flags})");
+            Logger.Trace($"EndPower(): {Prototype} (flags={flags})");
+
+            // Validate client cancel requests
+            if (flags.HasFlag(EndPowerFlags.ExplicitCancel) && flags.HasFlag(EndPowerFlags.ClientRequest)
+                && flags.HasFlag(EndPowerFlags.ExitWorld) == false && flags.HasFlag(EndPowerFlags.Unassign) == false
+                && flags.HasFlag(EndPowerFlags.Interrupting) == false && flags.HasFlag(EndPowerFlags.Force) == false)
+            {
+                _lastActivationSettings.Flags |= PowerActivationSettingsFlags.Cancel;
+                if (CanBeUserCanceledNow() == false)
+                    return false;
+            }
+
+            if (CanEndPower(flags) == false)
+                return false;
+
+            if (OnEndPowerCheckTooEarly(flags))
+            {
+                _activationPhase = PowerActivationPhase.MinTimeEnding;
+                return false;
+            }
+
+            if (OnEndPowerRemoveApplications(flags))
+                return false;
+
+            OnEndPowerCancelEvents(flags);
+            OnEndPowerCancelConditions();
+            OnEndPowerSendCancel(flags);
+
+            if (OnEndPowerCheckLoopEnd(flags))
+            {
+                HandleTriggerPowerEventOnPowerLoopEnd();
+                _activationPhase = PowerActivationPhase.LoopEnding;
+                return false;
+            }
+
+            EndPowerInternal(flags);
+
+            if (flags.HasFlag(EndPowerFlags.Interrupting))
+                WasLastActivateInterrupted = true;
+
+            bool wasActive = _activationPhase != PowerActivationPhase.Inactive;
             _activationPhase = PowerActivationPhase.Inactive;
-            Owner?.OnPowerEnded(this, flags);
+
+            if (IsToggledOn() && Owner?.IsInWorld == true)
+            {
+                // TODO
+            }
+
+            if (Owner == null) return Logger.WarnReturn(false, "EndPower(): Owner == null");
+            Owner.OnPowerEnded(this, flags);
+
+            if (wasActive)
+                HandleTriggerPowerEventOnPowerStopped(flags);
+
+            if (flags.HasFlag(EndPowerFlags.ExplicitCancel) == false && flags.HasFlag(EndPowerFlags.ExitWorld) == false
+                && flags.HasFlag(EndPowerFlags.Unassign) == false)
+            {
+                HandleTriggerPowerEventOnPowerEnd();
+            }
+
+            _lastActivationSettings = new();
+
+            Owner.ActivatePostPowerAction(this, flags);
+
+            OnEndPowerConditionalRemove(flags);     // Remove one-offs, like throwables
+
             return true;
         }
 
-        public bool IsTargetInAOE(WorldEntity target, WorldEntity owner, Vector3 userPos, Vector3 aimPos, float aoeRadius,
-            int beamSweepCount, TimeSpan beamSweepTime, PowerPrototype powerProto, PropertyCollection properties)
+        public void StartCooldown()
         {
-            throw new NotImplementedException();
+            // TODO
         }
 
         public PowerPositionSweepResult PowerPositionSweep(RegionLocation regionLocation, Vector3 targetPosition, ulong targetId,
@@ -510,12 +575,6 @@ namespace MHServerEmu.Games.Powers
             throw new NotImplementedException();
         }
 
-        public static bool ValidateAOETarget(WorldEntity target, PowerPrototype powerProto, WorldEntity user, Vector3 powerUserPosition,
-            AlliancePrototype userAllianceProto, bool needsLineOfSight)
-        {
-            return true;
-        }
-
         public static bool IsValidTarget(PowerPrototype powerProto, WorldEntity worldEntity1, AlliancePrototype alliance, WorldEntity worldEntity2)
         {
             return true;
@@ -549,6 +608,34 @@ namespace MHServerEmu.Games.Powers
             float userRadius = Owner.Bounds.Radius;
 
             return IsInRangeInternal(powerProto, range, userPosition, userRadius, targetPosition, checkType, 0f);
+        }
+
+        public static bool ValidateAOETarget(WorldEntity target, PowerPrototype powerProto, WorldEntity user, Vector3 powerUserPosition,
+            AlliancePrototype userAllianceProto, bool needsLineOfSight)
+        {
+            return true;
+        }
+
+        public static bool IsTargetInAOE(WorldEntity target, WorldEntity owner, Vector3 ownerPosition, Vector3 targetPosition, float radius,
+            int beamSlice, TimeSpan totalSweepTime, PowerPrototype powerProto, PropertyCollection properties)
+        {
+            Logger.Debug("IsTargetInAOE()");
+            var styleProto = powerProto.GetTargetingStyle();
+            if (styleProto == null) return Logger.WarnReturn(false, $"IsTargetInAOE(): Unable to get the prototype for power. Prototype:{powerProto} ");
+            Vector3 position = targetPosition;
+            if (styleProto.AOESelfCentered && styleProto.RandomPositionRadius == 0)
+                position = ownerPosition + styleProto.GetOwnerOrientedPositionOffset(owner);
+
+            return styleProto.TargetingShape switch
+            {
+                TargetingShapeType.ArcArea      => IsTargetInArc(target, owner, radius, position, targetPosition, powerProto, styleProto, properties),
+                TargetingShapeType.BeamSweep    => IsTargetInBeamSlice(target, owner, radius, position, targetPosition, beamSlice, totalSweepTime, powerProto, styleProto),
+                TargetingShapeType.CapsuleArea  => IsTargetInCapsule(target, owner, position, targetPosition, powerProto, styleProto, properties),
+                TargetingShapeType.CircleArea   => IsTargetInCircle(target, radius, position),
+                TargetingShapeType.RingArea     => IsTargetInRing(target, radius, position, powerProto, properties),
+                TargetingShapeType.WedgeArea    => IsTargetInWedge(target, owner, radius, position, targetPosition, powerProto, styleProto),
+                _ => Logger.WarnReturn(false, $"IsTargetInAOE(): Targeting shape ({styleProto.TargetingShape}) for this power hasn't been implemented! Prototype: {powerProto}"),
+            };
         }
 
         #region State Accessors
@@ -825,7 +912,7 @@ namespace MHServerEmu.Games.Powers
             if (Owner == null) return Logger.WarnReturn(0f, "GetAOERadius(): Owner == null");
             PowerPrototype powerProto = Prototype;
             if (powerProto == null) return Logger.WarnReturn(0f, "GetAOERadius(): powerProto == null");
-            return GetAOERadius();
+            return GetAOERadius(powerProto, Owner.Properties);
         }
 
         public static float GetAOERadius(PowerPrototype powerProto, PropertyCollection ownerProperties = null)
@@ -839,6 +926,54 @@ namespace MHServerEmu.Games.Powers
         {
             // TODO
             return 1f;
+        }
+
+        public float GetAOEAngle()
+        {
+            var powerProto = Prototype;
+            if (powerProto == null) return Logger.WarnReturn(0f, "GetAOEAngle(): powerProto == null");
+            return GetAOEAngle(powerProto);
+        }
+
+        public static float GetAOEAngle(PowerPrototype powerProto)
+        {
+            var styleProto = powerProto.GetTargetingStyle();
+            if (styleProto == null) return Logger.WarnReturn(0f, "GetAOEAngle(): styleProto == null");
+
+            if (styleProto.TargetingShape == TargetingShapeType.CircleArea)
+                return 360.0f;
+
+            return styleProto.AOEAngle switch
+            {
+                AOEAngleType._0     => 0.0f,
+                AOEAngleType._1     => 1.0f,
+                AOEAngleType._10    => 10.0f,
+                AOEAngleType._30    => 30.0f,
+                AOEAngleType._45    => 45.0f,
+                AOEAngleType._60    => 60.0f,
+                AOEAngleType._90    => 90.0f,
+                AOEAngleType._120   => 120.0f,
+                AOEAngleType._180   => 180.0f,
+                AOEAngleType._240   => 240.0f,
+                AOEAngleType._300   => 300.0f,
+                AOEAngleType._360   => 360.0f,
+                _                   => 0.0f
+            };
+        }
+
+        public float GetTargetingWidth()
+        {
+            if (Owner == null) return Logger.WarnReturn(0f, "GetTargetingWidth(): Owner == null");
+            var powerProto = Prototype;
+            if (powerProto == null) return Logger.WarnReturn(0f, "GetTargetingWidth(): powerProto == null");
+            return GetTargetingWidth(powerProto, Owner.Properties);
+        }
+
+        public static float GetTargetingWidth(PowerPrototype powerProto, PropertyCollection ownerProperties)
+        {
+            var styleProto = powerProto.GetTargetingStyle();
+            if (styleProto == null) return Logger.WarnReturn(0f, "GetTargetingWidth(): styleProto == null");
+            return styleProto.Width * GetAOESizePctModifier(powerProto, ownerProperties);
         }
 
         public TargetingShapeType GetTargetingShape()
@@ -1488,11 +1623,88 @@ namespace MHServerEmu.Games.Powers
 
         #endregion
 
+        protected PowerUseResult ActivateInternal(in PowerActivationSettings settings)
+        {
+            //TEMP_SendActivatePowerMessage(in settings);
+
+            PowerPrototype powerProto = Prototype;
+            if (powerProto == null) return Logger.WarnReturn(PowerUseResult.GenericError, "ActivateInternal(): powerProto == null");
+
+            // Make a copy of activation settings
+            _lastActivationSettings = settings;
+
+            // Trigger events (this relies on the copy of setting we just made)
+            HandleTriggerPowerEventOnPowerStart();
+
+            return PowerUseResult.Success;
+        }
+
+        protected virtual void EndPowerInternal(EndPowerFlags flags)
+        {
+
+        }
+
+        protected virtual bool OnEndPowerCheckTooEarly(EndPowerFlags flags)
+        {
+            return false;
+        }
+
+        protected virtual bool OnEndPowerRemoveApplications(EndPowerFlags flags)
+        {
+            return false;
+        }
+
+        protected virtual void OnEndPowerCancelEvents(EndPowerFlags flags)
+        {
+
+        }
+
+        protected virtual void OnEndPowerCancelConditions()
+        {
+
+        }
+
+        protected virtual void OnEndPowerSendCancel(EndPowerFlags flags)
+        {
+
+        }
+
+        protected virtual bool OnEndPowerCheckLoopEnd(EndPowerFlags flags)
+        {
+            return false;
+        }
+
+        protected virtual void OnEndPowerConditionalRemove(EndPowerFlags flags)
+        {
+            // Unassign one-off powers (e.g. throwables)
+            if (Prototype.RemovedOnUse && flags.HasFlag(EndPowerFlags.Unassign) == false)
+                Owner.UnassignPower(PrototypeDataRef);
+        }
+
         protected virtual void GenerateActualTargetPosition(ulong targetId, Vector3 initialTargetPosition, out Vector3 actualTargetPosition,
             in PowerActivationSettings settings)
         {
             actualTargetPosition = initialTargetPosition;
             //TODO
+        }
+
+        protected virtual bool SetToggleState(bool value, bool doNotStartCooldown = false)
+        {
+            if (IsToggled() == false) return Logger.WarnReturn(false, "SetToggleState(): Trying to toggle a power that isn't togglable!");
+
+            if (value)
+            {
+                HandleTriggerPowerEventOnPowerToggleOn();
+            }
+            else
+            {
+                HandleTriggerPowerEventOnPowerToggleOff();
+
+                if (doNotStartCooldown == false)
+                    StartCooldown();
+            }
+
+            return true;
         }
 
         private bool CreateSituationalComponent()
@@ -1715,6 +1927,137 @@ namespace MHServerEmu.Games.Powers
             return clipped ? PowerPositionSweepResult.Clipped : PowerPositionSweepResult.Success;
         }
 
+        private static bool IsTargetInArc(WorldEntity target, WorldEntity owner, float radius, Vector3 position, Vector3 targetPosition,
+            PowerPrototype powerProto, TargetingStylePrototype styleProto, PropertyCollection properties)
+        {
+            return IsTargetInWedge(target, owner, radius, position, targetPosition, powerProto, styleProto)
+                && IsTargetInRing(target, radius, position, powerProto, properties);
+        }
+
+        private static bool IsTargetInBeamSlice(WorldEntity target, WorldEntity owner, float radius, Vector3 position, Vector3 targetPosition,
+            int beamSlice, TimeSpan beamTime, PowerPrototype powerProto, TargetingStylePrototype styleProto)
+        {
+            float aoeAngle = GetAOEAngle(powerProto);
+            if (beamSlice >= 0)
+                GetBeamSweepSliceCheckData(powerProto, targetPosition, position, beamSlice, aoeAngle, beamTime, ref aoeAngle, ref targetPosition);
+            return IsTargetInWedge(target, owner, radius, position, targetPosition, powerProto, styleProto, aoeAngle);
+        }
+
+        private static bool IsTargetInCapsule(WorldEntity target, WorldEntity owner, Vector3 position, Vector3 targetPosition,
+            PowerPrototype powerProto, TargetingStylePrototype styleProto, PropertyCollection properties)
+        {
+            float radius = GetTargetingWidth(powerProto, properties);
+            float length = GetAOERadius(powerProto, properties);
+            Vector3 direction = GetDirectionCheckData(styleProto, owner, position, targetPosition);
+            Vector3 endPosition = position + direction * length;
+            var capsule = new Capsule(position, endPosition, radius);
+            return target.Bounds.Intersects(capsule);
+        }
+
+        private static bool IsTargetInCircle(WorldEntity target, float radius, Vector3 position)
+        {
+            var sphere = new Sphere(position, radius);
+            return target.Bounds.Intersects(sphere);
+        }
+
+        private static bool IsTargetInRing(WorldEntity target, float radius, Vector3 position, PowerPrototype powerProto, PropertyCollection properties)
+        {
+            if (IsTargetInCircle(target, radius, position))
+            {
+                float targetRadius = target.Bounds.Radius;
+                float width = GetTargetingWidth(powerProto, properties);
+                float ringRadius = radius - width;
+
+                Vector3 targetPosition = target.RegionLocation.Position;
+                Vector3 distance = position - targetPosition;
+                float targetDistance = Vector3.Length(distance);
+                return targetDistance + targetRadius > ringRadius;
+            }
+
+            return false;
+        }
+
+        private static bool IsTargetInWedge(WorldEntity target, WorldEntity owner, float radius, Vector3 position, Vector3 targetPosition,
+            PowerPrototype powerProto, TargetingStylePrototype styleProto, float aoeAngle = 0.0f)
+        {
+            if (aoeAngle == 0.0f) aoeAngle = GetAOEAngle(powerProto);
+            if (aoeAngle <= 0.0f)
+                return Logger.WarnReturn(false, $"IsTargetInWedge(): Trying to use a power with an invalid unsupported obtuse wedge angle! Prototype: {powerProto}");
+
+            float targetRadius = target.Bounds.Radius;
+            Vector3 targetPos = target.RegionLocation.Position;
+            Vector3 direction = GetDirectionCheckData(styleProto, owner, position, targetPosition);
+            Vector3 distance = targetPos - position;
+            float lengthSq = Vector3.LengthSquared2D(distance);
+            float radiusSq = MathHelper.Square(radius + targetRadius);
+            if (lengthSq > radiusSq) return false;
+
+            float halfAngle = MathHelper.ToRadians(aoeAngle / 2.0f);
+            float angle = Vector3.Angle2D(distance, direction);
+            if (angle < halfAngle) return true;
+
+            Vector3 vectorSide = Vector3.SafeNormalize2D(Vector3.Perp2D(distance)) * targetRadius;
+
+            float angleRight = Vector3.Angle2D(vectorSide + distance, direction);
+            if (angleRight < halfAngle) return true;
+
+            float angleLeft = Vector3.Angle2D(-vectorSide + distance, direction);
+            if (angleLeft < halfAngle) return true;
+
+            return false;
+        }
+
+        private static void GetBeamSweepSliceCheckData(PowerPrototype powerProto, Vector3 targetPosition, Vector3 position, int beamSlice,
+            float aoeAngle, TimeSpan totalSweepTime, ref float angleResult, ref Vector3 positionResult)
+        {
+            TimeSpan sweepUpdateRate = TimeSpan.FromMilliseconds((long)powerProto.Properties[PropertyEnum.AOESweepRateMS]);
+            if (sweepUpdateRate >= totalSweepTime)
+            {
+                Logger.Warn($"GetBeamSweepSliceCheckData(): Trying to get targets for a BeamSweep power whose update rate is slower than the total sweep time!\n[{powerProto}]");
+                return;
+            }
+
+            float angleTime = Math.Min(aoeAngle, aoeAngle * (float)(sweepUpdateRate.TotalSeconds / totalSweepTime.TotalSeconds));
+            float totalAngle = angleTime * (beamSlice + 1);
+            float angleSliceCenter = -0.5f * aoeAngle;
+
+            if (totalAngle <= aoeAngle)
+            {
+                angleResult = angleTime;
+                angleSliceCenter += (angleTime / 2.0f) * ((2 * beamSlice) + 1);
+            }
+            else
+            {
+                float finalAngle = angleTime - (totalAngle - aoeAngle);
+                angleResult = finalAngle;
+                angleSliceCenter += (finalAngle / 2.0f) + (angleTime / 2.0f) * (2 * beamSlice);
+            }
+
+            float sweepDirection = powerProto.Properties[PropertyEnum.AOESweepDirectionCW] ? 1.0f : -1.0f;
+            angleSliceCenter *= sweepDirection;
+
+            Matrix3 rotMat = Matrix3.RotationZ(MathHelper.ToRadians(angleSliceCenter));
+            Vector3 toTargetPosition = targetPosition - position;
+
+            positionResult = position + rotMat * toTargetPosition;
+        }
+
+        private static Vector3 GetDirectionCheckData(TargetingStylePrototype styleProto, WorldEntity owner, Vector3 position, Vector3 targetPosition)
+        {
+            Vector3 direction = (targetPosition - position).To2D();
+
+            if (owner != null && owner.IsInWorld && Vector3.LengthSqr(direction) < Segment.Epsilon)
+                direction = owner.Forward.To2D();
+
+            if (styleProto.OrientationOffset != 0.0f)
+            {
+                Transform3 transform = Transform3.BuildTransform(Vector3.Zero, new Orientation(MathHelper.ToRadians(styleProto.OrientationOffset), 0.0f, 0.0f));
+                direction = transform * direction;
+            }
+
+            return Vector3.Normalize(direction);
+        }
+
         private void ComputePowerMovementSettings(MovementPowerPrototype movementPowerProto, ref PowerActivationSettings settings)
         {
             if (movementPowerProto != null && movementPowerProto.TeleportMethod == TeleportMethodType.None)
@@ -1741,6 +2084,12 @@ namespace MHServerEmu.Games.Powers
             Logger.Debug("StartCharging()");
         }
 
+        private void StopCharging()
+        {
+            // TODO
+            Logger.Debug("StopCharging()");
+        }
+
         private void ScheduleChannelStart()
         {
             // TODO
@@ -1751,6 +2100,12 @@ namespace MHServerEmu.Games.Powers
         {
             // TODO
             Logger.Debug("CanBeUserCanceledNow()");
+            return true;
+        }
+
+        private bool CanEndPower(EndPowerFlags flags)
+        {
+            // TODO
             return true;
         }
 
@@ -1770,12 +2125,6 @@ namespace MHServerEmu.Games.Powers
             }
 
             return success;
-        }
-
-        private PowerUseResult ActivateInternal(in PowerActivationSettings settings)
-        {
-            //TEMP_SendActivatePowerMessage(in settings);
-            return PowerUseResult.Success;
         }
 
         private bool SchedulePowerEnd(in PowerActivationSettings settings)
