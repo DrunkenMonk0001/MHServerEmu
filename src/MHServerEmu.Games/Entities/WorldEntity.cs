@@ -120,6 +120,7 @@ namespace MHServerEmu.Games.Entities
         public bool IsWeaponMissing { get => Properties[PropertyEnum.WeaponMissing]; }
         public bool IsGlobalEventVendor { get; internal set; }
         public bool IsHighFlying { get => Locomotor?.IsHighFlying ?? false; }
+        public bool IsDestructible { get => HasKeyword(GameDatabase.KeywordGlobalsPrototype.DestructibleKeyword); }
 
         public WorldEntity(Game game) : base(game)
         {
@@ -914,6 +915,16 @@ namespace MHServerEmu.Games.Entities
             return Region.NaviMesh.Contains(position, Bounds.GetRadius(), new DefaultContainsPathFlagsCheck(GetPathFlags()));
         }
 
+        public int GetPowerChargesAvailable(PrototypeId powerProtoRef)
+        {
+            return Properties[PropertyEnum.PowerChargesAvailable, powerProtoRef];
+        }
+
+        public int GetPowerChargesMax(PrototypeId powerProtoRef)
+        {
+            return Properties[PropertyEnum.PowerChargesMax, powerProtoRef];
+        }
+
         public TimeSpan GetAbilityCooldownStartTime(PowerPrototype powerProto)
         {
             return Properties[PropertyEnum.PowerCooldownStartTime, powerProto.DataRef];
@@ -982,6 +993,17 @@ namespace MHServerEmu.Games.Entities
 
             var player = GetOwnerOfType<Player>();
             if (player != null && player.IsTargetable(entity.Alliance) == false) return false;
+
+            return true;
+        }
+
+        public bool IsAffectedByPowers()
+        {
+            if (IsAffectedByPowersInternal() == false)
+                return false;
+
+            if (Alliance == null)
+                return false;
 
             return true;
         }
