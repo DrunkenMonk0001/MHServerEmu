@@ -111,6 +111,13 @@ namespace MHServerEmu.Games.Entities
 
         #region Powers
 
+        public virtual bool HasPowerWithKeyword(PowerPrototype powerProto, PrototypeId keywordProtoRef)
+        {
+            KeywordPrototype keywordPrototype = GameDatabase.GetPrototype<KeywordPrototype>(keywordProtoRef);
+            if (keywordPrototype == null) return Logger.WarnReturn(false, "HasPowerWithKeyword(): keywordPrototype == null");
+            return powerProto.HasKeyword(keywordPrototype);
+        }
+
         public virtual bool HasPowerInPowerProgression(PrototypeId powerRef)
         {
             if (IsTeamUpAgent)
@@ -314,6 +321,21 @@ namespace MHServerEmu.Games.Entities
             || IsMesmerized
             || NPCAmbientLock
             || IsInPowerLock;
+        }
+
+        public override TimeSpan GetAbilityCooldownTimeRemaining(PowerPrototype powerProto)
+        {
+            if (AIController != null && powerProto.PowerCategory == PowerCategoryType.NormalPower)
+            {
+                Game game = Game;
+                if (game == null) return Logger.WarnReturn(TimeSpan.Zero, "GetAbilityCooldownTimeRemaining(): game == null");
+
+                PropertyCollection blackboardProperties = AIController.Blackboard.PropertyCollection;
+                long aiCooldownTime = blackboardProperties[PropertyEnum.AIProceduralPowerSpecificCDTime, powerProto.DataRef];
+                return TimeSpan.FromMilliseconds(aiCooldownTime) - game.CurrentTime;
+            }
+
+            return base.GetAbilityCooldownTimeRemaining(powerProto);
         }
 
         public bool StartThrowing(ulong entityId)

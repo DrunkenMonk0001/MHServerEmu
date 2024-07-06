@@ -43,6 +43,8 @@ namespace MHServerEmu.Games.Powers
         private readonly EventPointer<StopChargingEvent> _stopChargingEvent = new();
         private readonly EventPointer<StartChannelingEvent> _startChannelingEvent = new();
         private readonly EventPointer<StopChannelingEvent> _stopChannelingEvent = new();
+        private readonly EventPointer<EndCooldownEvent> _endCooldownEvent = new();
+        private readonly EventPointer<PowerSubsequentActivationTimeoutEvent> _subsequentActivationTimeoutEvent = new();
         private readonly EventPointer<EndPowerEvent> _endPowerEvent = new();
 
         public Game Game { get; }
@@ -227,7 +229,7 @@ namespace MHServerEmu.Games.Powers
             }
         }
 
-        // Keywords
+        #region Keywords
 
         public bool AddKeyword(PrototypeId keywordProtoRef)
         {
@@ -251,6 +253,44 @@ namespace MHServerEmu.Games.Powers
         {
             return keywordProto != null && KeywordPrototype.TestKeywordBit(_keywordsMask, keywordProto);
         }
+
+        public static void AccumulateKeywordProperties(ref float value, PowerPrototype powerProto, PropertyCollection properties1,
+            PropertyCollection properties2, PropertyEnum propertyEnum)
+        {
+            foreach (var kvp in properties1.IteratePropertyRange(propertyEnum))
+            {
+                Property.FromParam(kvp.Key, 0, out PrototypeId keywordProtoRef);
+                if (keywordProtoRef == PrototypeId.Invalid) continue;
+
+                int powerKeywordChange = properties2[PropertyEnum.PowerKeywordChange, powerProto.DataRef, keywordProtoRef];
+
+                if ((powerKeywordChange != (int)TriBool.False && powerProto.HasKeyword(keywordProtoRef.As<KeywordPrototype>())) ||
+                   powerKeywordChange == (int)TriBool.True)
+                {
+                    value += kvp.Value;
+                }
+            }
+        }
+
+        public static void AccumulateKeywordProperties(ref long value, PowerPrototype powerProto, PropertyCollection properties1,
+            PropertyCollection properties2, PropertyEnum propertyEnum)
+        {
+            foreach (var kvp in properties1.IteratePropertyRange(propertyEnum))
+            {
+                Property.FromParam(kvp.Key, 0, out PrototypeId keywordProtoRef);
+                if (keywordProtoRef == PrototypeId.Invalid) continue;
+
+                int powerKeywordChange = properties2[PropertyEnum.PowerKeywordChange, powerProto.DataRef, keywordProtoRef];
+
+                if ((powerKeywordChange != (int)TriBool.False && powerProto.HasKeyword(keywordProtoRef.As<KeywordPrototype>())) ||
+                   powerKeywordChange == (int)TriBool.True)
+                {
+                    value += kvp.Value;
+                }
+            }
+        }
+
+        #endregion
 
         public WorldEntity GetUltimateOwner()
         {
@@ -711,11 +751,153 @@ namespace MHServerEmu.Games.Powers
             return true;
         }
 
-        public void StartCooldown()
+        #region Cooldowns
+
+        public bool StartCooldown(TimeSpan cooldownDuration = default)
         {
-            // TODO
-            //Logger.Debug("StartCooldown()");
+            if (Owner == null) return Logger.WarnReturn(false, "StartCooldown(): Owner == null");
+
+            if (CanStartCooldowns() == false)
+                return false;
+
+            PowerPrototype powerProto = Prototype;
+            if (powerProto == null) return Logger.WarnReturn(false, "StartCooldown(): powerProto == null");
+
+            if (GetPowerCategory() == PowerCategoryType.NormalPower)
+            {
+                // AI cooldowns for normal powers have their own thing going on
+                if (Owner is Agent agentOwner && agentOwner.AIController != null)
+                {
+                    TimeSpan cooldownTime = agentOwner.Game.CurrentTime + cooldownDuration;
+                    PropertyCollection blackboardProperties = agentOwner.AIController.Blackboard.PropertyCollection;
+                    blackboardProperties[PropertyEnum.AIProceduralPowerSpecificCDTime, PrototypeDataRef] = (long)cooldownTime.TotalMilliseconds;
+                    return true;
+                }
+            }
+
+            if (cooldownDuration == TimeSpan.Zero)
+            {
+                if (powerProto.ExtraActivation is ExtraActivateOnSubsequentPrototype extraActivateOnSubsequent)
+                {
+                    Owner.Properties.AdjustProperty(1, new(PropertyEnum.PowerActivationCount, PrototypeDataRef));
+
+                    int numActivatesBeforeCooldown = extraActivateOnSubsequent.GetNumActivatesBeforeCooldown(Properties[PropertyEnum.PowerRank]);
+                    if (numActivatesBeforeCooldown > 1)
+                    {
+                        int powerActivationCount = Owner.Properties[PropertyEnum.PowerActivationCount, PrototypeDataRef];
+                        if (powerActivationCount < numActivatesBeforeCooldown)
+                            return true;
+
+                        // Cancel timeout and start cooldown after reaching the number of activations before cooldown
+                        Owner.Properties[PropertyEnum.PowerActivationCount, PrototypeDataRef] = 0;
+                        CancelExtraActivationTimeout();
+                        HandleTriggerPowerEventOnExtraActivationCooldown();
+                    }
+                }
+
+                if (Owner.GetPowerChargesMax(PrototypeDataRef) > 0)
+                {
+                    // Fix for BUE 2
+                    if (IsOnCooldown() || (powerProto is MovementPowerPrototype && Game.CustomGameOptions.DisableMovementPowerChargeCost))
+                        return true;
+                }
+            }
+
+            PropertyCollection properties = Owner.Properties;
+            if (powerProto.CooldownOnPlayer)
+            {
+                Player player = Owner.GetOwnerOfType<Player>();
+                if (player == null) return Logger.WarnReturn(false, "StartCooldown(): player == null");
+                properties = player.Properties;
+            }
+
+            cooldownDuration = CalcCooldownDuration(powerProto, Owner, Properties, cooldownDuration);
+
+            if (cooldownDuration > TimeSpan.Zero)
+            {
+                properties[PropertyEnum.PowerCooldownStartTime, powerProto.DataRef] = Game.Current.CurrentTime;
+                properties[PropertyEnum.PowerCooldownDuration, powerProto.DataRef] = cooldownDuration;
+
+                // Schedule cooldown end event that's going to replenish charges
+                EventScheduler scheduler = Game?.GameEventScheduler;
+                if (scheduler == null) return Logger.WarnReturn(false, "StartCooldown(): scheduler == null");
+
+                if (_endCooldownEvent.IsValid)
+                {
+                    scheduler.RescheduleEvent(_endCooldownEvent, cooldownDuration);
+                }
+                else
+                {
+                    scheduler.ScheduleEvent(_endCooldownEvent, cooldownDuration, _pendingEvents);
+                    _endCooldownEvent.Get().Initialize(this);
+                }
+
+                Logger.Debug($"StartCooldown(): {Prototype} - {cooldownDuration.TotalMilliseconds} ms");
+            }
+
+            return true;
         }
+
+        public void OnCooldownEndCallback()
+        {
+            if (ShouldReplenishCharges() == false)
+                return;
+
+            PrototypeId powerProtoRef = PrototypeDataRef;
+            Owner.Properties.AdjustProperty(1, new(PropertyEnum.PowerChargesAvailable, powerProtoRef));
+
+            if (Owner.GetPowerChargesAvailable(powerProtoRef) < Owner.GetPowerChargesMax(powerProtoRef))
+            {
+                StartCooldown();
+            }
+            else
+            {
+                Owner.Properties.RemoveProperty(new(PropertyEnum.PowerCooldownStartTime, powerProtoRef));
+                Owner.Properties.RemoveProperty(new(PropertyEnum.PowerCooldownDuration, powerProtoRef));
+            }
+        }
+
+        public bool ExtraActivateTimeoutCallback()
+        {
+            if (Owner == null) return Logger.WarnReturn(false, "ExtraActivateTimeoutCallback(): Owner == null");
+
+            PowerPrototype powerProto = Prototype;
+            if (powerProto == null) return Logger.WarnReturn(false, "ExtraActivateTimeoutCallback(): powerProto == null");
+
+            if (powerProto.ExtraActivation != null &&
+                powerProto.ExtraActivation is ExtraActivateOnSubsequentPrototype extraActivateOnSubsequent)
+            {
+                // Fast forward activation count to the end of the counter
+                int numActivatesBeforeCooldown = extraActivateOnSubsequent.GetNumActivatesBeforeCooldown(Properties[PropertyEnum.PowerRank]);
+                if (numActivatesBeforeCooldown > 1)
+                    Owner.Properties[PropertyEnum.PowerActivationCount, PrototypeDataRef] = numActivatesBeforeCooldown;
+            }
+
+            StartCooldown();
+            return true;
+        }
+
+        private bool ShouldReplenishCharges()
+        {
+            PrototypeId powerProtoRef = PrototypeDataRef;
+            int maxCharges = Owner.GetPowerChargesMax(powerProtoRef);
+
+            if (maxCharges <= 0)
+                return false;
+
+            int chargeCount = Owner.GetPowerChargesAvailable(powerProtoRef);
+
+            if (Owner.TestStatus(EntityStatus.EnteringWorld) == false &&
+                Owner.TestStatus(EntityStatus.ExitingWorld) == false &&
+                (chargeCount < 0 || chargeCount > maxCharges))
+            {
+                return Logger.WarnReturn(false, "ShouldReplenishCharges(): chargeCount < 0 || chargetCount > maxCharges");
+            }
+
+            return chargeCount < maxCharges;
+        }
+
+        #endregion
 
         public bool GetTargets(List<WorldEntity> targetList, WorldEntity target, in Vector3 targetPosition, int randomSeed = 0, int beamSweepSlice = -1)
         {
@@ -889,9 +1071,25 @@ namespace MHServerEmu.Games.Powers
             return false;
         }
 
+        public bool IsOnCooldown()
+        {
+            if (Owner == null) return Logger.WarnReturn(false, "IsOnCooldown(): Owner == null");
+            PowerPrototype powerProto = Prototype;
+            if (powerProto == null) return Logger.WarnReturn(false, "IsOnCooldown(): powerProto == null");
+            return Owner.IsPowerOnCooldown(powerProto);
+        }
+
         public TimeSpan GetCooldownTimeRemaining()
         {
-            return TimeSpan.Zero;
+            if (Owner == null) return Logger.WarnReturn(TimeSpan.Zero, "GetCooldownTimeRemaining(): Owner == null");
+            PowerPrototype powerProto = Prototype;
+            if (powerProto == null) return Logger.WarnReturn(TimeSpan.Zero, "GetCooldownTimeRemaining(): powerProto == null");
+            return GetCooldownTimeRemaining(powerProto, Owner);
+        }
+
+        public static TimeSpan GetCooldownTimeRemaining(PowerPrototype powerProto, WorldEntity owner)
+        {
+            return owner.GetAbilityCooldownTimeRemaining(powerProto);
         }
 
         #endregion
@@ -1143,8 +1341,15 @@ namespace MHServerEmu.Games.Powers
 
         public static float GetAOESizePctModifier(PowerPrototype powerProto, PropertyCollection ownerProperties)
         {
-            // TODO
-            return 1f;
+            float aoeSizePctModifier = 1f;
+
+            if (ownerProperties != null)
+            {
+                aoeSizePctModifier += ownerProperties[PropertyEnum.AOESizePctModifier];
+                AccumulateKeywordProperties(ref aoeSizePctModifier, powerProto, ownerProperties, ownerProperties, PropertyEnum.AOESizePctModifierKeyword);
+            }
+
+            return MathF.Max(aoeSizePctModifier, 0.1f);  // 0.1f - smallest possible AoE size modifier
         }
 
         public float GetAOEAngle()
@@ -1255,7 +1460,11 @@ namespace MHServerEmu.Games.Powers
             if (ownerProperties != null && range > 0f && IsMelee(powerProto) == false && IsOwnerCenteredAOE(powerProto) == false)
             {
                 range += ownerProperties[PropertyEnum.RangeModifier];
-                // TODO: Power::AccumulateKeywordProperties<float>()
+
+                // Calculate and apply range multiplier
+                float rangeMult = 1f;
+                AccumulateKeywordProperties(ref rangeMult, powerProto, ownerProperties, ownerProperties, PropertyEnum.RangeModifierPctKeyword);
+                range *= rangeMult;
             }
 
             return range;
@@ -1645,12 +1854,30 @@ namespace MHServerEmu.Games.Powers
 
         public static TimeSpan CalcCooldownDuration(PowerPrototype powerProto, WorldEntity owner, PropertyCollection powerProperties, TimeSpan baseCooldown = default)
         {
-            if (baseCooldown == TimeSpan.Zero)
+            if (baseCooldown == default)
                 baseCooldown = powerProto.GetCooldownDuration(powerProperties, owner.Properties);
 
-            // TODO: apply modifiers
+            // Calculate cooldown modifier percentage
+            float cooldownModifierPct = owner.Properties[PropertyEnum.CooldownModifierPctGlobal];
+            cooldownModifierPct += owner.Properties[PropertyEnum.CooldownModifierPctForPower, powerProto.DataRef];
+            AccumulateKeywordProperties(ref cooldownModifierPct, powerProto, owner.Properties, owner.Properties, PropertyEnum.CooldownModifierPctForKeyword);
 
-            return baseCooldown;
+            // Calculate flat cooldown modifier
+            long flatCooldownModifierMS = owner.Properties[PropertyEnum.CooldownModifierPctForPower, powerProto.DataRef];
+            AccumulateKeywordProperties(ref flatCooldownModifierMS, powerProto, owner.Properties, owner.Properties, PropertyEnum.CooldownModifierMSForKeyword);
+            TimeSpan flatCooldownModifier = TimeSpan.FromMilliseconds(flatCooldownModifierMS);
+
+            // Calculate cooldown
+            TimeSpan cooldown = baseCooldown;
+            cooldown += flatCooldownModifier;               // Apply flat modifier to base
+            cooldown += cooldown * cooldownModifierPct;     // Apply percentage modifier
+
+            // Get interrupt cooldown and use it to override the value we calculated if its longer
+            TimeSpan interruptCooldown = owner.GetPowerInterruptCooldown(powerProto);
+            cooldown = Clock.Max(cooldown, interruptCooldown);
+
+            // Make we don't get a negative cooldown
+            return Clock.Max(cooldown, TimeSpan.Zero);
         }
 
         public static bool IsCooldownOnPlayer(PowerPrototype powerProto)
@@ -1895,6 +2122,164 @@ namespace MHServerEmu.Games.Powers
 
         #endregion
 
+        #region Stat Calculations
+
+        public static float GetDamageRatingMult(float damageRating, PropertyCollection userProperties, WorldEntity target)
+        {
+            CombatGlobalsPrototype combatGlobals = GameDatabase.CombatGlobalsPrototype;
+            if (combatGlobals == null) return Logger.WarnReturn(0f, "GetDamageRatingMult(): combatGlobals == null");
+
+            EvalPrototype damageRatingEval = combatGlobals.EvalDamageRatingFormula;
+            if (damageRatingEval == null) return Logger.WarnReturn(0f, "GetDamageRatingMult(): damageRatingEval == null");
+
+            EvalContextData contextData = new();
+            contextData.SetReadOnlyVar_PropertyCollectionPtr(EvalContext.Entity, userProperties);
+            contextData.SetReadOnlyVar_PropertyCollectionPtr(EvalContext.Other, target.Properties);
+            contextData.SetVar_Float(EvalContext.Var1, damageRating);
+
+            return Eval.RunFloat(damageRatingEval, contextData);
+        }
+
+        public static float GetCritChance(PowerPrototype powerProto, PropertyCollection userProperties, WorldEntity target,
+            ulong userEntityId, PrototypeId keywordProtoRef = PrototypeId.Invalid, int targetLevelOverride = -1)
+        {
+            CombatGlobalsPrototype combatGlobals = GameDatabase.CombatGlobalsPrototype;
+            if (combatGlobals == null) return Logger.WarnReturn(0f, "GetCritChance(): combatGlobals == null");
+
+            EvalPrototype critEval = combatGlobals.EvalCritChanceFormula;
+            if (critEval == null) return Logger.WarnReturn(0f, "GetCritChance(): critEval == null");
+
+            // Start calculating crit rating for the user
+            float critRatingAdd = userProperties[PropertyEnum.CritRatingBonusAdd];
+            float critRatingMult = 1f + userProperties[PropertyEnum.CritRatingBonusMult];
+            float critChancePctAdd = userProperties[PropertyEnum.CritChancePctAdd];
+
+            // Apply power bonuses
+            critRatingAdd += userProperties[PropertyEnum.CritRatingPowerBonusAdd];
+            critRatingMult += userProperties[PropertyEnum.CritRatingPowerBonusMult];
+
+            // Apply targeted crit bonus
+            ulong targetedCritBonusId = target.Properties[PropertyEnum.TargetedCritBonusId];
+            if (userEntityId != Entity.InvalidId && targetedCritBonusId == userEntityId)
+                critRatingAdd += target.Properties[PropertyEnum.TargetedCritBonus];
+
+            // Apply keyword bonuses
+            if (powerProto != null)
+            {
+                AccumulateKeywordProperties(ref critRatingAdd, powerProto, userProperties, userProperties, PropertyEnum.CritRatingBonusAddPowerKeyword);
+                AccumulateKeywordProperties(ref critRatingMult, powerProto, userProperties, userProperties, PropertyEnum.CritRatingBonusMultPowerKeyword);
+                AccumulateKeywordProperties(ref critChancePctAdd, powerProto, userProperties, userProperties, PropertyEnum.CritChancePctAddPowerKeyword);
+            }
+            else if (keywordProtoRef != PrototypeId.Invalid)
+            {
+                critRatingAdd += userProperties[PropertyEnum.CritRatingBonusAddPowerKeyword, keywordProtoRef];
+                critRatingMult += userProperties[PropertyEnum.CritRatingBonusMultPowerKeyword, keywordProtoRef];
+                critChancePctAdd += userProperties[PropertyEnum.CritChancePctAddPowerKeyword, keywordProtoRef];
+            }
+
+            // Apply target keyword crit bonus
+            target.AccumulateKeywordProperties(PropertyEnum.CritRatingBonusVsTargetKeyword, userProperties, ref critRatingAdd);            
+
+            // Prepare int arguments for context data
+            int critRating = (int)(critRatingAdd * MathF.Max(critRatingMult, 0f));
+            int critChancePctAddInt = (int)MathF.Round(critChancePctAdd * 100f);
+            int userLevel = Math.Max(1, userProperties[PropertyEnum.CombatLevel]);
+            int targetLevel = targetLevelOverride >= 0 ? targetLevelOverride : target.CombatLevel;
+
+            // Run eval
+            EvalContextData contextData = new();
+            contextData.SetReadOnlyVar_PropertyCollectionPtr(EvalContext.Entity, userProperties);
+            contextData.SetReadOnlyVar_PropertyCollectionPtr(EvalContext.Other, target.Properties);
+            contextData.SetVar_Int(EvalContext.Var1, critRating);
+            contextData.SetVar_Int(EvalContext.Var2, critChancePctAddInt);
+            contextData.SetVar_Int(EvalContext.Var3, userLevel);
+            contextData.SetVar_Int(EvalContext.Var4, targetLevel);
+
+            return Eval.RunFloat(critEval, contextData);
+        }
+
+        public static float GetSuperCritChance(PowerPrototype powerProto, PropertyCollection userProperties, WorldEntity target, int targetLevelOverride = -1)
+        {
+            CombatGlobalsPrototype combatGlobals = GameDatabase.CombatGlobalsPrototype;
+            if (combatGlobals == null) return Logger.WarnReturn(0f, "GetSuperCritChance(): combatGlobals == null");
+
+            EvalPrototype superCritEval = combatGlobals.EvalSuperCritChanceFormula;
+            if (superCritEval == null) return Logger.WarnReturn(0f, "GetSuperCritChance(): superCritEval == null");
+
+            // Start calculating super crit rating for the user
+            float superCritRatingAdd = userProperties[PropertyEnum.SuperCritRatingBonusAdd];
+            float superCritRatingMult = 1f + userProperties[PropertyEnum.SuperCritRatingBonusMult];
+            float superCritChancePctAdd = userProperties[PropertyEnum.SuperCritChancePctAdd];
+
+            // Apply power bonuses
+            superCritRatingAdd += userProperties[PropertyEnum.SuperCritRatingPowerBonusAdd];
+            superCritRatingMult += userProperties[PropertyEnum.SuperCritRatingPowerBonusMult];
+
+            // Apply power keyword bonuses
+            if (powerProto != null)
+            {
+                AccumulateKeywordProperties(ref superCritRatingAdd, powerProto, userProperties, userProperties, PropertyEnum.SuperCritRatingBonusAddPowerKeyword);
+                AccumulateKeywordProperties(ref superCritRatingMult, powerProto, userProperties, userProperties, PropertyEnum.SuperCritRatingBonusMultPowerKeyword);
+                AccumulateKeywordProperties(ref superCritChancePctAdd, powerProto, userProperties, userProperties, PropertyEnum.SuperCritChancePctAddPowerKwd);
+            }
+
+            // Prepare arguments for context data
+            float superCritRating = superCritRatingAdd * MathF.Max(superCritRatingMult, 0f);
+            int superCritChancePctAddInt = (int)MathF.Round(superCritChancePctAdd * 100f);
+            int userLevel = userProperties[PropertyEnum.CombatLevel];
+            int targetLevel = targetLevelOverride >= 0 ? targetLevelOverride : target.CombatLevel;
+
+            // Run eval
+            EvalContextData contextData = new();
+            contextData.SetReadOnlyVar_PropertyCollectionPtr(EvalContext.Entity, userProperties);
+            contextData.SetReadOnlyVar_PropertyCollectionPtr(EvalContext.Other, target.Properties);
+            contextData.SetVar_Float(EvalContext.Var1, superCritRating);
+            contextData.SetVar_Int(EvalContext.Var2, superCritChancePctAddInt);
+            contextData.SetVar_Int(EvalContext.Var3, userLevel);
+            contextData.SetVar_Int(EvalContext.Var4, targetLevel);
+
+            return Eval.RunFloat(superCritEval, contextData);
+        }
+
+        public static float GetCritDamageMult(PropertyCollection userProperties, WorldEntity target, bool isSuperCrit)
+        {
+            CombatGlobalsPrototype combatGlobals = GameDatabase.CombatGlobalsPrototype;
+            if (combatGlobals == null) return Logger.WarnReturn(0f, "GetCritDamageMult(): combatGlobals == null");
+
+            EvalPrototype ratingEval = combatGlobals.EvalCritDamageRatingFormula;
+            if (ratingEval == null) return Logger.WarnReturn(0f, "GetCritDamageMult(): ratingEval == null");
+
+            // Start calculating crit damage mult
+            float critDamageMult = userProperties[PropertyEnum.CritDamageMult];
+            critDamageMult += userProperties[PropertyEnum.CritDamagePowerMultBonus];
+
+            if (isSuperCrit)
+            {
+                critDamageMult += userProperties[PropertyEnum.SuperCritDamageMult];
+                critDamageMult += userProperties[PropertyEnum.SuperCritDamagePowerMultBonus];
+            }
+
+            // Calculate crit damage rating
+            float critDamageRating = userProperties[PropertyEnum.CritDamageRating];
+
+            if (isSuperCrit)
+                critDamageRating += userProperties[PropertyEnum.SuperCritDamageRating];
+
+            // Run crit damage rating eval
+            EvalContextData contextData = new();
+            contextData.SetReadOnlyVar_PropertyCollectionPtr(EvalContext.Entity, userProperties);
+            contextData.SetReadOnlyVar_PropertyCollectionPtr(EvalContext.Other, target.Properties);
+            contextData.SetVar_Float(EvalContext.Var1, critDamageRating);
+
+            float critDamageRatingBonus = Eval.RunFloat(ratingEval, contextData);
+
+            // TODO: target.IsInPvPMatch()
+
+            return critDamageMult + critDamageRatingBonus;
+        }
+
+        #endregion
+
         protected PowerUseResult ActivateInternal(in PowerActivationSettings settings)
         {
             // Send non-combo activations and combos triggered by the server
@@ -2039,37 +2424,50 @@ namespace MHServerEmu.Games.Powers
                 PowerResults results = new()
                 {
                     ReplicationPolicy = AOINetworkPolicyValues.AOIChannelProximity,
-                    MessageFlags = PowerResultMessageFlags.UltimateOwnerIsPowerOwner,
+                    MessageFlags = PowerResultMessageFlags.UltimateOwnerIsPowerOwner | PowerResultMessageFlags.HasResultFlags,
                     PowerPrototypeRef = PrototypeDataRef,
                     PowerOwnerEntityId = Owner.Id,
                     TargetEntityId = target.Id
                 };
 
+                if (Owner.IsHostileTo(target))
+                    results.ResultFlags |= PowerResultFlags.Hostile;
+
                 // Calculate damage
                 // TODO: Move this to PowerPayload
-                float damagePhysical = PowerPayloadHelper.CalculateDamage(this, DamageType.Physical);
+                float damagePhysical = PowerPayloadHelper.CalculateDamage(this, DamageType.Physical, Owner, target, out PowerResultFlags physicalFlags);
                 if (damagePhysical >= 1f)
                 {
                     results.DamagePhysical = (uint)damagePhysical;
+                    results.ResultFlags |= physicalFlags;
                     results.MessageFlags |= PowerResultMessageFlags.HasDamagePhysical;
                 }
 
-                float damageEnergy = PowerPayloadHelper.CalculateDamage(this, DamageType.Energy);
+                float damageEnergy = PowerPayloadHelper.CalculateDamage(this, DamageType.Energy, Owner, target, out PowerResultFlags energyFlags);
                 if (damageEnergy >= 1f)
                 {
                     results.DamageEnergy = (uint)damageEnergy;
+                    results.ResultFlags |= energyFlags;
                     results.MessageFlags |= PowerResultMessageFlags.HasDamageEnergy;
                 }
 
-                float damageMental = PowerPayloadHelper.CalculateDamage(this, DamageType.Mental);
+                float damageMental = PowerPayloadHelper.CalculateDamage(this, DamageType.Mental, Owner, target, out PowerResultFlags mentalFlags);
                 if (damageMental >= 1f)
                 {
                     results.DamageMental = (uint)damageMental;
+                    results.ResultFlags |= mentalFlags;
                     results.MessageFlags |= PowerResultMessageFlags.HasDamageMental;
                 }
 
                 // Send results
                 Game.NetworkManager.SendMessageToInterested(results.ToProtobuf(), Owner, AOINetworkPolicyValues.AOIChannelProximity);
+            }
+
+            if (Owner.GetPowerChargesMax(PrototypeDataRef) > 0)
+            {
+                // Doctors hate him! BUE fixed with one simple trick
+                if (Prototype is not MovementPowerPrototype || Game.CustomGameOptions.DisableMovementPowerChargeCost == false)
+                    Owner.Properties.AdjustProperty(-1, new(PropertyEnum.PowerChargesAvailable, PrototypeDataRef));
             }
 
             return true;
@@ -2965,6 +3363,43 @@ namespace MHServerEmu.Games.Powers
             return true;
         }
 
+        private bool ScheduleExtraActivationTimeout(ExtraActivateOnSubsequentPrototype extraActivateOnSubsequent)
+        {
+            int timeoutLengthMS = extraActivateOnSubsequent.GetTimeoutLengthMS(Properties[PropertyEnum.PowerRank]);
+            
+            if (timeoutLengthMS == 0)
+                return true;
+
+            if (extraActivateOnSubsequent.ExtraActivateEffect == SubsequentActivateType.DestroySummonedEntity)
+            {
+                if (IsOnExtraActivation() == false)
+                    return Logger.WarnReturn(false, "ScheduleExtraActivationTimeout(): IsOnExtraActivation() == false");
+
+                if (_subsequentActivationTimeoutEvent.IsValid)
+                    return Logger.WarnReturn(false, "ScheduleExtraActivationTimeout(): _subsequentActivationTimeoutEvent.IsValid");
+            }
+
+            if (_subsequentActivationTimeoutEvent.IsValid == false)
+            {
+                EventScheduler scheduler = Game?.GameEventScheduler;
+                if (scheduler == null) return Logger.WarnReturn(false, "ScheduleExtraActivationTimeout(): scheduler == null");
+
+                scheduler.ScheduleEvent(_subsequentActivationTimeoutEvent, TimeSpan.FromMilliseconds(timeoutLengthMS), _pendingEvents);
+                _subsequentActivationTimeoutEvent.Get().Initialize(this);
+            }
+
+            return true;
+        }
+
+        private bool CancelExtraActivationTimeout()
+        {
+            EventScheduler scheduler = Game?.GameEventScheduler;
+            if (scheduler == null) return Logger.WarnReturn(false, "CancelExtraActivationTimeout(): scheduler == null");
+
+            scheduler.CancelEvent(_subsequentActivationTimeoutEvent);
+            return true;
+        }
+
         private bool SchedulePowerEnd(in PowerActivationSettings settings)
         {
             if (Owner == null) return Logger.WarnReturn(false, "SchedulePowerEnd(): Owner == null");
@@ -3084,6 +3519,16 @@ namespace MHServerEmu.Games.Powers
 
                 return true;
             }
+        }
+
+        private class EndCooldownEvent : CallMethodEvent<Power>
+        {
+            protected override CallbackDelegate GetCallback() => (t) => t.OnCooldownEndCallback();
+        }
+
+        private class PowerSubsequentActivationTimeoutEvent : CallMethodEvent<Power>
+        {
+            protected override CallbackDelegate GetCallback() => (t) => t.ExtraActivateTimeoutCallback();
         }
 
         private class EndPowerEvent : CallMethodEventParam1<Power, EndPowerFlags>
