@@ -575,6 +575,13 @@ namespace MHServerEmu.Games.Entities.Avatars
                 }
             }
 
+            // Assign hidden passive powers
+            if (avatarPrototype.HiddenPassivePowers.HasValue())
+            {
+                foreach (AbilityAssignmentPrototype abilityAssignmentProto in avatarPrototype.HiddenPassivePowers)
+                    AssignPower(abilityAssignmentProto.Ability, indexProps);
+            }
+
             // Travel
             AssignPower(avatarPrototype.TravelPower, indexProps);
 
@@ -765,7 +772,7 @@ namespace MHServerEmu.Games.Entities.Avatars
         public override void OnExitedWorld()
         {
             base.OnExitedWorld();
-            SetSimulated(false); // put it here for test
+
             if (CurrentTeamUpAgent != null) DismissTeamUpAgent();
             Inventory summonedInventory = GetInventory(InventoryConvenienceLabel.Summoned);
             if (summonedInventory != null)

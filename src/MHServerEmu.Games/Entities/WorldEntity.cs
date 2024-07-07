@@ -1381,12 +1381,17 @@ namespace MHServerEmu.Games.Entities
             PowerCollection?.OnOwnerEnteredWorld();
 
             NotifyPlayers(true, settings);
+
+            // TODO: Simulate only world entities that have interest references
+            SetSimulated(true);
         }
 
         public virtual void OnExitedWorld()
         {
             PowerCollection?.OnOwnerExitedWorld();
             NotifyPlayers(false);
+
+            SetSimulated(false);
         }
 
         public virtual void OnDramaticEntranceEnd() { }
@@ -1623,6 +1628,17 @@ namespace MHServerEmu.Games.Entities
                 if (keywordsMask == null) return false;     // REMOVEME: Temp fix for condition collections not having keyword masks
                 return keywordsMask[keyword];
             }
+            return false;
+        }
+
+        public bool HasConditionWithAnyKeyword(IEnumerable<PrototypeId> keywordProtoRefs)
+        {
+            foreach (PrototypeId keywordProtoRef in keywordProtoRefs)
+            {
+                if (HasConditionWithKeyword(keywordProtoRef))
+                    return true;
+            }
+
             return false;
         }
 
