@@ -156,9 +156,6 @@ namespace MHServerEmu.Games.Powers
             EndPower(endPowerFlags);
 
             Owner?.Properties.RemoveProperty(new(PropertyEnum.PowerActivationCount, PrototypeDataRef));
-
-            // TODO: call this from PowerCollection
-            OnDeallocate();
         }
 
         public void OnOwnerEnteredWorld()
@@ -179,6 +176,9 @@ namespace MHServerEmu.Games.Powers
 
         public virtual void OnDeallocate()
         {
+            if (_activationPhase != PowerActivationPhase.Inactive)
+                Logger.Warn($"The following Power is being destructed while still in an ActivationPhase other than Inactive!\nPower: [{this}]\nOwner: [{Owner}]");
+
             Game.GameEventScheduler.CancelAllEvents(_pendingEvents);
             Game.GameEventScheduler.CancelAllEvents(_pendingActivationPhaseEvents);
             Game.GameEventScheduler.CancelAllEvents(_pendingPowerApplicationEvents);
@@ -456,8 +456,9 @@ namespace MHServerEmu.Games.Powers
             }
 
             settings.OriginalTargetPosition = settings.TargetPosition;
+            EntityHelper.CrateOrb(EntityHelper.TestOrb.Red, settings.TargetPosition, Owner.Region);
             GenerateActualTargetPosition(settings.TargetEntityId, settings.OriginalTargetPosition, out settings.TargetPosition, in settings);
-
+            EntityHelper.CrateOrb(EntityHelper.TestOrb.BigRed, settings.TargetPosition, Owner.Region);
             MovementPowerPrototype movementPowerProto = FindPowerPrototype<MovementPowerPrototype>(powerProto);
             if (movementPowerProto == null || movementPowerProto.TeleportMethod != TeleportMethodType.Teleport)
                 ComputePowerMovementSettings(movementPowerProto, ref settings);
@@ -2490,7 +2491,8 @@ namespace MHServerEmu.Games.Powers
 
                 // Create a payload and calculate results
                 PowerPayload payload = new();
-                payload.Init(powerApplication.UserEntityId, GetUltimateOwner().Id, powerApplication.TargetEntityId, powerApplication.UserPosition, Prototype);
+                WorldEntity ultimateOwner = GetUltimateOwner();
+                payload.Init(powerApplication.UserEntityId, ultimateOwner != null ? ultimateOwner.Id : 0, powerApplication.TargetEntityId, powerApplication.UserPosition, Prototype);
 
                 // Apply results to the target
                 PowerResults results = payload.GenerateResults(this, Owner, target);

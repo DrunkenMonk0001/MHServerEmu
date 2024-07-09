@@ -347,6 +347,21 @@ namespace MHServerEmu.Games.Entities
                 SetStatus(EntityStatus.ExitingWorld, false);
         }
 
+        public SimulateResult UpdateSimulationState()
+        {
+            // Never simulate when not in the world
+            if (IsInWorld == false)
+                return SetSimulated(false);
+
+            // Simulate if the prototype is flagged as always simulated
+            if (WorldEntityPrototype?.AlwaysSimulated == true)
+                return SetSimulated(true);
+
+            // Simulate is there are any player interested in this world entity
+            return SetSimulated(InterestReferences.IsAnyPlayerInterested(AOINetworkPolicyValues.AOIChannelProximity) ||
+                                InterestReferences.IsAnyPlayerInterested(AOINetworkPolicyValues.AOIChannelClientIndependent));
+        }
+
         public virtual bool CanRotate()
         {
             return true;
@@ -438,7 +453,7 @@ namespace MHServerEmu.Games.Entities
             if (Cell != null && flags.HasFlag(ChangePositionFlags.SkipAOI) == false)
             {
                 // TODO: Notify if distance is far enough, similar to AOI updates
-                NotifyPlayers(true);
+                UpdateInterestPolicies(true);
             }
 
             return ChangePositionResult.PositionChanged;
@@ -800,6 +815,7 @@ namespace MHServerEmu.Games.Entities
         public Power GetPower(PrototypeId powerProtoRef) => _powerCollection?.GetPower(powerProtoRef);
         public Power GetThrowablePower() => _powerCollection?.ThrowablePower;
         public Power GetThrowableCancelPower() => _powerCollection?.ThrowableCancelPower;
+        public virtual bool IsMelee() => false;
 
         public bool HasPowerInPowerCollection(PrototypeId powerProtoRef)
         {
@@ -1127,10 +1143,13 @@ namespace MHServerEmu.Games.Entities
             else
             {
                 Properties[PropertyEnum.Health] = health;
-
+                /*
+                if (totalDamage > 0f && this is Agent aiAgent) aiAgent.AITestOn();
                 // HACK: Rotate towards the power user
-                if (totalDamage > 0f && powerUser is Avatar && this is Agent && Locomotor != null)
+                if (totalDamage > 0f && powerUser is Avatar && Locomotor != null)
+                {
                     ChangeRegionPosition(null, new(Vector3.AngleYaw(RegionLocation.Position, powerUser.RegionLocation.Position), 0f, 0f));
+                }*/
             }
 
             return true;
@@ -1485,6 +1504,12 @@ namespace MHServerEmu.Games.Entities
 
         #region Event Handlers
 
+        public override void OnChangePlayerAOI(Player player, InterestTrackOperation operation, AOINetworkPolicyValues newInterestPolicies, AOINetworkPolicyValues previousInterestPolicies, AOINetworkPolicyValues archiveInterestPolicies = AOINetworkPolicyValues.AOIChannelNone)
+        {
+            base.OnChangePlayerAOI(player, operation, newInterestPolicies, previousInterestPolicies, archiveInterestPolicies);
+            UpdateSimulationState();
+        }
+
         public virtual void OnEnteredWorld(EntitySettings settings)
         {
             if (CanInfluenceNavigationMesh())
@@ -1492,18 +1517,23 @@ namespace MHServerEmu.Games.Entities
 
             PowerCollection?.OnOwnerEnteredWorld();
 
-            NotifyPlayers(true, settings);
+            UpdateInterestPolicies(true, settings);
 
-            // TODO: Simulate only world entities that have interest references
-            SetSimulated(true);
+            UpdateSimulationState();
         }
 
         public virtual void OnExitedWorld()
         {
             PowerCollection?.OnOwnerExitedWorld();
-            NotifyPlayers(false);
+            UpdateInterestPolicies(false);
 
-            SetSimulated(false);
+            UpdateSimulationState();
+        }
+
+        public override void OnDeallocate()
+        {
+            base.OnDeallocate();
+            PowerCollection?.OnOwnerDeallocate();
         }
 
         public virtual void OnDramaticEntranceEnd() { }
@@ -1569,6 +1599,11 @@ namespace MHServerEmu.Games.Entities
 
                 case PropertyEnum.HealthMax:
                     Properties[PropertyEnum.HealthMaxOther] = newValue;
+                    break;
+
+                case PropertyEnum.NoEntityCollide:
+                    _flags |= EntityFlags.NoCollide;
+                    // EnableNavigationInfluence DisableNavigationInfluence
                     break;
             }
         }
@@ -1768,12 +1803,15 @@ namespace MHServerEmu.Games.Entities
 
         public bool CanEntityActionTrigger(EntitySelectorActionEventType eventType)
         {
-            throw new NotImplementedException();
+            Logger.Debug($"CanEntityActionTrigger {eventType}");
+            return false;
+            // throw new NotImplementedException();
         }
 
         public void TriggerEntityActionEvent(EntitySelectorActionEventType actionType)
         {
-            throw new NotImplementedException();
+            Logger.Debug($"TriggerEntityActionEvent {actionType}");
+            // throw new NotImplementedException();
         }
 
         protected override void BuildString(StringBuilder sb)
