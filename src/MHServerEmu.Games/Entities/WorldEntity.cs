@@ -64,12 +64,11 @@ namespace MHServerEmu.Games.Entities
         NotChanged,
     }
 
-    public class WorldEntity : Entity
+    public partial class WorldEntity : Entity
     {
         private static readonly Logger Logger = LogManager.CreateLogger();
 
-        private EventPointer<TEMP_SendActivatePowerMessageEvent> _sendActivatePowerMessageEvent = new();
-        private EventPointer<ScheduledExitWorldEvent> _exitWorldEvent = new();
+        private readonly EventPointer<ScheduledExitWorldEvent> _exitWorldEvent = new();
 
         private AlliancePrototype _allianceProto;
         private Transform3 _transform = Transform3.Identity();
@@ -158,13 +157,6 @@ namespace MHServerEmu.Games.Entities
 
             // Old
             Properties[PropertyEnum.VariationSeed] = Game.Random.Next(1, 10000);
-
-            // HACK: Override base health to make things more reasonable with the current damage implementation
-            /*
-            float healthBaseOverride = EntityHelper.GetHealthForWorldEntity(this);
-            if (healthBaseOverride > 0f)
-                Properties[PropertyEnum.Health] = Properties[PropertyEnum.HealthMaxOther];
-            */
 
             Properties[PropertyEnum.CharacterLevel] = 60;
             Properties[PropertyEnum.CombatLevel] = 60;
@@ -289,14 +281,6 @@ namespace MHServerEmu.Games.Entities
                 CancelDestroyEvent();
                 base.Destroy();
             }
-        }
-
-        public override bool ScheduleDestroyEvent(TimeSpan delay)
-        {
-            if (IsDestroyProtectedEntity)
-                return Logger.WarnReturn(false, $"ScheduleDestroyEvent(): Trying to schedule destruction of a destroy-protected entity {this}");
-
-            return base.ScheduleDestroyEvent(delay);
         }
 
         #region World and Positioning
@@ -535,17 +519,6 @@ namespace MHServerEmu.Games.Entities
             return false;
         }
 
-        public void ScheduleExitWorldEvent(TimeSpan time)
-        {
-            if (_exitWorldEvent.IsValid)
-            {
-                if (_exitWorldEvent.Get().FireTime > Game.CurrentTime + time)
-                    Game.GameEventScheduler.RescheduleEvent(_exitWorldEvent, time);
-            }
-            else
-                ScheduleEntityEvent(_exitWorldEvent, time);
-        }
-
         public Vector3 GetVectorFrom(WorldEntity other)
         {
             if (other == null) return Vector3.Zero;
@@ -574,11 +547,6 @@ namespace MHServerEmu.Games.Entities
 
             if (oldLocation.Cell != newLocation.Cell)
                 OnCellChanged(oldLocation, newLocation, flags);
-        }
-
-        protected class ScheduledExitWorldEvent : CallMethodEvent<Entity>
-        {
-            protected override CallbackDelegate GetCallback() => (t) => (t as WorldEntity)?.ExitWorld();
         }
 
         #endregion
@@ -1159,38 +1127,6 @@ namespace MHServerEmu.Games.Entities
             return true;
         }
 
-        public bool TEMP_ScheduleSendActivatePowerMessage(PrototypeId powerProtoRef, TimeSpan timeOffset)
-        {
-            if (_sendActivatePowerMessageEvent.IsValid) return false;
-            ScheduleEntityEvent(_sendActivatePowerMessageEvent, timeOffset, powerProtoRef);
-            return true;
-        }
-
-        public bool TEMP_SendActivatePowerMessage(PrototypeId powerProtoRef)
-        {
-            if (IsInWorld == false) return false;
-
-            Logger.Trace($"Activating {GameDatabase.GetPrototypeName(powerProtoRef)} for {this}");
-
-            OLD_ActivatePowerArchive activatePower = new()
-            {
-                Flags = ActivatePowerMessageFlags.TargetIsUser | ActivatePowerMessageFlags.HasTargetPosition |
-                ActivatePowerMessageFlags.TargetPositionIsUserPosition | ActivatePowerMessageFlags.HasFXRandomSeed |
-                ActivatePowerMessageFlags.HasPowerRandomSeed,
-
-                PowerPrototypeRef = powerProtoRef,
-                UserEntityId = Id,
-                TargetPosition = RegionLocation.Position,
-                FXRandomSeed = (uint)Game.Random.Next(),
-                PowerRandomSeed = (uint)Game.Random.Next()
-            };
-
-            var activatePowerMessage = NetMessageActivatePower.CreateBuilder().SetArchiveData(activatePower.ToByteString()).Build();
-            Game.NetworkManager.SendMessageToInterested(activatePowerMessage, this, AOINetworkPolicyValues.AOIChannelProximity);
-
-            return true;
-        }
-
         public string PowerCollectionToString()
         {
             StringBuilder sb = new();
@@ -1226,11 +1162,6 @@ namespace MHServerEmu.Games.Entities
                 || IsInWorld == false || IsSimulated == false
                 || IsDormant || IsUnaffectable || IsHotspot) return false;
             return true;
-        }
-
-        protected class TEMP_SendActivatePowerMessageEvent : CallMethodEventParam1<Entity, PrototypeId>
-        {
-            protected override CallbackDelegate GetCallback() => (t, p1) => ((WorldEntity)t).TEMP_SendActivatePowerMessage(p1);
         }
 
         #endregion
@@ -1851,5 +1782,33 @@ namespace MHServerEmu.Games.Entities
             }
             return false;
         }
+
+        #region Scheduled Events
+
+        public override bool ScheduleDestroyEvent(TimeSpan delay)
+        {
+            if (IsDestroyProtectedEntity)
+                return Logger.WarnReturn(false, $"ScheduleDestroyEvent(): Trying to schedule destruction of a destroy-protected entity {this}");
+
+            return base.ScheduleDestroyEvent(delay);
+        }
+
+        public void ScheduleExitWorldEvent(TimeSpan time)
+        {
+            if (_exitWorldEvent.IsValid)
+            {
+                if (_exitWorldEvent.Get().FireTime > Game.CurrentTime + time)
+                    Game.GameEventScheduler.RescheduleEvent(_exitWorldEvent, time);
+            }
+            else
+                ScheduleEntityEvent(_exitWorldEvent, time);
+        }
+
+        protected class ScheduledExitWorldEvent : CallMethodEvent<Entity>
+        {
+            protected override CallbackDelegate GetCallback() => (t) => (t as WorldEntity)?.ExitWorld();
+        }
+
+        #endregion
     }
 }
