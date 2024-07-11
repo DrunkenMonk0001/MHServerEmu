@@ -17,10 +17,9 @@ using MHServerEmu.Games.Events.LegacyImplementations;
 using MHServerEmu.Games.Events.Templates;
 using MHServerEmu.Games.GameData;
 using MHServerEmu.Games.GameData.Prototypes;
-using MHServerEmu.Games.Generators;
-using MHServerEmu.Games.Generators.Population;
 using MHServerEmu.Games.Navi;
 using MHServerEmu.Games.Network;
+using MHServerEmu.Games.Populations;
 using MHServerEmu.Games.Powers;
 using MHServerEmu.Games.Properties;
 using MHServerEmu.Games.Regions;
@@ -209,7 +208,15 @@ namespace MHServerEmu.Games.Entities
         {
             // HACK: LOOT
             if (this is Agent agent && agent is not Missile)
-                Game.LootGenerator.DropRandomLoot(agent);
+            {
+                foreach (ulong playerId in InterestReferences.PlayerIds)
+                {
+                    Player player = Game.EntityManager.GetEntity<Player>(playerId);
+                    if (player == null) continue;
+
+                    Game.LootManager.DropRandomLoot(this, player);
+                }
+            }
 
             // HACK: Schedule respawn using SpawnSpec
             if (SpawnSpec != null)

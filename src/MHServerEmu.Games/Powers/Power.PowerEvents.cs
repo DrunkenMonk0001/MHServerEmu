@@ -9,7 +9,6 @@ using MHServerEmu.Games.Entities.Items;
 using MHServerEmu.Games.Entities.PowerCollections;
 using MHServerEmu.Games.GameData;
 using MHServerEmu.Games.GameData.Prototypes;
-using MHServerEmu.Games.Generators;
 using MHServerEmu.Games.Properties;
 using MHServerEmu.Games.Regions;
 
@@ -887,6 +886,11 @@ namespace MHServerEmu.Games.Powers
             foreach (WorldEntity worldEntity in region.IterateEntitiesInVolume(vacuumVolume, new(EntityRegionSPContextFlags.ActivePartition)))
             {
                 if (worldEntity is not Item item)
+                    continue;
+
+                // Check if this is an item restricted to a player (instanced loot)
+                ulong restrictedToPlayerGuid = item.Properties[PropertyEnum.RestrictedToPlayerGuid];
+                if (restrictedToPlayerGuid != 0 && restrictedToPlayerGuid != player.DatabaseUniqueId)
                     continue;
 
                 // Push the item to the stack
