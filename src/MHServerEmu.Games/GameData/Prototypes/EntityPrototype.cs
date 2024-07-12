@@ -1,4 +1,5 @@
-﻿using MHServerEmu.Core.Extensions;
+﻿using MHServerEmu.Core.Collections;
+using MHServerEmu.Core.Extensions;
 using MHServerEmu.Core.System.Random;
 using MHServerEmu.Core.VectorMath;
 using MHServerEmu.Games.Dialog;
@@ -293,6 +294,9 @@ namespace MHServerEmu.Games.GameData.Prototypes
         [DoNotCopy]
         public List<InteractionData> KeywordsInteractionData { get; protected set; }
 
+        [DoNotCopy]
+        public int WorldEntityPrototypeEnumValue { get; private set; }
+
         public override void PostProcess()
         {
             base.PostProcess();
@@ -302,8 +306,9 @@ namespace MHServerEmu.Games.GameData.Prototypes
             var keywordVacuumable = GameDatabase.KeywordGlobalsPrototype.VacuumableKeyword.As<KeywordPrototype>();
             isVacuumable = keywordVacuumable != null && HasKeyword(keywordVacuumable);
 
-            //if (DataRef != GameDatabase.GetDataRefByPrototypeGuid((PrototypeGuid)13337309842336122384))
-            //    worldEntityPrototypeEnumValue = GetEnumValueFromBlueprint(LiveTuningData.GetWorldEntityBlueprintDataRef());
+            // NOTE: This is a hack straight from the client, do not change
+            if (DataRef != (PrototypeId)DataDirectory.Instance.GetBlueprintDataRefByGuid((BlueprintGuid)13337309842336122384))  // Entity/PowerAgnostic.blueprint
+                WorldEntityPrototypeEnumValue = GetEnumValueFromBlueprint(LiveTuningData.GetWorldEntityBlueprintDataRef());
         }
 
         public override bool ApprovedForUse()
@@ -450,6 +455,48 @@ namespace MHServerEmu.Games.GameData.Prototypes
                         return;
                     }
             }
+        }
+
+        public EntityActionOverheadTextPrototype PickOverheadText(GRandom random)
+        {
+            if (OverheadTexts.IsNullOrEmpty() && OverheadTextsList.IsNullOrEmpty()) return null;
+
+            Picker<EntityActionOverheadTextPrototype> picker = new(random);
+            if (OverheadTexts.HasValue())
+            {
+                foreach (var overheadTextRef in OverheadTexts)
+                {
+                    var overheadText = overheadTextRef.As<EntityActionOverheadTextPrototype>();
+                    picker.Add(overheadText, overheadText.Weight);
+                }
+            }
+            else if (AIOverridesList.HasValue())
+            {
+                foreach (var overheadText in OverheadTextsList)
+                    picker.Add(overheadText, overheadText.Weight);
+            }
+            return picker.Pick();
+        }
+
+        public EntityActionAIOverridePrototype PickAIOverride(GRandom random)
+        {
+            if (AIOverrides.IsNullOrEmpty() && AIOverridesList.IsNullOrEmpty()) return null;
+
+            Picker<EntityActionAIOverridePrototype> picker = new(random);
+            if (AIOverrides.HasValue())
+            {
+                foreach (var brainRef in AIOverrides) 
+                {
+                    var brain = brainRef.As<EntityActionAIOverridePrototype>();
+                    picker.Add(brain, brain.Weight);
+                }                   
+            } 
+            else if (AIOverridesList.HasValue())
+            {
+                foreach (var brain in AIOverridesList)
+                    picker.Add(brain, brain.Weight);
+            }
+            return picker.Pick();
         }
     }
 
