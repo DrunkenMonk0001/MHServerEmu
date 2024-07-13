@@ -144,7 +144,7 @@ namespace MHServerEmu.Games.Entities
             var proto = WorldEntityPrototype;
 
             if (settings.IgnoreNavi)
-                _flags |= EntityFlags.IgnoreNavi;
+                SetFlag(EntityFlags.IgnoreNavi, true);
 
             ShouldSnapToFloorOnSpawn = settings.OptionFlags.HasFlag(EntitySettingsOptionFlags.HasOverrideSnapToFloor)
                 ? settings.OptionFlags.HasFlag(EntitySettingsOptionFlags.OverrideSnapToFloorValue)
@@ -207,7 +207,7 @@ namespace MHServerEmu.Games.Entities
         public virtual void OnKilled(WorldEntity killer, KillFlags killFlags, WorldEntity directKiller)
         {
             // HACK: LOOT
-            if (this is Agent agent && agent is not Missile)
+            if (this is Agent agent && agent is not Missile && agent is not Avatar && agent.IsTeamUpAgent == false)
             {
                 foreach (ulong playerId in InterestReferences.PlayerIds)
                 {
@@ -227,8 +227,7 @@ namespace MHServerEmu.Games.Entities
                 eventPointer.Get().Initialize(SpawnSpec);
             }
 
-            // HACK?: Set death state
-            _flags |= EntityFlags.IsDead;
+            // Set death state properties
             Properties[PropertyEnum.IsDead] = true;
             Properties[PropertyEnum.NoEntityCollide] = true;
 
@@ -285,7 +284,7 @@ namespace MHServerEmu.Games.Entities
             ExitWorld();
             if (IsDestroyed == false)
             {
-                // CancelExitWorldEvent();
+                CancelExitWorldEvent();
                 // CancelKillEvent();
                 CancelDestroyEvent();
                 base.Destroy();
@@ -1099,22 +1098,33 @@ namespace MHServerEmu.Games.Entities
             NetMessagePowerResult powerResultMessage = ArchiveMessageBuilder.BuildPowerResultMessage(powerResults);
             Game.NetworkManager.SendMessageToInterested(powerResultMessage, this, AOINetworkPolicyValues.AOIChannelProximity);
 
-            // Do not apply damage to avatars and team-ups... yet
-            // Do this after sending the message so that the client can play hit effects anyway
-            if (this is Avatar || (this is Agent agent && agent.IsTeamUpAgent))
-                return true;
-
             // Apply the results to this entity
-            // NOTE: A lot more things should happen here, but for now we just apply damage and check death
-            int health = Properties[PropertyEnum.Health];
+            // TODO: More stuff
 
-            float totalDamage = powerResults.Properties[PropertyEnum.Damage, (int)DamageType.Physical];
-            totalDamage += powerResults.Properties[PropertyEnum.Damage, (int)DamageType.Energy];
-            totalDamage += powerResults.Properties[PropertyEnum.Damage, (int)DamageType.Mental];
+            // Calculate health difference based on all damage types and healing
+            // NOTE: Health can be > 2147483647, so we have to use 64-bit integers here to avoid overflows
+            long health = Properties[PropertyEnum.Health];
+            float healthDelta = 0f;
 
-            health = (int)Math.Max(health - totalDamage, 0);
+            if (powerResults.Flags.HasFlag(PowerResultFlags.InstantKill))
+            {
+                // INSTANT KILL
+                healthDelta -= health;
+            }
+            else
+            {
+                // Calculate damage delta normally
+                healthDelta -= powerResults.Properties[PropertyEnum.Damage, (int)DamageType.Physical];
+                healthDelta -= powerResults.Properties[PropertyEnum.Damage, (int)DamageType.Energy];
+                healthDelta -= powerResults.Properties[PropertyEnum.Damage, (int)DamageType.Mental];
+                healthDelta += powerResults.Properties[PropertyEnum.Healing];
+            }
 
-            // Kill
+            // Apply health delta
+            health += (long)MathF.Round(healthDelta);
+            health = Math.Clamp(health, Properties[PropertyEnum.HealthMin], Properties[PropertyEnum.HealthMaxOther]);
+
+            // Change health to the new value
             WorldEntity powerUser = Game.EntityManager.GetEntity<WorldEntity>(powerResults.PowerOwnerId);
 
             if (health <= 0)
@@ -1124,13 +1134,6 @@ namespace MHServerEmu.Games.Entities
             else
             {
                 Properties[PropertyEnum.Health] = health;
-                /*
-                if (totalDamage > 0f && this is Agent aiAgent) aiAgent.AITestOn();
-                // HACK: Rotate towards the power user
-                if (totalDamage > 0f && powerUser is Avatar && Locomotor != null)
-                {
-                    ChangeRegionPosition(null, new(Vector3.AngleYaw(RegionLocation.Position, powerUser.RegionLocation.Position), 0f, 0f));
-                }*/
             }
 
             return true;
@@ -1546,7 +1549,7 @@ namespace MHServerEmu.Games.Entities
                     break;
 
                 case PropertyEnum.NoEntityCollide:
-                    _flags |= EntityFlags.NoCollide;
+                    SetFlag(EntityFlags.NoCollide, true);
                     // EnableNavigationInfluence DisableNavigationInfluence
                     break;
             }
@@ -1865,6 +1868,12 @@ namespace MHServerEmu.Games.Entities
             }
             else
                 ScheduleEntityEvent(_exitWorldEvent, time);
+        }
+
+        public void CancelExitWorldEvent()
+        {
+            if (_exitWorldEvent.IsValid)
+                Game?.GameEventScheduler?.CancelEvent(_exitWorldEvent);
         }
 
         protected class ScheduledExitWorldEvent : CallMethodEvent<Entity>

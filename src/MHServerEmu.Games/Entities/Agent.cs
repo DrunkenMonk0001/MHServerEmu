@@ -1,7 +1,6 @@
 ﻿using Gazillion;
 using MHServerEmu.Core.Extensions;
 using MHServerEmu.Core.Logging;
-using MHServerEmu.Core.System.Time;
 using MHServerEmu.Core.VectorMath;
 using MHServerEmu.Games.Behavior;
 using MHServerEmu.Games.Dialog;
@@ -10,6 +9,8 @@ using MHServerEmu.Games.Entities.Inventories;
 using MHServerEmu.Games.Entities.Items;
 using MHServerEmu.Games.Entities.Locomotion;
 using MHServerEmu.Games.Entities.PowerCollections;
+using MHServerEmu.Games.Events;
+using MHServerEmu.Games.Events.Templates;
 using MHServerEmu.Games.GameData;
 using MHServerEmu.Games.GameData.Prototypes;
 using MHServerEmu.Games.GameData.Tables;
@@ -34,11 +35,17 @@ namespace MHServerEmu.Games.Entities
     {
         private static readonly Logger Logger = LogManager.CreateLogger();
 
+        private readonly EventPointer<WakeStartEvent> _wakeStartEvent = new();
+        private readonly EventPointer<WakeEndEvent> _wakeEndEvent = new();
         public AIController AIController { get; private set; }
         public AgentPrototype AgentPrototype { get => Prototype as AgentPrototype; }
         public override bool IsTeamUpAgent { get => AgentPrototype is AgentTeamUpPrototype; }
+        public Avatar TeamUpOwner { get => Game.EntityManager.GetEntity<Avatar>(Properties[PropertyEnum.TeamUpOwnerId]); }
 
         public int PowerSpecIndexActive { get; set; }
+        public bool IsVisibleWhenDormant { get => AgentPrototype.WakeStartsVisible; }
+        public override bool IsWakingUp { get => _wakeEndEvent.IsValid; }
+        public override bool IsDormant { get => base.IsDormant || IsWakingUp; }
 
         public Agent(Game game) : base(game) { }
 
@@ -107,6 +114,38 @@ namespace MHServerEmu.Games.Entities
         #endregion
 
         #region Powers
+
+        public virtual bool Resurrect()
+        {
+            // Cancel cleanup events
+            CancelExitWorldEvent();
+            // CancelKillEvent();
+            CancelDestroyEvent();
+
+            // Reset health
+            Properties[PropertyEnum.Health] = Properties[PropertyEnum.HealthMaxOther];
+
+            // Remove death state properties
+            Properties[PropertyEnum.IsDead] = false;
+            Properties[PropertyEnum.NoEntityCollide] = false;
+
+            // Send resurrection message
+            var resurrectMessage = NetMessageOnResurrect.CreateBuilder()
+                .SetTargetId(Id)
+                .Build();
+
+            Game.NetworkManager.SendMessageToInterested(resurrectMessage, this, AOINetworkPolicyValues.AOIChannelProximity);
+
+            // Activate resurrection power
+            if (AgentPrototype.OnResurrectedPower != PrototypeId.Invalid)
+            {
+                PowerActivationSettings settings = new(Id, RegionLocation.Position, RegionLocation.Position);
+                settings.Flags |= PowerActivationSettingsFlags.NotifyOwner;
+                ActivatePower(AgentPrototype.OnResurrectedPower, ref settings);
+            }
+
+            return true;
+        }
 
         public virtual bool HasPowerWithKeyword(PowerPrototype powerProto, PrototypeId keywordProtoRef)
         {
@@ -531,6 +570,11 @@ namespace MHServerEmu.Games.Entities
             AIController?.Think();
         }
 
+        private void AllianceChange()
+        {
+            AIController?.OnAIAllianceChange();
+        }
+
         public void SetDormant(bool dormant)
         {
             if (IsDormant != dormant)
@@ -584,6 +628,12 @@ namespace MHServerEmu.Games.Entities
             else if (result == SimulateResult.Clear)
             {
                 EntityActionComponent?.RestartPendingActions();
+                var scheduler = Game?.GameEventScheduler;
+                if (scheduler != null)
+                {
+                    scheduler.CancelEvent(_wakeStartEvent);
+                    scheduler.CancelEvent(_wakeEndEvent);
+                }
             }
 
             return result;
@@ -621,12 +671,61 @@ namespace MHServerEmu.Games.Entities
 
         #region Event Handlers
 
+        public override void OnPropertyChange(PropertyId id, PropertyValue newValue, PropertyValue oldValue, SetPropertyFlags flags)
+        {
+            base.OnPropertyChange(id, newValue, oldValue, flags);
+            if (flags.HasFlag(SetPropertyFlags.Refresh)) return;
+
+            switch (id.Enum)
+            {
+                case PropertyEnum.AllianceOverride:
+                    AllianceChange();
+                    break;
+
+                case PropertyEnum.Confused:
+                    SetFlag(EntityFlags.Confused, newValue);
+                    AllianceChange();
+                    break;
+
+                case PropertyEnum.Immobilized:
+                case PropertyEnum.ImmobilizedByHitReact:
+                case PropertyEnum.SystemImmobilized:
+                case PropertyEnum.TutorialImmobilized:
+
+                    if (newValue) StopLocomotor();
+                    break;
+
+                case PropertyEnum.Dormant:
+
+                    bool dormant = newValue;
+                    SetFlag(EntityFlags.Dormant, dormant);
+                    if (dormant == false) СheckWakeDelay();
+                    RegisterForPendingPhysicsResolve();
+                    if (!IsVisibleWhenDormant) Properties[PropertyEnum.Visible] = !dormant;
+
+                    break;
+            }
+        }
+
+        private void StopLocomotor()
+        {
+            if (IsInWorld) Locomotor?.Stop();
+        }
+
         public override void OnEnteredWorld(EntitySettings settings)
         {
             base.OnEnteredWorld(settings);
             if (this is not Avatar)     // fix for avatar
                 RegionLocation.Cell.EnemySpawn(); // Calc Enemy
                                                   // ActivePowerRef = settings.PowerPrototype
+
+            // Assign on resurrected power
+            PrototypeId onResurrectedPowerRef = AgentPrototype.OnResurrectedPower;
+            if (onResurrectedPowerRef != PrototypeId.Invalid)
+            {
+                PowerIndexProperties indexProps = new(0, CharacterLevel, CombatLevel);
+                AssignPower(onResurrectedPowerRef, indexProps);
+            }
 
             // AI
             // if (TestAI() == false) return;
@@ -680,6 +779,10 @@ namespace MHServerEmu.Games.Entities
         public override void OnKilled(WorldEntity killer, KillFlags killFlags, WorldEntity directKiller)
         {
             // TODO other events
+
+            Avatar teamUpOwner = TeamUpOwner;
+            if (teamUpOwner != null)
+                teamUpOwner.ClearSummonedTeamUpAgent(this);
 
             if (AIController != null)
             {
@@ -974,11 +1077,77 @@ namespace MHServerEmu.Games.Entities
                     EntityHelper.CrateOrb(orbRef, node.Vertex, Region);
         }
 
+        private void TryAutoActivatePowersInCollection()
+        {
+            // TODO throw new NotImplementedException();
+        }
+
         #region Scheduled Events
 
         private void ScheduleRandomWakeStart(int wakeRandomStartMS)
         {
-            throw new NotImplementedException();
+            if (!_wakeStartEvent.IsValid)
+            {
+                TimeSpan randomStart = TimeSpan.FromMilliseconds(Game.Random.Next(wakeRandomStartMS));
+                ScheduleEntityEvent(_wakeStartEvent, randomStart);
+            }
+        }
+
+        private void WakeStartCallback()
+        {
+            Properties[PropertyEnum.Dormant] = false;
+        }
+
+        private void СheckWakeDelay()
+        {
+            var prototype = AgentPrototype;
+            if (prototype == null) return;
+
+            if (prototype.WakeDelayMS > 0 
+                && prototype.PlayDramaticEntrance != DramaticEntranceType.Never
+                && Properties[PropertyEnum.DramaticEntrancePlayedOnce] == false)
+            {
+                TimeSpan wakeDelay = TimeSpan.FromMilliseconds(prototype.WakeDelayMS);
+                if (wakeDelay > TimeSpan.Zero)
+                {
+                    if (_wakeEndEvent.IsValid)
+                    {
+                        var scheduler = Game?.GameEventScheduler;
+                        if (Game.CurrentTime + wakeDelay < _wakeEndEvent.Get().FireTime)
+                            scheduler?.RescheduleEvent(_wakeEndEvent, wakeDelay);
+                    }
+                    else
+                        ScheduleEntityEvent(_wakeEndEvent, wakeDelay);
+                }
+            }
+            else
+                TryAutoActivatePowersInCollection();
+        }
+
+        private void WakeEndCallback()
+        {
+            RegisterForPendingPhysicsResolve();
+            OnDramaticEntranceEnd();
+            var prototype = AgentPrototype;
+            if (prototype != null && prototype.PlayDramaticEntrance == DramaticEntranceType.Once)
+                Properties[PropertyEnum.DramaticEntrancePlayedOnce] = true;
+            var region = Region;
+            if (region != null)
+            {
+                var evt = new EntityLeaveDormantGameEvent(this);
+                region.EntityLeaveDormantEvent.Invoke(evt);
+            }
+            TryAutoActivatePowersInCollection();
+        }
+
+        protected class WakeStartEvent : CallMethodEvent<Entity>
+        {
+            protected override CallbackDelegate GetCallback() => (t) => (t as Agent)?.WakeStartCallback();
+        }
+
+        protected class WakeEndEvent : CallMethodEvent<Entity>
+        {
+            protected override CallbackDelegate GetCallback() => (t) => (t as Agent)?.WakeEndCallback();
         }
 
         #endregion

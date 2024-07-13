@@ -456,9 +456,9 @@ namespace MHServerEmu.Games.Powers
             }
 
             settings.OriginalTargetPosition = settings.TargetPosition;
-            EntityHelper.CrateOrb(EntityHelper.TestOrb.Red, settings.TargetPosition, Owner.Region);
+            // EntityHelper.CrateOrb(EntityHelper.TestOrb.Red, settings.TargetPosition, Owner.Region);
             GenerateActualTargetPosition(settings.TargetEntityId, settings.OriginalTargetPosition, out settings.TargetPosition, in settings);
-            EntityHelper.CrateOrb(EntityHelper.TestOrb.BigRed, settings.TargetPosition, Owner.Region);
+            // EntityHelper.CrateOrb(EntityHelper.TestOrb.BigRed, settings.TargetPosition, Owner.Region);
             MovementPowerPrototype movementPowerProto = FindPowerPrototype<MovementPowerPrototype>(powerProto);
             if (movementPowerProto == null || movementPowerProto.TeleportMethod != TeleportMethodType.Teleport)
                 ComputePowerMovementSettings(movementPowerProto, ref settings);
@@ -2590,7 +2590,7 @@ namespace MHServerEmu.Games.Powers
                 : Owner.RegionLocation.Position;
 
             GetTargets(targetList, Game, powerProto, Owner.Properties, primaryTarget, powerApplication.TargetPosition, userPosition,
-                GetApplicationRange(), Owner.Region.Id, Owner.Id, Owner.Id, Owner.Alliance, -1, GetFullExecutionTime(), 0);
+                GetApplicationRange(), Owner.Region.Id, Owner.Id, Owner.Id, Owner.Alliance, -1, GetFullExecutionTime(), (int)powerApplication.PowerRandomSeed);
 
             for (int i = 0; i < targetList.Count; i++)
             {
@@ -3276,7 +3276,7 @@ namespace MHServerEmu.Games.Powers
             if (reachProto.RandomAOETargets && randomSeed == 0)
             {
                 return Logger.WarnReturn(false,
-                    "GetAOETargets(): A power has RandomAOETargets set true, but no random seed to do it with!\n Power: {powerProto}\n Owner: {owner}\n");
+                    $"GetAOETargets(): A power has RandomAOETargets set true, but no random seed to do it with!\n Power: {powerProto}\n Owner: {owner}\n");
             }
 
             GRandom random = new(randomSeed);
