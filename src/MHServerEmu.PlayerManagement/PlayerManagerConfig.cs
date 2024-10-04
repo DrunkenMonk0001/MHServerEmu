@@ -7,6 +7,7 @@ namespace MHServerEmu.PlayerManagement
     /// </summary>
     public class PlayerManagerConfig : ConfigContainer
     {
+        public bool UseMySqlDBManager { get; private set; } = false;
         public bool UseJsonDBManager { get; private set; } = false;
         public bool IgnoreSessionToken { get; private set; } = false;
         public bool AllowClientVersionMismatch { get; private set; } = false;

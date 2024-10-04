@@ -9,6 +9,7 @@ using MHServerEmu.Core.Logging.Targets;
 using MHServerEmu.Core.Network;
 using MHServerEmu.DatabaseAccess;
 using MHServerEmu.DatabaseAccess.Json;
+using MHServerEmu.DatabaseAccess.MySQL;
 using MHServerEmu.DatabaseAccess.SQLite;
 using MHServerEmu.Frontend;
 using MHServerEmu.Games.GameData;
@@ -201,7 +202,7 @@ namespace MHServerEmu
         {
             // JsonDBManager saves a single account in a JSON file
             var config = ConfigManager.Instance.GetConfig<PlayerManagerConfig>();
-            IDBManager dbManager = config.UseJsonDBManager ? JsonDBManager.Instance : SQLiteDBManager.Instance;
+            IDBManager dbManager = config.UseJsonDBManager ? JsonDBManager.Instance : config.UseMySqlDBManager & !config.UseJsonDBManager ? MySQLDBManager.Instance : SQLiteDBManager.Instance;
 
             return PakFileSystem.Instance.Initialize()
                 && ProtocolDispatchTable.Instance.Initialize()
