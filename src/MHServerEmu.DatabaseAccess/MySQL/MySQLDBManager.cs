@@ -6,6 +6,10 @@ using MHServerEmu.DatabaseAccess.Models;
 using MHServerEmu.DatabaseAccess.MySqlDB;
 using MHServerEmu.DatabaseAccess.MySqlA;
 using MySql.Data.MySqlClient;
+using MHServerEmu.Core.Helpers;
+using MHServerEmu.DatabaseAccess.SQLite;
+using System.Data.SQLite;
+using System.Text;
 
 
 namespace MHServerEmu.DatabaseAccess.MySQL
@@ -23,9 +27,8 @@ namespace MHServerEmu.DatabaseAccess.MySQL
 
         private readonly object _writeLock = new();
 
-        private int _maxBackupNumber;
-        private TimeSpan _backupInterval;
-        private TimeSpan _lastBackupTime;
+        private string _dbFilePath;
+        private string _connectionString;
 
         public static MySQLDBManager Instance { get; } = new();
         private MySQLDBManager() { }
@@ -33,19 +36,37 @@ namespace MHServerEmu.DatabaseAccess.MySQL
         public bool Initialize()
         {
             var config = ConfigManager.Instance.GetConfig<MySQLDBManagerConfig>();
+            _connectionString = $"Data Source={_dbFilePath}";
+            _dbFilePath = Path.Combine(FileHelper.DataDirectory, ConfigManager.Instance.GetConfig<SQLiteDBManagerConfig>().FileName);
             try
             {
                 using MySqlConnection schemaCheck = GetConnection();
                 var isSchemaExist = schemaCheck.Query("SHOW DATABASES LIKE '" + config.MySqlDBName + "';");
                 schemaCheck.Close();
-                if (isSchemaExist.Count() == 0) InitializeDatabaseFile();
-                _lastBackupTime = Clock.GameTime;
+                if (!isSchemaExist.Any()) InitializeDatabaseFile();
+                if (File.Exists(_dbFilePath) == true)
+                {
+                    if (MigrateDatabaseFileToCurrentSchema() == false)
+                        return false;
+                    return true;
+                }
+                    //_lastBackupTime = Clock.GameTime;
                 return true;
             }
             catch
             {
-                Logger.Warn("Schema does not exist... Creating");
-                InitializeDatabaseFile();
+                if (File.Exists(_dbFilePath) == true)
+                {
+                    // Migrate existing database if needed
+                    if (MigrateDatabaseFileToCurrentSchema() == false)
+                        return false;
+                }
+                else
+                {
+                    if (InitializeDatabaseFile() == false)
+                        return false;
+                }
+
                 return true;
             }
         }
@@ -165,12 +186,12 @@ namespace MHServerEmu.DatabaseAccess.MySQL
         /// <summary>
         /// Creates and opens a new <see cref="MySQLConnection"/>.
         /// </summary>
-        private MySqlConnection GetConnection()
+        private static MySqlConnection GetConnection()
         {
             var config = ConfigManager.Instance.GetConfig<MySQLDBManagerConfig>();
             var connectionStringVars = string.Join(";", "server="+config.MySqlIP, "Database="+config.MySqlDBName, "Uid="+config.MySqlUsername, "Pwd="+config.MySqlPw);
             string connectionString = new MySql.Data.MySqlClient.MySqlConnectionStringBuilder(connectionStringVars).ToString();
-            MySqlConnection connection = new MySqlConnection(connectionString);
+            MySqlConnection connection = new(connectionString);
             connection.Open();
             return connection;
         }
@@ -187,7 +208,7 @@ namespace MHServerEmu.DatabaseAccess.MySQL
 
             var connectionStringVars = string.Join(";", "server=" + config.MySqlIP, "Uid=" + config.MySqlUsername, "Pwd=" + config.MySqlPw);
             string connectionString = new MySql.Data.MySqlClient.MySqlConnectionStringBuilder(connectionStringVars).ToString();
-            MySqlConnection connectionInit = new MySqlConnection(connectionString);
+            MySqlConnection connectionInit = new(connectionString);
             connectionInit.Open();
             connectionInit.Execute("CREATE SCHEMA IF NOT EXISTS " + config.MySqlDBName);
             connectionInit.Execute("USE " + config.MySqlDBName);
@@ -222,57 +243,104 @@ namespace MHServerEmu.DatabaseAccess.MySQL
         /// </summary>
         private bool MigrateDatabaseFileToCurrentSchema()
         {
-            using MySqlConnection connection = GetConnection();
 
-            int schemaVersion = GetSchemaVersion(connection);
-            if (schemaVersion > CurrentSchemaVersion)
-                return Logger.ErrorReturn(false, $"Initialize(): Existing database uses unsupported schema version {schemaVersion} (current = {CurrentSchemaVersion})");
-
-            Logger.Info($"Found existing database with schema version {schemaVersion} (current = {CurrentSchemaVersion})");
-
-            if (schemaVersion == CurrentSchemaVersion)
-                return true;
-
-            // Create a backup to fall back to if something goes wrong
-            
-
-            bool success = true;
-
-            while (schemaVersion < CurrentSchemaVersion)
+            if (File.Exists(_dbFilePath) == true)
             {
-                Logger.Info($"Migrating version {schemaVersion} => {schemaVersion + 1}...");
-
-                string migrationScript = MySQLScripts.GetMigrationScript(schemaVersion);
-                if (migrationScript == string.Empty)
+                var config = ConfigManager.Instance.GetConfig<MySQLDBManagerConfig>();
+                try
                 {
-                    Logger.Error($"MigrateDatabaseFileToCurrentSchema(): Failed to get database migration script for version {schemaVersion}");
-                    success = false;
-                    break;
+                    using MySqlConnection connection = GetConnection();
+                    File.WriteAllText($"{_dbFilePath}.WMigrate.sql", DumpSQLiteDatabase(_dbFilePath, true));
+                    string filePath = $"{_dbFilePath}.WMigrate.sql";
+                    Logger.Info("Importing SQLite Database into MySQL... This may take a while.");
+                    MySqlScript importScript = new(connection, File.ReadAllText(filePath));
+                    importScript.Execute();
+                    connection.Close();
+                    File.Move($"{_dbFilePath}", $"{_dbFilePath}.WMigrated");
+                    Logger.Info($"Old SQLite Database saved to {_dbFilePath}.Migrated");
+                    File.Delete($"{_dbFilePath}.WMigrate.sql");
+                    return true;
+                }
+                catch (Exception e)
+                {
+                    if (e.Message.Any())
+                    {
+                        Logger.Error(e.Message); return false;
+                    }
+                    File.WriteAllText($"{_dbFilePath}.Migrate.sql", DumpSQLiteDatabase(_dbFilePath, false));
+                    var connectionStringVars = string.Join(";", "server=" + config.MySqlIP, "Uid=" + config.MySqlUsername, "Pwd=" + config.MySqlPw);
+                    string connectionString = new MySql.Data.MySqlClient.MySqlConnectionStringBuilder(connectionStringVars).ToString();
+                    MySqlConnection connectionInit = new(connectionString);
+                    connectionInit.Open();
+                    connectionInit.Execute("CREATE SCHEMA IF NOT EXISTS " + config.MySqlDBName);
+                    connectionInit.Close();
+                    using MySqlConnection connection = GetConnection();
+                    Logger.Info("Importing SQLite Database into MySQL... This may take a while.");
+                    string filePath = $"{_dbFilePath}.Migrate.sql";
+                    MySqlScript importScript = new(connection, File.ReadAllText(filePath));
+                    importScript.Execute();
+                    File.Move($"{_dbFilePath}", $"{_dbFilePath}.Migrated");
+                    Logger.Info($"SQL to MySQL Migration success!");
+                    Logger.Info($"Old SQLite Database saved to {_dbFilePath}.Migrated");
+                    connection.Close();
+                    File.Delete($"{_dbFilePath}.WMigrate.sql");
+                    return true;
                 }
 
-                connection.Execute(migrationScript);
-                SetSchemaVersion(connection, ++schemaVersion);
-            }
-
-            success &= GetSchemaVersion(connection) == CurrentSchemaVersion;
-
-            if (success == false)
-            {
-                // Restore backup
-                
-                return Logger.ErrorReturn(false, "MigrateDatabaseFileToCurrentSchema(): Migration failed, backup restored");
             }
             else
             {
-                // Clean up backup
-                
-            }
+                using MySqlConnection connection = GetConnection();
+                int schemaVersion = GetSchemaVersion(connection);
+                if (schemaVersion > CurrentSchemaVersion)
+                    return Logger.ErrorReturn(false, $"Initialize(): Existing database uses unsupported schema version {schemaVersion} (current = {CurrentSchemaVersion})");
 
-            Logger.Info($"Successfully migrated to schema version {CurrentSchemaVersion}");
+                Logger.Info($"Found existing database with schema version {schemaVersion} (current = {CurrentSchemaVersion})");
+
+                if (schemaVersion == CurrentSchemaVersion)
+                    return true;
+
+                // Create a backup to fall back to if something goes wrong
+
+
+                bool success = true;
+
+                while (schemaVersion < CurrentSchemaVersion)
+                {
+                    Logger.Info($"Migrating version {schemaVersion} => {schemaVersion + 1}...");
+
+                    string migrationScript = MySQLScripts.GetMigrationScript(schemaVersion);
+                    if (migrationScript == string.Empty)
+                    {
+                        Logger.Error($"MigrateDatabaseFileToCurrentSchema(): Failed to get database migration script for version {schemaVersion}");
+                        success = false;
+                        break;
+                    }
+
+                    connection.Execute(migrationScript);
+                    SetSchemaVersion(connection, ++schemaVersion);
+                }
+
+                success &= GetSchemaVersion(connection) == CurrentSchemaVersion;
+
+                if (success == false)
+                {
+                    // Restore backup
+
+                    return Logger.ErrorReturn(false, "MigrateDatabaseFileToCurrentSchema(): Migration failed, backup restored");
+                }
+                else
+                {
+                    // Clean up backup
+
+                }
+
+                Logger.Info($"Successfully migrated to schema version {CurrentSchemaVersion}");
+            }
             return true;
         }
 
-        private bool DoSavePlayerData(DBAccount account)
+        private static bool DoSavePlayerData(DBAccount account)
         {
 
             {
@@ -375,6 +443,122 @@ namespace MHServerEmu.DatabaseAccess.MySQL
             connection.Execute(@$"UPDATE {tableName} SET ContainerDbGuid=@ContainerDbGuid, InventoryProtoGuid=@InventoryProtoGuid,
                                 Slot=@Slot, EntityProtoGuid=@EntityProtoGuid, ArchiveData=@ArchiveData WHERE DbGuid=@DbGuid",
                                 entries, transaction);
+        }
+
+        public static string DumpSQLiteDatabase(string dbFilePath, bool isExist)
+        {
+                StringBuilder tableCreation = new();
+                StringBuilder foreignKeys = new();
+                StringBuilder dataInsertion = new();
+
+            using SQLiteConnection connection = new($"Data Source={dbFilePath};");
+            connection.Open();
+
+            List<string> tableNames = new();
+            using (var cmd = new SQLiteCommand("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%';", connection))
+            using (var reader = cmd.ExecuteReader())
+            {
+                while (reader.Read())
+                {
+                    tableNames.Add(reader.GetString(0));
+                }
+            }
+
+            foreach (string tableName in tableNames)
+            {
+                // Get table creation SQL
+                using (var cmd = new SQLiteCommand($"SELECT sql FROM sqlite_master WHERE type='table' AND name='{tableName}';", connection))
+                {
+                    string createTableSql = cmd.ExecuteScalar() as string;
+                    tableCreation.AppendLine(createTableSql + ";");
+
+                    // Extract foreign key definitions
+                    string[] lines = createTableSql.Split('\n');
+                    foreach (string line in lines)
+                    {
+                        if (line.Trim().StartsWith("FOREIGN KEY", StringComparison.OrdinalIgnoreCase))
+                        {
+                            foreignKeys.AppendLine($"ALTER TABLE {tableName} ADD {line.Trim()};");
+                        }
+                    }
+                }
+
+                // Get column names and types
+                List<(string Name, string Type)> columns = new();
+                using (var cmd = new SQLiteCommand($"PRAGMA table_info('{tableName}');", connection))
+                using (var reader = cmd.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        columns.Add((reader.GetString(1), reader.GetString(2))); // Name at index 1, Type at index 2
+                    }
+                }
+
+                // Dump table data
+                using (var cmd = new SQLiteCommand($"SELECT * FROM '{tableName}';", connection))
+                using (var reader = cmd.ExecuteReader())
+                {
+                    while (reader.Read())
+                    {
+                        StringBuilder insertSql = new();
+                        if (!isExist) insertSql = new($"INSERT INTO `{tableName}` (");
+                        if (isExist) insertSql = new($"INSERT IGNORE INTO `{tableName}` (");
+                        insertSql.Append(string.Join(", ", columns.Select(c => c.Name)));
+                        insertSql.Append(") VALUES (");
+
+                        for (int i = 0; i < reader.FieldCount; i++)
+                        {
+                            if (i > 0) insertSql.Append(", ");
+                            if (reader.IsDBNull(i))
+                            {
+                                insertSql.Append("NULL");
+                            }
+                            else if (columns[i].Type.ToUpper() == "BLOB")
+                            {
+                                byte[] blobData = (byte[])reader.GetValue(i);
+                                string hexString = BitConverter.ToString(blobData).Replace("-", "");
+                                insertSql.Append($"X'{hexString}'");
+                            }
+                            else
+                            {
+                                string value = reader.GetValue(i).ToString().Replace("'", "''");
+                                insertSql.Append($"'{value}'");
+                            }
+                        }
+                        insertSql.Append(");");
+                        dataInsertion.AppendLine(insertSql.ToString());
+                    }
+                }
+            }
+
+            // Get and append index creation statements
+            StringBuilder indexCreation = new();
+            using (var cmd = new SQLiteCommand("SELECT sql FROM sqlite_master WHERE type='index' AND sql IS NOT NULL;", connection))
+            using (var reader = cmd.ExecuteReader())
+            {
+                while (reader.Read())
+                {
+                    indexCreation.AppendLine(reader.GetString(0) + ";");
+                }
+            }
+
+            // Combine all parts in the correct order
+            StringBuilder finalDump = new();
+            finalDump.AppendLine("-- Script to Initialize a new database file\r\n");
+            finalDump.AppendLine("SET FOREIGN_KEY_CHECKS=0;");
+            if (!isExist)
+            {
+                finalDump.Append(tableCreation);
+                //finalDump.Append(foreignKeys);
+                finalDump.Append(indexCreation);
+            }
+            finalDump.Append(dataInsertion);
+            finalDump.Replace("\"", "");
+            finalDump.Replace("`", "");
+            finalDump.Replace("INTEGER", "BIGINT");
+            finalDump.Replace("TEXT", "VARCHAR(50)");
+            finalDump.Replace("BLOB", "BLOB(1000)");
+            return finalDump.ToString();
         }
     }
 }
