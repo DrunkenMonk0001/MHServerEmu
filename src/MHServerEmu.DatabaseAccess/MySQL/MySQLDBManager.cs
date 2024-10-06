@@ -35,7 +35,7 @@ namespace MHServerEmu.DatabaseAccess.MySQL
 
         public bool Initialize()
         {
-            var config = ConfigManager.Instance.GetConfig<MySQLDBManagerConfig>();
+            var config = ConfigManager.Instance.GetConfig<MySqlDBManagerConfig>();
             _connectionString = $"Data Source={_dbFilePath}";
             _dbFilePath = Path.Combine(FileHelper.DataDirectory, ConfigManager.Instance.GetConfig<SQLiteDBManagerConfig>().FileName);
             try
@@ -188,7 +188,7 @@ namespace MHServerEmu.DatabaseAccess.MySQL
         /// </summary>
         private static MySqlConnection GetConnection()
         {
-            var config = ConfigManager.Instance.GetConfig<MySQLDBManagerConfig>();
+            var config = ConfigManager.Instance.GetConfig<MySqlDBManagerConfig>();
             var connectionStringVars = string.Join(";", "server="+config.MySqlIP, "Database="+config.MySqlDBName, "Uid="+config.MySqlUsername, "Pwd="+config.MySqlPw, "SslMode=Required;AllowPublicKeyRetrieval=True;");
             string connectionString = new MySql.Data.MySqlClient.MySqlConnectionStringBuilder(connectionStringVars).ToString();
             MySqlConnection connection = new(connectionString);
@@ -202,7 +202,7 @@ namespace MHServerEmu.DatabaseAccess.MySQL
         private bool InitializeDatabaseFile()
         {
             string MySqlInitializationScript = MySqlA.MySQLScripts.GetInitializationScript();
-            var config = ConfigManager.Instance.GetConfig<MySQLDBManagerConfig>();
+            var config = ConfigManager.Instance.GetConfig<MySqlDBManagerConfig>();
             if (MySqlInitializationScript == string.Empty)
                 return Logger.ErrorReturn(false, "InitializeDatabaseFile(): Failed to get database initialization script");
 
@@ -246,7 +246,7 @@ namespace MHServerEmu.DatabaseAccess.MySQL
 
             if (File.Exists(_dbFilePath) == true)
             {
-                var config = ConfigManager.Instance.GetConfig<MySQLDBManagerConfig>();
+                var config = ConfigManager.Instance.GetConfig<MySqlDBManagerConfig>();
                 try
                 {
                     using MySqlConnection connection = GetConnection();
@@ -265,7 +265,7 @@ namespace MHServerEmu.DatabaseAccess.MySQL
                 {
                     if (e.Message.Any())
                     {
-                        Logger.Error(e.Message);
+                        //Logger.Error(e.Message);
                     }
                     File.WriteAllText($"{_dbFilePath}.Migrate.sql", DumpSQLiteDatabase(_dbFilePath, false));
                     var connectionStringVars = string.Join(";", "server=" + config.MySqlIP, "Uid=" + config.MySqlUsername, "Pwd=" + config.MySqlPw, "SslMode=Required;AllowPublicKeyRetrieval=True;");

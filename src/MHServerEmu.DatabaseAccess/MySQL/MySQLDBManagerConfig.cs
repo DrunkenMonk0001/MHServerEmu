@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 
 namespace MHServerEmu.DatabaseAccess.MySqlDB
 {
-    public class MySQLDBManagerConfig : ConfigContainer
+    public class MySqlDBManagerConfig : ConfigContainer
     {
         public string MySqlIP { get; private set; } = "127.0.0.1";
 
