@@ -250,15 +250,16 @@ namespace MHServerEmu.DatabaseAccess.MySQL
                 try
                 {
                     using MySqlConnection connection = GetConnection();
-                    File.WriteAllText($"{_dbFilePath}.WMigrate.sql", DumpSQLiteDatabase(_dbFilePath, true));
-                    string filePath = $"{_dbFilePath}.WMigrate.sql";
+                    File.WriteAllText($"{_dbFilePath}.Migrate.sql", DumpSQLiteDatabase(_dbFilePath, true));
+                    string filePath = $"{_dbFilePath}.Migrate.sql";
                     Logger.Info("Importing SQLite Database into MySQL... This may take a while.");
                     MySqlScript importScript = new(connection, File.ReadAllText(filePath));
                     importScript.Execute();
                     connection.Close();
-                    File.Move($"{_dbFilePath}", $"{_dbFilePath}.WMigrated");
+                    File.Move($"{_dbFilePath}", $"{_dbFilePath}.Migrated");
                     Logger.Info($"Old SQLite Database saved to {_dbFilePath}.Migrated");
-                    File.Delete($"{_dbFilePath}.WMigrate.sql");
+                    File.Delete($"{_dbFilePath}.Migrate.sql");
+                    Logger.Info($"SQL to MySQL Migration success!");
                     return true;
                 }
                 catch (Exception e)
@@ -267,23 +268,18 @@ namespace MHServerEmu.DatabaseAccess.MySQL
                     {
                         //Logger.Error(e.Message);
                     }
-                    File.WriteAllText($"{_dbFilePath}.Migrate.sql", DumpSQLiteDatabase(_dbFilePath, false));
-                    var connectionStringVars = string.Join(";", "server=" + config.MySqlIP, "Uid=" + config.MySqlUsername, "Pwd=" + config.MySqlPw, "SslMode=Required;AllowPublicKeyRetrieval=True;");
-                    string connectionString = new MySql.Data.MySqlClient.MySqlConnectionStringBuilder(connectionStringVars).ToString();
-                    MySqlConnection connectionInit = new(connectionString);
-                    connectionInit.Open();
-                    connectionInit.Execute("CREATE SCHEMA IF NOT EXISTS " + config.MySqlDBName);
-                    connectionInit.Close();
+                    if (!InitializeDatabaseFile()) return false;
                     using MySqlConnection connection = GetConnection();
-                    Logger.Info("Importing SQLite Database into MySQL... This may take a while.");
+                    File.WriteAllText($"{_dbFilePath}.Migrate.sql", DumpSQLiteDatabase(_dbFilePath, true));
                     string filePath = $"{_dbFilePath}.Migrate.sql";
+                    Logger.Info("Importing SQLite Database into MySQL... This may take a while.");
                     MySqlScript importScript = new(connection, File.ReadAllText(filePath));
                     importScript.Execute();
-                    File.Move($"{_dbFilePath}", $"{_dbFilePath}.Migrated");
-                    Logger.Info($"SQL to MySQL Migration success!");
-                    Logger.Info($"Old SQLite Database saved to {_dbFilePath}.Migrated");
                     connection.Close();
+                    File.Move($"{_dbFilePath}", $"{_dbFilePath}.Migrated");
+                    Logger.Info($"Old SQLite Database saved to {_dbFilePath}.Migrated");
                     File.Delete($"{_dbFilePath}.Migrate.sql");
+                    Logger.Info($"SQL to MySQL Migration success!");
                     return true;
                 }
 
