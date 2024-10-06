@@ -189,7 +189,7 @@ namespace MHServerEmu.DatabaseAccess.MySQL
         private static MySqlConnection GetConnection()
         {
             var config = ConfigManager.Instance.GetConfig<MySQLDBManagerConfig>();
-            var connectionStringVars = string.Join(";", "server="+config.MySqlIP, "Database="+config.MySqlDBName, "Uid="+config.MySqlUsername, "Pwd="+config.MySqlPw);
+            var connectionStringVars = string.Join(";", "server="+config.MySqlIP, "Database="+config.MySqlDBName, "Uid="+config.MySqlUsername, "Pwd="+config.MySqlPw, "SslMode=Required;AllowPublicKeyRetrieval=True;");
             string connectionString = new MySql.Data.MySqlClient.MySqlConnectionStringBuilder(connectionStringVars).ToString();
             MySqlConnection connection = new(connectionString);
             connection.Open();
@@ -206,7 +206,7 @@ namespace MHServerEmu.DatabaseAccess.MySQL
             if (MySqlInitializationScript == string.Empty)
                 return Logger.ErrorReturn(false, "InitializeDatabaseFile(): Failed to get database initialization script");
 
-            var connectionStringVars = string.Join(";", "server=" + config.MySqlIP, "Uid=" + config.MySqlUsername, "Pwd=" + config.MySqlPw);
+            var connectionStringVars = string.Join(";", "server=" + config.MySqlIP, "Uid=" + config.MySqlUsername, "Pwd=" + config.MySqlPw, "SslMode=Required;AllowPublicKeyRetrieval=True;");
             string connectionString = new MySql.Data.MySqlClient.MySqlConnectionStringBuilder(connectionStringVars).ToString();
             MySqlConnection connectionInit = new(connectionString);
             connectionInit.Open();
@@ -265,10 +265,10 @@ namespace MHServerEmu.DatabaseAccess.MySQL
                 {
                     if (e.Message.Any())
                     {
-                        Logger.Error(e.Message); return false;
+                        Logger.Error(e.Message);
                     }
                     File.WriteAllText($"{_dbFilePath}.Migrate.sql", DumpSQLiteDatabase(_dbFilePath, false));
-                    var connectionStringVars = string.Join(";", "server=" + config.MySqlIP, "Uid=" + config.MySqlUsername, "Pwd=" + config.MySqlPw);
+                    var connectionStringVars = string.Join(";", "server=" + config.MySqlIP, "Uid=" + config.MySqlUsername, "Pwd=" + config.MySqlPw, "SslMode=Required;AllowPublicKeyRetrieval=True;");
                     string connectionString = new MySql.Data.MySqlClient.MySqlConnectionStringBuilder(connectionStringVars).ToString();
                     MySqlConnection connectionInit = new(connectionString);
                     connectionInit.Open();
@@ -283,7 +283,7 @@ namespace MHServerEmu.DatabaseAccess.MySQL
                     Logger.Info($"SQL to MySQL Migration success!");
                     Logger.Info($"Old SQLite Database saved to {_dbFilePath}.Migrated");
                     connection.Close();
-                    File.Delete($"{_dbFilePath}.WMigrate.sql");
+                    File.Delete($"{_dbFilePath}.Migrate.sql");
                     return true;
                 }
 
