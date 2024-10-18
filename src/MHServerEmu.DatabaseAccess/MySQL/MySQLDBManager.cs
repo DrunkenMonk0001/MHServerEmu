@@ -72,13 +72,11 @@ namespace MHServerEmu.DatabaseAccess.MySQL
         }
 
 
-            public bool TryQueryAccountByEmail(string email, out DBAccount account)
+        public bool TryQueryAccountByEmail(string email, out DBAccount account)
         {
             using MySqlConnection connection = GetConnection();
-
             var accounts = connection.Query<DBAccount>("SELECT * FROM Account WHERE Email = @Email", new { Email = email });
 
-            // Associated player data is loaded separately
             account = accounts.FirstOrDefault();
             return account != null;
         }
@@ -94,10 +92,9 @@ namespace MHServerEmu.DatabaseAccess.MySQL
 
         public bool InsertAccount(DBAccount account)
         {
-
+            lock (_writeLock)
             {
                 using MySqlConnection connection = GetConnection();
-
                 try
                 {
                     connection.Execute(@"INSERT INTO Account (Id, Email, PlayerName, PasswordHash, Salt, UserLevel, Flags)
@@ -111,12 +108,12 @@ namespace MHServerEmu.DatabaseAccess.MySQL
                 }
             }
         }
+
         public bool UpdateAccount(DBAccount account)
         {
-
+            lock (_writeLock)
             {
                 using MySqlConnection connection = GetConnection();
-
                 try
                 {
                     connection.Execute(@"UPDATE Account SET Email=@Email, PlayerName=@PlayerName, PasswordHash=@PasswordHash, Salt=@Salt,
@@ -133,11 +130,9 @@ namespace MHServerEmu.DatabaseAccess.MySQL
 
         public bool LoadPlayerData(DBAccount account)
         {
-            // Clear existing data
             account.Player = null;
             account.ClearEntities();
 
-            // Load fresh data
             using MySqlConnection connection = GetConnection();
 
             var @params = new { DbGuid = account.Id };
@@ -151,7 +146,6 @@ namespace MHServerEmu.DatabaseAccess.MySQL
                 Logger.Info($"Initialized player data for account 0x{account.Id:X}");
             }
 
-            // Load inventory entities
             account.Avatars.AddRange(LoadEntitiesFromTable(connection, "Avatar", account.Id));
             account.TeamUps.AddRange(LoadEntitiesFromTable(connection, "TeamUp", account.Id));
             account.Items.AddRange(LoadEntitiesFromTable(connection, "Item", account.Id));
@@ -176,16 +170,14 @@ namespace MHServerEmu.DatabaseAccess.MySQL
             {
                 if (DoSavePlayerData(account))
                     return Logger.InfoReturn(true, $"Successfully written player data for account [{account}]");
-
-                // Maybe we should add a delay here
             }
 
             return Logger.WarnReturn(false, $"SavePlayerData(): Failed to write player data for account [{account}]");
         }
 
-        /// <summary>
+
         /// Creates and opens a new <see cref="MySQLConnection"/>.
-        /// </summary>
+
         private static MySqlConnection GetConnection()
         {
             var config = ConfigManager.Instance.GetConfig<MySqlDBManagerConfig>();
@@ -196,9 +188,9 @@ namespace MHServerEmu.DatabaseAccess.MySQL
             return connection;
         }
 
-        /// <summary>
+
         /// Initializes a new empty database file using the current schema.
-        /// </summary>
+
         private bool InitializeDatabaseFile()
         {
             string MySqlInitializationScript = MySqlA.MySQLScripts.GetInitializationScript();
@@ -221,9 +213,8 @@ namespace MHServerEmu.DatabaseAccess.MySQL
             return true;
         }
 
-        /// <summary>
         /// Creates the specified number of test accounts.
-        /// </summary>
+
         private void CreateTestAccounts(int numAccounts)
         {
             for (int i = 0; i < numAccounts; i++)
@@ -238,9 +229,7 @@ namespace MHServerEmu.DatabaseAccess.MySQL
             }
         }
 
-        /// <summary>
         /// Migrates an existing database to the current schema if needed.
-        /// </summary>
         private bool MigrateDatabaseFileToCurrentSchema()
         {
 
@@ -336,22 +325,21 @@ namespace MHServerEmu.DatabaseAccess.MySQL
             return true;
         }
 
-        private static bool DoSavePlayerData(DBAccount account)
+        private bool DoSavePlayerData(DBAccount account)
         {
-
+            lock (_writeLock)
             {
                 using MySqlConnection connection = GetConnection();
-
-                // Use a transaction to make sure all data is saved
                 using MySqlTransaction transaction = connection.BeginTransaction();
 
                 try
                 {
-                    // Update player entity
+                    connection.Execute("SET FOREIGN_KEY_CHECKS=0;", transaction: transaction);
+
                     if (account.Player != null)
                     {
-                        connection.Execute(@$"INSERT IGNORE INTO Player (DbGuid) VALUES (@DbGuid)", account.Player, transaction);
-                        connection.Execute(@$"UPDATE Player SET ArchiveData=@ArchiveData, StartTarget=@StartTarget,
+                        connection.Execute(@"INSERT INTO Player (DbGuid) VALUES (@DbGuid) ON DUPLICATE KEY UPDATE DbGuid=@DbGuid", account.Player, transaction);
+                        connection.Execute(@"UPDATE Player SET ArchiveData=@ArchiveData, StartTarget=@StartTarget,
                                             StartTargetRegionOverride=@StartTargetRegionOverride, AOIVolume=@AOIVolume WHERE DbGuid = @DbGuid",
                                             account.Player, transaction);
                     }
@@ -360,7 +348,6 @@ namespace MHServerEmu.DatabaseAccess.MySQL
                         Logger.Warn($"DoSavePlayerData(): Attempted to save null player entity data for account {account}");
                     }
 
-                    // Update inventory entities
                     UpdateEntityTable(connection, transaction, "Avatar", account.Id, account.Avatars);
                     UpdateEntityTable(connection, transaction, "TeamUp", account.Id, account.TeamUps);
                     UpdateEntityTable(connection, transaction, "Item", account.Id, account.Items);
@@ -376,23 +363,22 @@ namespace MHServerEmu.DatabaseAccess.MySQL
                         UpdateEntityTable(connection, transaction, "Item", teamUp.DbGuid, account.Items);
                     }
 
-                    transaction.Commit();
+                    connection.Execute("SET FOREIGN_KEY_CHECKS=1;", transaction: transaction);
 
+                    transaction.Commit();
 
                     return true;
                 }
                 catch (Exception e)
                 {
-                    Logger.Warn($"DoSavePlayerData(): MySql error for account [{account}]: {e.Message}");
+                    Logger.Warn($"DoSavePlayerData(): MySQL error for account [{account}]: {e.Message}");
                     transaction.Rollback();
                     return false;
                 }
             }
         }
 
-        /// <summary>
         /// Returns the user_version value of the current database.
-        /// </summary>
         private static int GetSchemaVersion(MySqlConnection connection)
         {
             var queryResult = connection.Query<int>("PRAGMA user_version");
@@ -402,26 +388,26 @@ namespace MHServerEmu.DatabaseAccess.MySQL
             return Logger.WarnReturn(-1, "GetSchemaVersion(): Failed to query user_version from the DB");
         }
 
-        /// <summary>
+
         /// Sets the user_version value of the current database.
-        /// </summary>
+
         private static void SetSchemaVersion(MySqlConnection connection, int version)
         {
             connection.Execute($"UPDATE PRAGMA SET user_version={version} LIMIT 1");
         }
 
-        /// <summary>
+
         /// Loads <see cref="DBEntity"/> instances belonging to the specified container from the specified table.
-        /// </summary>
+
         private static IEnumerable<DBEntity> LoadEntitiesFromTable(MySqlConnection connection, string tableName, long containerDbGuid)
         {
             var @params = new { ContainerDbGuid = containerDbGuid };
             return connection.Query<DBEntity>($"SELECT * FROM {tableName} WHERE ContainerDbGuid = @ContainerDbGuid", @params);
         }
 
-        /// <summary>
+
         /// Updates <see cref="DBEntity"/> instances belonging to the specified container in the specified table using the provided <see cref="DBEntityCollection"/>.
-        /// </summary>
+
         private static void UpdateEntityTable(MySqlConnection connection, MySqlTransaction transaction, string tableName,
             long containerDbGuid, DBEntityCollection dbEntityCollection)
         {

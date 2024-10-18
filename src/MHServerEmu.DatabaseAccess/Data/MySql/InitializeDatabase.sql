@@ -1,79 +1,72 @@
--- Initialize a new database file using the current schema version
-
-CREATE TABLE  Account  (
-	 Id 	BIGINT NOT NULL UNIQUE,
-	 Email 	VARCHAR(50) NOT NULL UNIQUE,
-	 PlayerName 	VARCHAR(50) NOT NULL UNIQUE,
-	 PasswordHash 	BLOB(255) NOT NULL,
-	 Salt 	BLOB(50) NOT NULL,
-	 UserLevel 	INTEGER NOT NULL,
-	 Flags 	INTEGER NOT NULL,
-	PRIMARY KEY( Id )
+CREATE TABLE IF NOT EXISTS SchemaVersion (
+    schema_version INT NOT NULL
 );
 
-CREATE TABLE  Player  (
-	 DbGuid 	BIGINT NOT NULL UNIQUE,
-	 ArchiveData 	BLOB(1000),
-	 StartTarget 	BIGINT,
-	 StartTargetRegionOverride 	BIGINT,
-	 AOIVolume 	INTEGER,
-	FOREIGN KEY( DbGuid ) REFERENCES  Account ( Id ) ON DELETE CASCADE,
-	PRIMARY KEY( DbGuid )
+INSERT INTO SchemaVersion (schema_version) VALUES (2);
+
+CREATE TABLE IF NOT EXISTS Account (
+    Id BIGINT PRIMARY KEY,
+    Email VARCHAR(255) NOT NULL UNIQUE,
+    PlayerName VARCHAR(255) NOT NULL UNIQUE,
+    PasswordHash BLOB NOT NULL,
+    Salt BLOB NOT NULL,
+    UserLevel TINYINT NOT NULL,
+    Flags INT NOT NULL
 );
 
-CREATE TABLE  Avatar  (
-	 DbGuid 	BIGINT NOT NULL UNIQUE,
-	 ContainerDbGuid 	BIGINT,
-	 InventoryProtoGuid 	BIGINT,
-	 Slot 	INTEGER,
-	 EntityProtoGuid 	BIGINT,
-	 ArchiveData 	BLOB(1000),
-	FOREIGN KEY( ContainerDbGuid ) REFERENCES  Player ( DbGuid ) ON DELETE CASCADE,
-	PRIMARY KEY( DbGuid )
+CREATE TABLE IF NOT EXISTS Player (
+    DbGuid BIGINT PRIMARY KEY,
+    ContainerId BIGINT,
+    ArchiveData LONGBLOB,
+    StartTarget BIGINT,
+    StartTargetRegionOverride BIGINT,
+    AOIVolume INT,
+    FOREIGN KEY (DbGuid) REFERENCES Account(Id) ON DELETE CASCADE
 );
 
-CREATE TABLE  TeamUp  (
-	 DbGuid 	BIGINT NOT NULL UNIQUE,
-	 ContainerDbGuid 	BIGINT,
-	 InventoryProtoGuid 	BIGINT,
-	 Slot 	INTEGER,
-	 EntityProtoGuid 	BIGINT,
-	 ArchiveData 	BLOB(1000),
-	FOREIGN KEY( ContainerDbGuid ) REFERENCES  Player ( DbGuid ) ON DELETE CASCADE,
-	PRIMARY KEY( DbGuid )
+CREATE TABLE IF NOT EXISTS Avatar (
+    DbGuid BIGINT PRIMARY KEY,
+    ContainerDbGuid BIGINT,
+    InventoryProtoGuid BIGINT,
+    Slot INT UNSIGNED,
+    EntityProtoGuid BIGINT,
+    ArchiveData LONGBLOB,
+    FOREIGN KEY (ContainerDbGuid) REFERENCES Player(DbGuid) ON DELETE CASCADE
 );
 
-CREATE TABLE  Item  (
-	 DbGuid 	BIGINT NOT NULL UNIQUE,
-	 ContainerDbGuid 	BIGINT,
-	 InventoryProtoGuid 	BIGINT,
-	 Slot 	INTEGER,
-	 EntityProtoGuid 	BIGINT,
-	 ArchiveData 	BLOB(1000),
-	FOREIGN KEY( ContainerDbGuid ) REFERENCES  Player ( DbGuid ) ON DELETE CASCADE,
-	FOREIGN KEY( ContainerDbGuid ) REFERENCES  Avatar ( DbGuid ) ON DELETE CASCADE,
-	FOREIGN KEY( ContainerDbGuid ) REFERENCES  TeamUp ( DbGuid ) ON DELETE CASCADE,
-	PRIMARY KEY( DbGuid )
+CREATE TABLE IF NOT EXISTS TeamUp (
+    DbGuid BIGINT PRIMARY KEY,
+    ContainerDbGuid BIGINT,
+    InventoryProtoGuid BIGINT,
+    Slot INT UNSIGNED,
+    EntityProtoGuid BIGINT,
+    ArchiveData LONGBLOB,
+    FOREIGN KEY (ContainerDbGuid) REFERENCES Player(DbGuid) ON DELETE CASCADE
 );
 
-CREATE TABLE  ControlledEntity  (
-	 DbGuid 	BIGINT NOT NULL UNIQUE,
-	 ContainerDbGuid 	BIGINT,
-	 InventoryProtoGuid 	BIGINT,
-	 Slot 	INTEGER,
-	 EntityProtoGuid 	BIGINT,
-	 ArchiveData 	BLOB(1000),
-	FOREIGN KEY( ContainerDbGuid ) REFERENCES  Avatar ( DbGuid ) ON DELETE CASCADE,
-	PRIMARY KEY( DbGuid )
+CREATE TABLE IF NOT EXISTS Item (
+    DbGuid BIGINT PRIMARY KEY,
+    ContainerDbGuid BIGINT,
+    InventoryProtoGuid BIGINT,
+    Slot INT UNSIGNED,
+    EntityProtoGuid BIGINT,
+    ArchiveData LONGBLOB,
+    FOREIGN KEY (ContainerDbGuid) REFERENCES Player(DbGuid) ON DELETE CASCADE,
+    FOREIGN KEY (ContainerDbGuid) REFERENCES Avatar(DbGuid) ON DELETE CASCADE,
+    FOREIGN KEY (ContainerDbGuid) REFERENCES TeamUp(DbGuid) ON DELETE CASCADE
 );
 
-CREATE TABLE  PRAGMA  (
-	 user_version 	INT NOT NULL UNIQUE
+CREATE TABLE IF NOT EXISTS ControlledEntity (
+    DbGuid BIGINT PRIMARY KEY,
+    ContainerDbGuid BIGINT,
+    InventoryProtoGuid BIGINT,
+    Slot INT UNSIGNED,
+    EntityProtoGuid BIGINT,
+    ArchiveData LONGBLOB,
+    FOREIGN KEY (ContainerDbGuid) REFERENCES Avatar(DbGuid) ON DELETE CASCADE
 );
 
-INSERT INTO pragma (user_version) VALUES (2);
-
-CREATE INDEX  IX_Avatar_ContainerDbGuid  ON  Avatar  ( ContainerDbGuid );
-CREATE INDEX  IX_TeamUp_ContainerDbGuid  ON  TeamUp  ( ContainerDbGuid );
-CREATE INDEX  IX_Item_ContainerDbGuid  ON  Item  ( ContainerDbGuid );
-CREATE INDEX  IX_ControlledEntity_ContainerDbGuid  ON  ControlledEntity  ( ContainerDbGuid );
+CREATE INDEX IX_Avatar_ContainerDbGuid ON Avatar (ContainerDbGuid);
+CREATE INDEX IX_TeamUp_ContainerDbGuid ON TeamUp (ContainerDbGuid);
+CREATE INDEX IX_Item_ContainerDbGuid ON Item (ContainerDbGuid);
+CREATE INDEX IX_ControlledEntity_ContainerDbGuid ON ControlledEntity (ContainerDbGuid);
