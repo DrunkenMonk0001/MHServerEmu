@@ -1,3 +1,5 @@
+## This is a fork that implements MySQL as an option for database management
+
 # MHServerEmu
 
 MHServerEmu is a server emulator for Marvel Heroes.
