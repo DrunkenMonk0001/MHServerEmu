@@ -16,6 +16,7 @@ using MHServerEmu.Games.GameData.Prototypes;
 using MHServerEmu.Games.Powers;
 using MHServerEmu.Games.Properties;
 using MHServerEmu.Games.Properties.Evals;
+using MHServerEmu.Games.Regions;
 
 namespace MHServerEmu.Games.Entities.Items
 {
@@ -64,6 +65,9 @@ namespace MHServerEmu.Games.Entities.Items
             if (settings.ItemSpec != null)
                 ApplyItemSpec(settings.ItemSpec);
 
+            if (Prototype is RelicPrototype)
+                RunRelicEval();
+
             return true;
         }
 
@@ -79,6 +83,12 @@ namespace MHServerEmu.Games.Entities.Items
             return true;
         }
 
+        public override void OnPostInit(EntitySettings settings)
+        {
+            base.OnPostInit(settings);
+            RefreshProcPowerIndexProperties();
+        }
+
         public override bool Serialize(Archive archive)
         {
             bool success = base.Serialize(archive);
@@ -92,6 +102,47 @@ namespace MHServerEmu.Games.Entities.Items
             if (itemProto == null) return Logger.WarnReturn(false, "IsAutoStackedWhenAddedToInventory(): itemProto == null");
             if (itemProto.StackSettings == null) return false;
             return itemProto.StackSettings.AutoStackWhenAddedToInventory;
+        }
+
+        public override void OnPropertyChange(PropertyId id, PropertyValue newValue, PropertyValue oldValue, SetPropertyFlags flags)
+        {
+            base.OnPropertyChange(id, newValue, oldValue, flags);
+            if (flags.HasFlag(SetPropertyFlags.Refresh)) return;
+            
+            switch (id.Enum)
+            {
+                case PropertyEnum.InventoryStackCount:
+                    RunRelicEval();
+                    RefreshProcPowerIndexProperties();
+
+                    int delta = (int)newValue - oldValue;
+                    if (delta == 0) return;
+
+                    Player owner = GetOwnerOfType<Player>();
+                    if (owner == null) return;
+
+                    Region region = owner.GetRegion();
+                    if (region == null) return;
+
+                    InventoryPrototype inventoryProto = InventoryLocation?.InventoryPrototype;
+                    if (inventoryProto == null) return;
+                    if (inventoryProto.IsPlayerGeneralInventory == false && inventoryProto.IsEquipmentInventory == false) return;
+
+                    if (delta > 0)
+                    {
+                        // TODO: PlayerCollectedItemGameEvent
+                    }
+                    else if (delta < 0)
+                    {
+                        // TODO: PlayerLostItemGameEvent
+                    }
+
+                    break;
+
+                case PropertyEnum.PetItemDonationCount:
+                    // TODO
+                    break;
+            }
         }
 
         public bool CanUse(Agent agent, bool powerUse)
@@ -203,6 +254,12 @@ namespace MHServerEmu.Games.Entities.Items
                 ScheduleDestroyEvent(TimeSpan.Zero);
 
             return true;
+        }
+
+        public void SetRecentlyAdded(bool value)
+        {
+            Properties[PropertyEnum.ItemRecentlyAddedGlint] = value;
+            Properties[PropertyEnum.ItemRecentlyAddedToInventory] = value;
         }
 
         private bool ApplyItemSpec(ItemSpec itemSpec)
@@ -352,6 +409,61 @@ namespace MHServerEmu.Games.Entities.Items
             Properties[PropertyEnum.ItemVariation] = random.NextFloat();
 
             return true;
+        }
+
+        public void InteractWithAvatar(Avatar avatar)
+        {
+            var player = avatar.GetOwnerOfType<Player>();
+            if (player == null) return;
+
+            var itemProto = ItemPrototype;
+
+            if (itemProto.ActionsTriggeredOnItemEvent != null && itemProto.ActionsTriggeredOnItemEvent.Choices.HasValue())
+                if (itemProto.ActionsTriggeredOnItemEvent.PickMethod == PickMethod.PickAll) // TODO : other pick method
+                {
+                    foreach (var choice in itemProto.ActionsTriggeredOnItemEvent.Choices)
+                    {
+                        if (choice is not ItemActionPrototype itemActionProto) continue;
+                        TriggerActionEvent(itemActionProto, player, avatar);
+                    }
+                }
+        }
+
+        private void TriggerActionEvent(ItemActionPrototype itemActionProto, Player player, Avatar avatar)
+        {
+            if (itemActionProto.TriggeringEvent != ItemEventType.OnUse) return;
+
+            // TODO ItemActionPrototype.ActionType
+
+            if (itemActionProto is ItemActionUsePowerPrototype itemActionUsePowerProto)
+                TriggerActionUsePower(avatar, itemActionUsePowerProto.Power);
+        }
+
+        private void TriggerActionUsePower(Avatar avatar, PrototypeId powerRef)
+        {
+            if (avatar.HasPowerInPowerCollection(powerRef) == false)
+                avatar.AssignPower(powerRef, new(0, avatar.CharacterLevel, avatar.CombatLevel));
+
+            // TODO move this to powers
+            Power power = avatar.GetPower(powerRef);
+            if (power == null) return;
+
+            if (power.Prototype is SummonPowerPrototype summonPowerProto)
+            {
+                PropertyId summonedEntityCountProp = new(PropertyEnum.PowerSummonedEntityCount, powerRef);
+                if (avatar.Properties[PropertyEnum.PowerToggleOn, powerRef])
+                {
+                    EntityHelper.DestroySummonerFromPowerPrototype(avatar, summonPowerProto);
+                    avatar.Properties[PropertyEnum.PowerToggleOn, powerRef] = false;
+                    avatar.Properties.AdjustProperty(-1, summonedEntityCountProp);
+                }
+                else
+                {
+                    EntityHelper.SummonEntityFromPowerPrototype(avatar, summonPowerProto);
+                    avatar.Properties[PropertyEnum.PowerToggleOn, powerRef] = true;
+                    avatar.Properties.AdjustProperty(1, summonedEntityCountProp);
+                }
+            }
         }
 
         private bool OnBuiltInPropertyRoll(float randomMult, PropertyPickInRangeEntryPrototype pickInRangeProto)
@@ -700,6 +812,24 @@ namespace MHServerEmu.Games.Entities.Items
         {
             //Logger.Warn($"GetTriggeredPower(): Not yet implemented (eventType={eventType}, actionType={actionType})");
             return PrototypeId.Invalid;
+        }
+
+        private bool RunRelicEval()
+        {
+            if (Prototype is not RelicPrototype relicProto)
+                return false;
+
+            if (relicProto.EvalOnStackCountChange == null)
+                return false;
+
+            using EvalContextData evalContext = ObjectPoolManager.Instance.Get<EvalContextData>();
+            evalContext.SetVar_PropertyCollectionPtr(EvalContext.Default, Properties);
+            return Eval.RunBool(relicProto.EvalOnStackCountChange, evalContext);
+        }
+
+        private void RefreshProcPowerIndexProperties()
+        {
+            // TODO
         }
     }
 }

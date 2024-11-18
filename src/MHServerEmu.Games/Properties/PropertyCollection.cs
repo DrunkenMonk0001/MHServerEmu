@@ -34,6 +34,8 @@ namespace MHServerEmu.Games.Properties
         // A collection of registered watchers
         private readonly HashSet<IPropertyChangeWatcher> _watchers = new();
 
+        public bool IsEmpty { get => _baseList.Count == 0 && _aggregateList.Count == 0 && _curveList.Count == 0; }
+
         #region Value Indexers
 
         // Add more indexers for specific param type combinations as needed
@@ -920,12 +922,17 @@ namespace MHServerEmu.Games.Properties
         private bool UpdateCurvePropertyValue(CurveProperty curveProp, SetPropertyFlags flags, PropertyInfo info)
         {
             // Retrieve the curve we need
-            if (curveProp.CurveId == CurveId.Invalid) Logger.WarnReturn(false, $"UpdateCurvePropertyValue(): curveId is invalid");
+            if (curveProp.CurveId == CurveId.Invalid) return Logger.WarnReturn(false, "UpdateCurvePropertyValue(): curveProp.CurveId == CurveId.Invalid");
+
             Curve curve = GameDatabase.DataDirectory.CurveDirectory.GetCurve(curveProp.CurveId);
+            if (curve == null) return Logger.WarnReturn(false, "UpdateCurvePropertyValue(): curve == null");
 
             // Get property info if we didn't get it and make sure it's for a curve property
-            if (info == null) info = GameDatabase.PropertyInfoTable.LookupPropertyInfo(curveProp.PropertyId.Enum);
-            if (info.IsCurveProperty == false) Logger.WarnReturn(false, $"UpdateCurvePropertyValue(): {curveProp.PropertyId} is not a curve property");
+            if (info == null)
+                info = GameDatabase.PropertyInfoTable.LookupPropertyInfo(curveProp.PropertyId.Enum);
+
+            if (info?.IsCurveProperty != true)
+                return Logger.WarnReturn(false, $"UpdateCurvePropertyValue(): {curveProp.PropertyId} is not a curve property");
 
             // Get curve value and round it if needed
             int indexValue = GetPropertyValue(curveProp.IndexPropertyId);

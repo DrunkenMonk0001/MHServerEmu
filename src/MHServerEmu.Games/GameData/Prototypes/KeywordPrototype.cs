@@ -3,23 +3,7 @@ using MHServerEmu.Core.Extensions;
 
 namespace MHServerEmu.Games.GameData.Prototypes
 {
-    public class KeywordsMask : BitList
-    {
-        public static KeywordsMask operator &(KeywordsMask left, KeywordsMask right)
-        {
-            return And(left, right);
-        }
-
-        public static KeywordsMask operator |(KeywordsMask left, KeywordsMask right)
-        {
-            return Or(left, right);
-        }
-
-        public static KeywordsMask operator ^(KeywordsMask left, KeywordsMask right)
-        {
-            return Xor(left, right);
-        }
-    }
+    public class KeywordsMask : GBitArray { }
 
     public class KeywordPrototype : Prototype
     {
@@ -64,7 +48,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
                 if (_bitMask.Any() == false) return;
                 
             }
-            keywordMask |= _bitMask;
+            keywordMask = GBitArray.Or(keywordMask, _bitMask);
         }
 
         public int GetBitIndex()
@@ -72,7 +56,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
             if (_bitIndex == -1)
             {
                 CacheBitMaskInfo();
-                if (_bitMask.Any() == false) return 0;
+                if (_bitIndex == -1) return 0;
 
             }
             return _bitIndex;

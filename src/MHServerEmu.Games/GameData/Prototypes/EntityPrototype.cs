@@ -352,6 +352,27 @@ namespace MHServerEmu.Games.GameData.Prototypes
             return keywordProto != null && KeywordPrototype.TestKeywordBit(_keywordsMask, keywordProto);
         }
 
+        public bool GetCurrency(out PrototypeId currencyRef, out int amount)
+        {
+            currencyRef = PrototypeId.Invalid;
+            amount = 0;
+
+            if (Properties == null)
+                return Logger.WarnReturn(false, "GetCurrency(): Properties == null");
+
+            foreach (var kvp in Properties.IteratePropertyRange(PropertyEnum.ItemCurrency))
+            {
+                Property.FromParam(kvp.Key, 0, out currencyRef);
+                if (currencyRef == PrototypeId.Invalid)
+                    return Logger.WarnReturn(false, "GetCurrency(): currencyRef == PrototypeId.Invalid");
+
+                amount = kvp.Value;
+                return true;
+            }
+
+            return Logger.WarnReturn(false, $"GetCurrency(): No currency property found for world entity {this}");
+        }
+
         public bool GetXPAwarded(int level, out long xp, out long minXP, bool applyGlobalTuning)
         {
             xp = 0;
@@ -367,7 +388,8 @@ namespace MHServerEmu.Games.GameData.Prototypes
                 Logger.Warn($"GetXPAwarded(): Invalid result returned from XP Curve! Level: {level} WorldEntity: {this}");
 
             float xpMinPct = Properties != null ? Properties[PropertyEnum.ExperienceAwardMinimumPct] : 0f;
-            minXP = Math.Max(1, (long)(baseXP * xpMinPct));
+            if (xpMinPct > 0f)  // If this entity has a minimum XP pct defined, always award at least 1 XP
+                minXP = Math.Max(1, (long)(baseXP * xpMinPct));
 
             float multiplier = LiveTuningManager.GetLiveWorldEntityTuningVar(this, WorldEntityTuningVar.eWETV_MobXP);
             if (applyGlobalTuning || LiveTuningManager.GetLiveGlobalTuningVar(GlobalTuningVar.eGTV_RespectLevelForGlobalXP) == 0f)
@@ -378,6 +400,12 @@ namespace MHServerEmu.Games.GameData.Prototypes
             xp = (long)(Math.Max(baseXP, minXP) * multiplier);
 
             return xp > 0 || minXP > 0;
+        }
+
+        public virtual PrototypeId GetPortalTarget()
+        {
+            // Overriden in Item and Transition
+            return PrototypeId.Invalid;
         }
 
         public InteractionData GetInteractionData()
@@ -630,6 +658,21 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public LocaleStringId ShowConfirmationDialogOverride { get; protected set; }
         public PrototypeId ShowConfirmationDialogTemplate { get; protected set; }
         public PrototypeId ShowConfirmationDialogEnemy { get; protected set; }
+
+        //---
+
+        private static readonly Logger Logger = LogManager.CreateLogger();
+
+        public override PrototypeId GetPortalTarget()
+        {
+            if (DirectTarget == PrototypeId.Invalid)
+                return PrototypeId.Invalid;
+
+            RegionConnectionTargetPrototype connectionTargetProto = DirectTarget.As<RegionConnectionTargetPrototype>();
+            if (connectionTargetProto == null) return Logger.WarnReturn(PrototypeId.Invalid, "GetPortalTarget(): connectionTargetProto == null");
+
+            return connectionTargetProto.Region;
+        }
 
         public Vector3 CalcSpawnOffset(in Orientation rotation)
         {

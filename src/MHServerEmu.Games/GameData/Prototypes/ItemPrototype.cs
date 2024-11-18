@@ -106,6 +106,51 @@ namespace MHServerEmu.Games.GameData.Prototypes
         [DoNotCopy]
         public bool IsGem { get => IsChildBlueprintOf(GameDatabase.LootGlobalsPrototype.GemBlueprint); }
 
+        public override PrototypeId GetPortalTarget()
+        {
+            if (ActionsTriggeredOnItemEvent == null || ActionsTriggeredOnItemEvent.Choices.IsNullOrEmpty())
+                return PrototypeId.Invalid;
+
+            foreach (ItemActionBasePrototype itemActionBaseProto in ActionsTriggeredOnItemEvent.Choices)
+            {
+                // Skip non-power actions
+                if (itemActionBaseProto is not ItemActionUsePowerPrototype usePowerProto || usePowerProto.Power == PrototypeId.Invalid)
+                    continue;
+
+                // Skip non-summon powers
+                SummonPowerPrototype summonPowerProto = usePowerProto.Power.As<SummonPowerPrototype>();
+                if (summonPowerProto == null || summonPowerProto.SummonEntityContexts.IsNullOrEmpty())
+                    continue;
+
+                // Search for transitions in summon contexts for this summon power action
+                foreach (SummonEntityContextPrototype summonContextProto in summonPowerProto.SummonEntityContexts)
+                {
+                    if (summonContextProto.SummonEntity == PrototypeId.Invalid)
+                        continue;
+
+                    // Skip summon contexts that do not summon a transition entity
+                    TransitionPrototype transitionProto = summonContextProto.SummonEntity.As<TransitionPrototype>();
+                    if (transitionProto == null || transitionProto.DirectTarget == PrototypeId.Invalid)
+                        continue;
+
+                    // Get region from transition target
+                    RegionConnectionTargetPrototype connectionTargetProto = transitionProto.DirectTarget.As<RegionConnectionTargetPrototype>();
+                    if (connectionTargetProto == null)
+                        continue;
+
+                    if (connectionTargetProto.Region == PrototypeId.Invalid)
+                    {
+                        Logger.Warn("GetPortalTarget(): connectionTargetProto.Region == PrototypeId.Invalid");
+                        continue;
+                    }
+
+                    return connectionTargetProto.Region;
+                }
+            }
+
+            return PrototypeId.Invalid;
+        }
+
         public void OnApplyItemSpec(Item item, ItemSpec itemSpec)
         {
             // TODO
@@ -141,6 +186,10 @@ namespace MHServerEmu.Games.GameData.Prototypes
             return IsUsableByAgent(agentProto);
         }
 
+        /// <summary>
+        /// Returns <see langword="true"/> if the provided <see cref="DropFilterArguments"/> passes the specified <see cref="RestrictionTestFlags"/>
+        /// for this <see cref="ItemPrototype"/>'s restrictions.
+        /// </summary>
         public bool IsDroppableForRestrictions(DropFilterArguments filterArgs, RestrictionTestFlags restrictionFlags)
         {
             if (LootDropRestrictions.IsNullOrEmpty())
@@ -150,6 +199,29 @@ namespace MHServerEmu.Games.GameData.Prototypes
             {
                 if (dropRestrictionProto.Allow(filterArgs, restrictionFlags) == false)
                     return false;
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Adjusts the provided <see cref="DropFilterArguments"/> to pass the specified <see cref="RestrictionTestFlags"/>
+        /// for this <see cref="ItemPrototype"/>'s restrictions.
+        /// </summary>
+        public bool MakeRestrictionsDroppable(DropFilterArguments filterArgs, RestrictionTestFlags flagsToAdjust, out RestrictionTestFlags adjustResultFlags)
+        {
+            adjustResultFlags = RestrictionTestFlags.None;
+
+            if (LootDropRestrictions.IsNullOrEmpty())
+                return true;
+
+            foreach (DropRestrictionPrototype dropRestrictionProto in LootDropRestrictions)
+            {
+                if (dropRestrictionProto.Adjust(filterArgs, ref adjustResultFlags, flagsToAdjust) == false)
+                {
+                    adjustResultFlags = RestrictionTestFlags.None;
+                    return false;
+                }
             }
 
             return true;

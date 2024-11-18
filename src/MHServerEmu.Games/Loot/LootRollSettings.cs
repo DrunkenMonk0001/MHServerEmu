@@ -1,4 +1,5 @@
 ﻿using MHServerEmu.Core.Memory;
+using MHServerEmu.Games.Entities;
 using MHServerEmu.Games.GameData;
 using MHServerEmu.Games.GameData.Prototypes;
 
@@ -10,6 +11,7 @@ namespace MHServerEmu.Games.Loot
         public LootDropChanceModifiers DropChanceModifiers { get; set; }
         public float NoDropModifier { get; set; } = 1f;         // LootRollModifyDropByDifficultyTierPrototype
 
+        public Player Player { get; set; }                      // LootRollMissionStateRequiredPrototype
         public AvatarPrototype UsableAvatar { get; set; }       // LootRollSetAvatarPrototype
         public AgentPrototype UsableTeamUp { get; set; }        // Team-ups are the only agents other than avatars that have equipment
         public bool UseSecondaryAvatar { get; set; }            // LootNodePrototype::select()
@@ -44,6 +46,7 @@ namespace MHServerEmu.Games.Loot
             DropChanceModifiers = other.DropChanceModifiers;
             NoDropModifier = other.NoDropModifier;
 
+            Player = other.Player;
             UsableAvatar = other.UsableAvatar;
             UsableTeamUp = other.UsableTeamUp;
             UseSecondaryAvatar = other.UseSecondaryAvatar;
@@ -98,6 +101,7 @@ namespace MHServerEmu.Games.Loot
             DropChanceModifiers = default;
             NoDropModifier = 1f;
 
+            Player = default;
             UsableAvatar = default;
             UsableTeamUp = default;
             UseSecondaryAvatar = default;
@@ -132,6 +136,10 @@ namespace MHServerEmu.Games.Loot
         /// <summary>
         /// Returns <see langword="true"/> if these <see cref="LootRollSettings"/> contain any restriction <see cref="LootDropChanceModifiers"/>.
         /// </summary>
+        /// <remarks>
+        /// Restriction flags are DifficultyModeRestricted, RegionRestricted, KillCountRestricted, WeekdayRestricted,
+        /// ConditionRestricted, DifficultyTierRestricted, LevelRestricted, DropperRestricted, and MissionRestricted.
+        /// </remarks>
         public bool IsRestrictedByLootDropChanceModifier()
         {
             return DropChanceModifiers.HasFlag(LootDropChanceModifiers.DifficultyModeRestricted) ||
@@ -143,6 +151,19 @@ namespace MHServerEmu.Games.Loot
                    DropChanceModifiers.HasFlag(LootDropChanceModifiers.LevelRestricted) ||
                    DropChanceModifiers.HasFlag(LootDropChanceModifiers.DropperRestricted) ||
                    DropChanceModifiers.HasFlag(LootDropChanceModifiers.MissionRestricted);
+        }
+
+        /// <summary>
+        /// Returns <see langword="true"/> if these <see cref="LootRollSettings"/> contain any cooldown <see cref="LootDropChanceModifiers"/>.
+        /// </summary>
+        /// <remarks>
+        /// Cooldown flags are CooldownOncePerXHours, CooldownOncePerRollover, and CooldownOncePerXHours.
+        /// </remarks>
+        public bool HasCooldownLootDropChanceModifier()
+        {
+            return DropChanceModifiers.HasFlag(LootDropChanceModifiers.CooldownOncePerXHours) ||
+                   DropChanceModifiers.HasFlag(LootDropChanceModifiers.CooldownOncePerRollover) ||
+                   DropChanceModifiers.HasFlag(LootDropChanceModifiers.CooldownOncePerXHours);
         }
     }
 }

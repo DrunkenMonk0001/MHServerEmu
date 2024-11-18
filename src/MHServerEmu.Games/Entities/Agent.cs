@@ -65,6 +65,11 @@ namespace MHServerEmu.Games.Entities
             // InitPowersCollection
             InitLocomotor(settings.LocomotorHeightOverride);
 
+            // Wait in dormant while play start animation
+            if (agentProto.WakeRange > 0.0f || agentProto.WakeDelayMS > 0) SetDormant(true);
+
+            Properties[PropertyEnum.InitialCharacterLevel] = CharacterLevel;
+
             // When Gazillion implemented DCL, it looks like they made it switchable at first (based on Eval::runIsDynamicCombatLevelEnabled),
             // so all agents need to have their default non-DCL health base curves overriden with new DCL ones.
             if (CanBePlayerOwned() == false)
@@ -91,7 +96,7 @@ namespace MHServerEmu.Games.Entities
             Player ownerPlayer = GetOwnerOfType<Player>();
             if (IsInKnockback || IsInKnockdown || IsInKnockup || IsImmobilized || IsImmobilizedByHitReact
                 || IsSystemImmobilized || IsStunned || IsMesmerized || NPCAmbientLock
-                || (ownerPlayer != null && (ownerPlayer.IsFullscreenMoviePlaying || ownerPlayer.IsOnLoadingScreen)))
+                || (ownerPlayer != null && ownerPlayer.IsFullscreenObscured))
                 return false;
             return true;
         }
@@ -100,7 +105,7 @@ namespace MHServerEmu.Games.Entities
         {
             Player ownerPlayer = GetOwnerOfType<Player>();
             if (base.CanMove() == false || HasMovementPreventionStatus || IsSystemImmobilized
-                || (ownerPlayer != null && (ownerPlayer.IsFullscreenMoviePlaying || ownerPlayer.IsOnLoadingScreen)))
+                || (ownerPlayer != null && ownerPlayer.IsFullscreenObscured))
                 return false;
 
             Power power = GetThrowablePower();
@@ -148,6 +153,7 @@ namespace MHServerEmu.Games.Entities
             // Remove death state properties
             Properties[PropertyEnum.IsDead] = false;
             Properties[PropertyEnum.NoEntityCollide] = false;
+            SetState(PrototypeId.Invalid);
 
             // Send resurrection message
             var resurrectMessage = NetMessageOnResurrect.CreateBuilder()
@@ -480,6 +486,13 @@ namespace MHServerEmu.Games.Entities
 
         #region Progression
 
+        public virtual int GetLatestPowerProgressionVersion()
+        {
+            if (IsTeamUpAgent == false) return 0;
+            if (Prototype is not AgentTeamUpPrototype teamUpProto) return 0;
+            return teamUpProto.PowerProgressionVersion;
+        }
+
         public virtual bool HasPowerInPowerProgression(PrototypeId powerRef)
         {
             if (IsTeamUpAgent)
@@ -635,6 +648,10 @@ namespace MHServerEmu.Games.Entities
         public virtual bool UseInteractableObject(ulong entityId, PrototypeId missionProtoRef)
         {
             // NOTE: This appears to be unused by regular agents.
+            var interactableObject = Game.EntityManager.GetEntity<WorldEntity>(entityId);
+            if (interactableObject == null || interactableObject.IsInWorld == false) return false;
+            if (InInteractRange(interactableObject, InteractionMethod.Use) == false) return false;
+            interactableObject.OnInteractedWith(this);
             return true;
         }
 
@@ -830,6 +847,9 @@ namespace MHServerEmu.Games.Entities
 
             if (result == SimulateResult.Set)
             {
+                if (AgentPrototype.WakeRange <= 0.0f) SetDormant(false);
+                if (IsDormant == false) TryAutoActivatePowersInCollection();
+
                 TriggerEntityActionEvent(EntitySelectorActionEventType.OnSimulated);
             }
             else if (result == SimulateResult.Clear)
@@ -1000,6 +1020,19 @@ namespace MHServerEmu.Games.Entities
 
             if (AIController == null)
                 EntityActionComponent?.InitActionBrain();
+        }
+
+        private void EquipPassivePowers(PrototypeId[] passivePowers)
+        {
+            if (passivePowers.IsNullOrEmpty()) return;
+            foreach (var powerRef in passivePowers)
+            {
+                var powerProto = GameDatabase.GetPrototype<PowerPrototype>(powerRef);
+                if (powerProto == null || powerProto.Activation != PowerActivationType.Passive) continue;
+                int rank = Properties[PropertyEnum.PowerRank];
+                PowerIndexProperties indexProps = new(rank, CharacterLevel, CombatLevel);
+                AssignPower(powerRef, indexProps);
+            }
         }
 
         public override void OnExitedWorld()
@@ -1268,7 +1301,7 @@ namespace MHServerEmu.Games.Entities
             return true;
         }
 
-        private PowerUseResult ActivatePerformPower(PrototypeId powerRef)
+        public PowerUseResult ActivatePerformPower(PrototypeId powerRef)
         {
             if (this is Avatar) return PowerUseResult.GenericError;
             if (powerRef == PrototypeId.Invalid) return PowerUseResult.AbilityMissing;

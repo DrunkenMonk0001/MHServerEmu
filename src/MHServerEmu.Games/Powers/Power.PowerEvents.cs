@@ -633,9 +633,12 @@ namespace MHServerEmu.Games.Powers
         }
 
         // 7
-        private void DoPowerEventActionInteractFinish()             
+        private bool DoPowerEventActionInteractFinish()
         {
-            Logger.Warn($"DoPowerEventActionInteractFinish(): Not implemented");
+            if (Owner is not Avatar avatar)
+                return Logger.WarnReturn(false, $"DoPowerEventActionInteractFinish(): Owner not Avatar");
+
+            return avatar.PreInteractPowerEnd();
         }
 
         // 9
@@ -995,7 +998,7 @@ namespace MHServerEmu.Games.Powers
             BlueprintId donationBlueprint = dataDirectory.GetPrototypeBlueprintDataRef(GameDatabase.AdvancementGlobalsPrototype.PetTechDonationItemPrototype);
             RarityPrototype rarityThresholdProto = itemDonateContext.RarityThreshold.As<RarityPrototype>();
 
-            foreach (WorldEntity worldEntity in region.IterateEntitiesInVolume(vacuumVolume, new(EntityRegionSPContextFlags.ActivePartition)))
+            foreach (WorldEntity worldEntity in region.IterateEntitiesInVolume(vacuumVolume, new()))
             {
                 // Skip non-item world entities
                 if (worldEntity is not Item item)

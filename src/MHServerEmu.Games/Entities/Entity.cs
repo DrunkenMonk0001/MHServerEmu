@@ -3,6 +3,7 @@ using MHServerEmu.Core.Collections;
 using MHServerEmu.Core.Logging;
 using MHServerEmu.Core.Memory;
 using MHServerEmu.Core.Serialization;
+using MHServerEmu.Games.Common;
 using MHServerEmu.Games.Entities.Avatars;
 using MHServerEmu.Games.Entities.Inventories;
 using MHServerEmu.Games.Events;
@@ -54,7 +55,7 @@ namespace MHServerEmu.Games.Entities
         MissileOwnedByPlayer            = 1ul << 29,
         HasMissionPrototype             = 1ul << 30,
         Flag31                          = 1ul << 31,
-        Flag32                          = 1ul << 32,
+        IsPopulation                    = 1ul << 32,
         Flag33                          = 1ul << 33,
         AttachedToEntityId              = 1ul << 34,
         IsHotspot                       = 1ul << 35,
@@ -119,6 +120,7 @@ namespace MHServerEmu.Games.Entities
         public EntityStatus Status { get; set; }
         public bool IsInGame { get => TestStatus(EntityStatus.InGame); }
         public bool IsDestroyed { get => TestStatus(EntityStatus.Destroyed); }
+        public bool IsScheduledToDestroy { get => _scheduledDestroyEvent.IsValid; }
 
         public ReplicatedPropertyCollection Properties { get; } = new();
 
@@ -171,6 +173,7 @@ namespace MHServerEmu.Games.Entities
         public bool HasPowerUserOverride { get => _flags.HasFlag(EntityFlags.PowerUserOverrideId); }
         public bool IsMissilePlayerOwned { get => _flags.HasFlag(EntityFlags.MissileOwnedByPlayer); }
         public bool HasMissionPrototype { get => _flags.HasFlag(EntityFlags.HasMissionPrototype); }
+        public bool IsPopulation { get => _flags.HasFlag(EntityFlags.IsPopulation); }
         public bool IsAttachedToEntity { get => _flags.HasFlag(EntityFlags.AttachedToEntityId); }
         public bool IsHotspot { get => _flags.HasFlag(EntityFlags.IsHotspot); }
         public bool IsCollidableHotspot { get => _flags.HasFlag(EntityFlags.IsCollidableHotspot); }
@@ -355,6 +358,45 @@ namespace MHServerEmu.Games.Entities
             }
         }
 
+        public void ApplyStateFromPrototype(StateChangePrototype stateProto)
+        {
+            if (stateProto is StateSetPrototype setProto)
+                SetState(setProto.State);
+
+            if (stateProto is StateTogglePrototype toongleProto)
+            {
+                PrototypeId stateRef = Properties[PropertyEnum.EntityState];
+                if (stateRef == toongleProto.StateA)
+                    SetState(toongleProto.StateA);
+                else if (stateRef == toongleProto.StateB)
+                    SetState(toongleProto.StateB);
+            }
+        }
+
+        public void SetState(PrototypeId stateRef)
+        {
+            PrototypeId oldStateRef = Properties[PropertyEnum.EntityState];
+            if (oldStateRef != stateRef)
+            {
+                ClearState();
+                Properties[PropertyEnum.EntityState] = stateRef;
+                ApplyState(stateRef);
+            }
+        }
+
+        public virtual bool ApplyState(PrototypeId stateRef)
+        {
+            if (stateRef == PrototypeId.Invalid) return true;
+            return GameDatabase.GetPrototype<EntityStatePrototype>(stateRef) != null;
+        }
+
+        public virtual bool ClearState()
+        {
+            PrototypeId stateRef = Properties[PropertyEnum.EntityState];
+            if (stateRef == PrototypeId.Invalid) return true;
+            return GameDatabase.GetPrototype<EntityStatePrototype>(stateRef) != null;
+        }
+
         // NOTE: TestStatus and SetStatus can be potentially replaced with an indexer property
 
         public bool TestStatus(EntityStatus status)
@@ -378,6 +420,19 @@ namespace MHServerEmu.Games.Entities
                 return simulated ? SimulateResult.Set : SimulateResult.Clear;
             }
             return SimulateResult.None;
+        }
+
+        public virtual void Trigger(EntityTriggerEnum trigger)
+        {
+            switch (trigger)
+            {
+                case EntityTriggerEnum.Enabled:
+                    Properties[PropertyEnum.Enabled] = true;
+                    break;
+                case EntityTriggerEnum.Disabled:
+                    Properties[PropertyEnum.Enabled] = false;
+                    break;
+            }
         }
 
         public virtual void Destroy()
@@ -416,7 +471,7 @@ namespace MHServerEmu.Games.Entities
             {
                 // Update only players who are already interested in this entity.
                 // This is what should be used to remove entities if possible.
-                foreach (ulong playerId in InterestReferences.PlayerIds)
+                foreach (ulong playerId in InterestReferences)
                 {
                     Player player = Game.EntityManager.GetEntity<Player>(playerId);
                     player?.AOI.ConsiderEntity(this, settings);
@@ -1049,6 +1104,17 @@ namespace MHServerEmu.Games.Entities
             if (PrototypeDataRef != other.PrototypeDataRef) return false;
             if (isAdding && CurrentStackSize + other.CurrentStackSize > other.MaxStackSize) return false;
             return true;
+        }
+
+        public bool IsCurrencyItem()
+        {
+            if (Properties.HasProperty(PropertyEnum.RunestonesAmount))
+                return true;
+
+            if (Properties.HasProperty(PropertyEnum.ItemCurrency) && Game.AdminCommandManager.TestAdminFlag(AdminFlags.CurrencyItemsConvertToggle))
+                return true;
+
+            return false;
         }
 
         protected virtual bool InitInventories(bool populateInventories)
