@@ -12,5 +12,7 @@ namespace MHServerEmu.DatabaseAccess.MySqlDB
         public string MySqlUsername { get; private set; } = "MHeroesSQL";
 
         public string MySqlPw { get; private set; } = "password123@";
+
+        public string MySqlPort { get; private set; } = "3306";
     }
 }

@@ -181,7 +181,7 @@ namespace MHServerEmu.DatabaseAccess.MySQL
         private static MySqlConnection GetConnection()
         {
             var config = ConfigManager.Instance.GetConfig<MySqlDBManagerConfig>();
-            var connectionStringVars = string.Join(";", "server="+config.MySqlIP, "Database="+config.MySqlDBName, "Uid="+config.MySqlUsername, "Pwd="+config.MySqlPw, "SslMode=Required;AllowPublicKeyRetrieval=True;");
+            var connectionStringVars = string.Join(";", "server="+config.MySqlIP, "port="+config.MySqlPort, "Database="+config.MySqlDBName, "Uid="+config.MySqlUsername, "Pwd="+config.MySqlPw, "SslMode=Required;AllowPublicKeyRetrieval=True;");
             string connectionString = new MySql.Data.MySqlClient.MySqlConnectionStringBuilder(connectionStringVars).ToString();
             MySqlConnection connection = new(connectionString);
             connection.Open();
@@ -198,7 +198,7 @@ namespace MHServerEmu.DatabaseAccess.MySQL
             if (MySqlInitializationScript == string.Empty)
                 return Logger.ErrorReturn(false, "InitializeDatabaseFile(): Failed to get database initialization script");
 
-            var connectionStringVars = string.Join(";", "server=" + config.MySqlIP, "Uid=" + config.MySqlUsername, "Pwd=" + config.MySqlPw, "SslMode=Required;AllowPublicKeyRetrieval=True;");
+            var connectionStringVars = string.Join(";", "server=" + config.MySqlIP, "port=" + config.MySqlPort, "Uid=" + config.MySqlUsername, "Pwd=" + config.MySqlPw, "SslMode=Required;AllowPublicKeyRetrieval=True;");
             string connectionString = new MySql.Data.MySqlClient.MySqlConnectionStringBuilder(connectionStringVars).ToString();
             MySqlConnection connectionInit = new(connectionString);
             connectionInit.Open();
