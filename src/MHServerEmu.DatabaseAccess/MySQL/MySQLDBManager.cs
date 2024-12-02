@@ -169,7 +169,7 @@ namespace MHServerEmu.DatabaseAccess.MySQL
             for (int i = 0; i < NumPlayerDataWriteAttempts; i++)
             {
                 if (DoSavePlayerData(account))
-                    return Logger.InfoReturn(true, $"Successfully written player data for account [{account}]");
+                    return Logger.InfoReturn(true, $"updated player data for account [{account}]");
             }
 
             return Logger.WarnReturn(false, $"SavePlayerData(): Failed to write player data for account [{account}]");
