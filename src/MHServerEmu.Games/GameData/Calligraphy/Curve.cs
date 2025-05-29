@@ -1,4 +1,5 @@
-﻿using MHServerEmu.Core.Logging;
+﻿using MHServerEmu.Core.Helpers;
+using MHServerEmu.Core.Logging;
 
 namespace MHServerEmu.Games.GameData.Calligraphy
 {
@@ -12,10 +13,10 @@ namespace MHServerEmu.Games.GameData.Calligraphy
         private readonly CurveId _curveId;
         private readonly float[] _values;
 
-        public float this[int position] { get => GetAt(position); }     // Indexer for easier access to float values
+        public float this[int index] { get => _values[index]; }
 
-        public int MinPosition { get; private set; }    // m_startPosition
-        public int MaxPosition { get; private set; }    // m_endPosition
+        public int MinPosition { get; }    // m_startPosition
+        public int MaxPosition { get; }    // m_endPosition
 
         public bool IsCurveZero { get; private set; } = true;
 
@@ -48,8 +49,11 @@ namespace MHServerEmu.Games.GameData.Calligraphy
         /// </summary>
         public float GetAt(int position)
         {
-            if (position < MinPosition) Logger.Warn($"Curve position {position} below min of {MinPosition}, curve {ToString()}");
-            if (position > MaxPosition) Logger.Warn($"Curve position {position} above max of {MaxPosition}, curve {ToString()}");
+            if (position < MinPosition)
+                Logger.Warn($"GetAt(): Curve position {position} below min of {MinPosition}, curve {this}");
+            else if (position > MaxPosition)
+                Logger.Warn($"GetAt(): Curve position {position} above max of {MaxPosition}, curve {this}");
+
             position = Math.Clamp(position, MinPosition, MaxPosition);
             int index = position - MinPosition;
             return _values[index];
@@ -60,14 +64,29 @@ namespace MHServerEmu.Games.GameData.Calligraphy
         /// </summary>
         public int GetIntAt(int position)
         {
-            return (int)MathF.Round(this[position]);
+            return MathHelper.RoundToInt(GetAt(position));
         }
 
         public bool GetIntAt(int position, out int value)
         {
-            // TODO
-            value = GetIntAt(position);
-            return true;
+            bool isValid = true;
+
+            if (position < MinPosition)
+            {
+                Logger.Warn($"GetAt(): Curve position {position} below min of {MinPosition}, curve {this}");
+                isValid = false;
+            }
+            else if (position > MaxPosition)
+            {
+                Logger.Warn($"GetAt(): Curve position {position} above max of {MaxPosition}, curve {this}");
+                isValid = false;
+            }
+
+            position = Math.Clamp(position, MinPosition, MaxPosition);
+            int index = position - MinPosition;
+            value = MathHelper.RoundToInt(_values[index]);
+
+            return isValid;
         }
 
         /// <summary>
@@ -75,14 +94,29 @@ namespace MHServerEmu.Games.GameData.Calligraphy
         /// </summary>
         public long GetInt64At(int position)
         {
-            return (long)MathF.Round(this[position]);
+            return MathHelper.RoundToInt64(GetAt(position));
         }
 
         public bool GetInt64At(int position, out long value)
         {
-            // TODO
-            value = GetInt64At(position);
-            return true;
+            bool isValid = true;
+
+            if (position < MinPosition)
+            {
+                Logger.Warn($"GetAt(): Curve position {position} below min of {MinPosition}, curve {this}");
+                isValid = false;
+            }
+            else if (position > MaxPosition)
+            {
+                Logger.Warn($"GetAt(): Curve position {position} above max of {MaxPosition}, curve {this}");
+                isValid = false;
+            }
+
+            position = Math.Clamp(position, MinPosition, MaxPosition);
+            int index = position - MinPosition;
+            value = MathHelper.RoundToInt64(_values[index]);
+
+            return isValid;
         }
 
         /// <summary>
@@ -90,10 +124,17 @@ namespace MHServerEmu.Games.GameData.Calligraphy
         /// </summary>
         public float IntegrateDiscrete(int start, int end)
         {
-            if (start < MinPosition) Logger.Warn($"Curve start {start} below min of {MinPosition}, curve {ToString()}");
-            if (start > MaxPosition) Logger.Warn($"Curve start {start} above max of {MaxPosition}, curve {ToString()}");
-            if (end < MinPosition) Logger.Warn($"Curve end {end} below min of {MinPosition}, curve {ToString()}");
-            if (end > MaxPosition) Logger.Warn($"Curve end {end} above max of {MaxPosition}, curve {ToString()}");
+            if (start < MinPosition)
+                return Logger.WarnReturn(0f, $"IntegrateDiscrete(): Curve start {start} below min of {MinPosition}, curve {ToString()}");
+
+            if (start > MaxPosition)
+                return Logger.WarnReturn(0f, $"IntegrateDiscrete(): Curve start {start} above max of {MaxPosition}, curve {ToString()}");
+
+            if (end < MinPosition)
+                return Logger.WarnReturn(0f, $"IntegrateDiscrete(): Curve end {end} below min of {MinPosition}, curve {ToString()}");
+
+            if (end > MaxPosition)
+                return Logger.WarnReturn(0f, $"IntegrateDiscrete(): Curve end {end} above max of {MaxPosition}, curve {ToString()}");
 
             float result = 0;
             for (int i = start; i <= end; i++)
@@ -106,7 +147,7 @@ namespace MHServerEmu.Games.GameData.Calligraphy
         /// </summary>
         public int IntegrateDiscreteInt(int start, int end)
         {
-            return (int)MathF.Round(IntegrateDiscrete(start, end));
+            return MathHelper.RoundToInt(IntegrateDiscrete(start, end));
         }
 
         /// <summary>
@@ -117,6 +158,9 @@ namespace MHServerEmu.Games.GameData.Calligraphy
             return index >= MinPosition && index <= MaxPosition;
         }
 
-        public override string ToString() => GameDatabase.GetCurveName(_curveId);
+        public override string ToString()
+        {
+            return GameDatabase.GetCurveName(_curveId);
+        }
     }
 }

@@ -12,6 +12,8 @@ using MHServerEmu.DatabaseAccess.Json;
 using MHServerEmu.DatabaseAccess.MySQL;
 using MHServerEmu.DatabaseAccess.SQLite;
 using MHServerEmu.Frontend;
+using MHServerEmu.Games;
+using MHServerEmu.Games.Common;
 using MHServerEmu.Games.GameData;
 using MHServerEmu.Games.GameData.LiveTuning;
 using MHServerEmu.Grouping;
@@ -75,6 +77,7 @@ namespace MHServerEmu
 
             // Initialize the command system
             CommandManager.Instance.SetClientOutput(new FrontendClientChatOutput());
+            ICommandParser.Instance = new CommandParser();
 
             // Create and register game services
             ServerManager serverManager = ServerManager.Instance;
@@ -83,7 +86,8 @@ namespace MHServerEmu
             serverManager.RegisterGameService(new FrontendServer(), ServerType.FrontendServer);
             serverManager.RegisterGameService(new AuthServer(), ServerType.AuthServer);
             serverManager.RegisterGameService(new PlayerManagerService(), ServerType.PlayerManager);
-            serverManager.RegisterGameService(new GroupingManagerService(new CommandParser()), ServerType.GroupingManager);
+            serverManager.RegisterGameService(new GroupingManagerService(), ServerType.GroupingManager);
+            serverManager.RegisterGameService(new GameInstanceService(), ServerType.GameInstanceServer);
             serverManager.RegisterGameService(new BillingService(), ServerType.Billing);
             serverManager.RegisterGameService(new LeaderboardService(), ServerType.Leaderboard);
 
@@ -94,7 +98,7 @@ namespace MHServerEmu
             while (true)
             {
                 string input = Console.ReadLine();
-                CommandManager.Instance.Parse(input);
+                CommandManager.Instance.TryParse(input);
             }
         }
 
@@ -179,15 +183,14 @@ namespace MHServerEmu
             // Attach console log target
             if (config.EnableConsole)
             {
-                ConsoleTarget target = new(config.ConsoleIncludeTimestamps, config.ConsoleMinLevel, config.ConsoleMaxLevel);
+                ConsoleTarget target = new(config.GetConsoleSettings());
                 LogManager.AttachTarget(target);
             }
 
             // Attach file log target
             if (config.EnableFile)
             {
-                FileTarget target = new(config.FileIncludeTimestamps, config.FileMinLevel, config.FileMaxLevel,
-                    $"MHServerEmu_{StartupTime.ToString(FileHelper.FileNameDateFormat)}.log", false);
+                FileTarget target = new(config.GetFileSettings(), $"MHServerEmu_{StartupTime.ToString(FileHelper.FileNameDateFormat)}", config.FileSplitOutput, false);
                 LogManager.AttachTarget(target);
             }
 
@@ -202,13 +205,13 @@ namespace MHServerEmu
         {
             // JsonDBManager saves a single account in a JSON file
             var config = ConfigManager.Instance.GetConfig<PlayerManagerConfig>();
-            IDBManager dbManager = config.UseJsonDBManager ? JsonDBManager.Instance : config.UseMySqlDBManager & !config.UseJsonDBManager ? MySQLDBManager.Instance : SQLiteDBManager.Instance;
-
+            IDBManager.Instance = config.UseJsonDBManager ? JsonDBManager.Instance : config.UseMySqlDBManager & !config.UseJsonDBManager ? MySQLDBManager.Instance : SQLiteDBManager.Instance;
             return PakFileSystem.Instance.Initialize()
                 && ProtocolDispatchTable.Instance.Initialize()
                 && GameDatabase.IsInitialized
                 && LiveTuningManager.Instance.Initialize()
-                && AccountManager.Initialize(dbManager);
+                && IDBManager.Instance.Initialize()
+                && AccountManager.Initialize();
         }
     }
 }

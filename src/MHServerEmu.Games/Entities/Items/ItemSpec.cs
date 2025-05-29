@@ -10,6 +10,13 @@ using MHServerEmu.Games.Loot;
 
 namespace MHServerEmu.Games.Entities.Items
 {
+    public enum TradeRestrictionState
+    {
+        Invalid = 0,
+        NotRestricted = 1,
+        Restricted = 2
+    }
+
     public class ItemSpec : ISerialize
     {
         private static readonly Logger Logger = LogManager.CreateLogger();
@@ -21,15 +28,16 @@ namespace MHServerEmu.Games.Entities.Items
         private List<AffixSpec> _affixSpecList = new();
         private int _seed;
         private PrototypeId _equippableBy;
-        private int _count = 1;
 
         public PrototypeId ItemProtoRef { get => _itemProtoRef; }
         public PrototypeId RarityProtoRef { get => _rarityProtoRef; set => _rarityProtoRef = value; }
         public int ItemLevel { get => _itemLevel; set => _itemLevel = value; }
         public int CreditsAmount { get => _creditsAmount; }
-        public IEnumerable<AffixSpec> AffixSpecs { get => _affixSpecList; }
+        public IReadOnlyList<AffixSpec> AffixSpecs { get => _affixSpecList; }
         public int Seed { get => _seed; }
         public PrototypeId EquippableBy { get => _equippableBy; }
+
+        public int StackCount { get; set; } = 1;
 
         public bool IsValid { get => _itemProtoRef != PrototypeId.Invalid && _rarityProtoRef != PrototypeId.Invalid; }
 
@@ -66,6 +74,22 @@ namespace MHServerEmu.Games.Entities.Items
                 _equippableBy = (PrototypeId)protobuf.EquippableBy;
         }
 
+        public ItemSpec(ItemSpec other)
+        {
+            _itemProtoRef = other._itemProtoRef;
+            _rarityProtoRef = other._rarityProtoRef;
+            _itemLevel = other._itemLevel;
+            _creditsAmount = other._creditsAmount;
+
+            foreach (AffixSpec affixSpec in other._affixSpecList)
+                _affixSpecList.Add(new(affixSpec));
+
+            _seed = other._seed;
+            _equippableBy = other._equippableBy;
+
+            StackCount = other.StackCount;
+        }
+
         public bool Serialize(Archive archive)
         {
             bool success = true;
@@ -76,6 +100,7 @@ namespace MHServerEmu.Games.Entities.Items
             success &= Serializer.Transfer(archive, ref _affixSpecList);
             success &= Serializer.Transfer(archive, ref _seed);
             success &= Serializer.Transfer(archive, ref _equippableBy);
+            // StackCount is serialized as a property
             return success;
         }
 
@@ -96,7 +121,7 @@ namespace MHServerEmu.Games.Entities.Items
         {
             return NetStructItemSpecStack.CreateBuilder()
                 .SetSpec(ToProtobuf())
-                .SetCount((uint)_count)
+                .SetCount((uint)StackCount)
                 .Build();
         }
 
@@ -197,6 +222,20 @@ namespace MHServerEmu.Games.Entities.Items
             return GetBindingState(out _);
         }
 
+        public bool GetTradeRestricted()
+        {
+            PrototypeId bindingRef = GameDatabase.GlobalsPrototype.ItemBindingAffix;
+            if (bindingRef == PrototypeId.Invalid) return Logger.WarnReturn(false, "GetTradeRestricted(): bindingRef == PrototypeId.Invalid");
+
+            foreach (AffixSpec affixSpec in _affixSpecList)
+            {
+                if (affixSpec.AffixProto.DataRef == bindingRef)
+                    return affixSpec.Seed == (int)TradeRestrictionState.Restricted;
+            }
+
+            return false;
+        }
+
         public bool SetBindingState(bool bound, PrototypeId agentProtoRef = PrototypeId.Invalid, bool? tradeRestricted = null)
         {
             if (agentProtoRef != PrototypeId.Invalid && EquippableBy != PrototypeId.Invalid && agentProtoRef != EquippableBy)
@@ -236,15 +275,15 @@ namespace MHServerEmu.Games.Entities.Items
                 }
 
                 // Looks like someone at Gazillion had a brilliant idea of storing trade restriction status in the seed field
-                if (tradeRestricted == true && affixSpec.Seed != 2)
+                if (tradeRestricted == true && affixSpec.Seed != (int)TradeRestrictionState.Restricted)
                 {
-                    affixSpec.Seed = 2;
+                    affixSpec.Seed = (int)TradeRestrictionState.Restricted;
                     stateChanged = true;
                 }
                 
-                if (tradeRestricted == false && affixSpec.Seed == 2)
+                if (tradeRestricted == false && affixSpec.Seed == (int)TradeRestrictionState.Restricted)
                 {
-                    affixSpec.Seed = 1;
+                    affixSpec.Seed = (int)TradeRestrictionState.NotRestricted;
                     stateChanged = true;
                 }
 
@@ -258,11 +297,53 @@ namespace MHServerEmu.Games.Entities.Items
             // Add a new binding
             AffixPrototype affixProto = itemBindingAffixProtoRef.As<AffixPrototype>();
 
-            int seed = 1;   // not trade restricted
+            int seed = (int)TradeRestrictionState.NotRestricted;
             if (tradeRestricted == true)
-                seed = 2;   // trade restricted
+                seed = (int)TradeRestrictionState.Restricted;
 
             _affixSpecList.Add(new(affixProto, agentProtoRef, seed));
+            return true;
+        }
+
+        public bool SetTradeRestricted(bool tradeRestricted, bool unbind)
+        {
+            PrototypeId bindingRef = GameDatabase.GlobalsPrototype.ItemBindingAffix;
+            if (bindingRef == PrototypeId.Invalid) return Logger.WarnReturn(false, "SetTradeRestricted(): bindingRef == PrototypeId.Invalid");
+
+            bool stateChanged = false;
+
+            foreach (AffixSpec affixSpec in _affixSpecList)
+            {
+                if (affixSpec.AffixProto.DataRef != bindingRef)
+                    continue;
+
+                if (tradeRestricted && affixSpec.Seed != (int)TradeRestrictionState.Restricted)
+                {
+                    affixSpec.Seed = (int)TradeRestrictionState.Restricted;
+                    stateChanged = true;
+                }
+
+                if (tradeRestricted == false && affixSpec.Seed == (int)TradeRestrictionState.Restricted)
+                {
+                    affixSpec.Seed = (int)TradeRestrictionState.NotRestricted;
+                    stateChanged = true;
+                }
+
+                if (unbind && affixSpec.ScopeProtoRef != PrototypeId.Invalid)
+                {
+                    affixSpec.ScopeProtoRef = PrototypeId.Invalid;
+                    stateChanged = true;
+                }
+
+                return stateChanged;
+            }
+
+            if (tradeRestricted)
+            {
+                AffixSpec affixSpec = new(bindingRef.As<AffixPrototype>(), PrototypeId.Invalid, (int)TradeRestrictionState.Restricted);
+                _affixSpecList.Add(affixSpec);
+            }
+
             return true;
         }
 

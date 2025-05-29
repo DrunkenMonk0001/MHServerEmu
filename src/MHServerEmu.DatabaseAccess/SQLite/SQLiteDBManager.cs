@@ -13,7 +13,7 @@ namespace MHServerEmu.DatabaseAccess.SQLite
     /// </summary>
     public class SQLiteDBManager : IDBManager
     {
-        private const int CurrentSchemaVersion = 2;         // Increment this when making changes to the database schema
+        private const int CurrentSchemaVersion = 3;         // Increment this when making changes to the database schema
         private const int NumTestAccounts = 5;              // Number of test accounts to create for new database files
         private const int NumPlayerDataWriteAttempts = 3;   // Number of write attempts to do when saving player data
 
@@ -68,6 +68,27 @@ namespace MHServerEmu.DatabaseAccess.SQLite
             // Associated player data is loaded separately
             account = accounts.FirstOrDefault();
             return account != null;
+        }
+
+        public bool TryGetPlayerName(ulong id, out string playerName)
+        {
+            using SQLiteConnection connection = GetConnection();
+            
+            playerName = connection.QueryFirstOrDefault<string>("SELECT PlayerName FROM Account WHERE Id = @Id", new { Id = (long)id });
+
+            return string.IsNullOrWhiteSpace(playerName) == false;
+        }
+
+        public bool GetPlayerNames(Dictionary<ulong, string> playerNames)
+        {
+            using SQLiteConnection connection = GetConnection();
+            
+            var accounts = connection.Query<DBAccount>("SELECT Id, PlayerName FROM Account");
+
+            foreach (DBAccount account in accounts)
+                playerNames[(ulong)account.Id] = account.PlayerName;
+
+            return playerNames.Count > 0;
         }
 
         public bool QueryIsPlayerNameTaken(string playerName)
@@ -292,7 +313,8 @@ namespace MHServerEmu.DatabaseAccess.SQLite
                     {
                         connection.Execute(@$"INSERT OR IGNORE INTO Player (DbGuid) VALUES (@DbGuid)", account.Player, transaction);
                         connection.Execute(@$"UPDATE Player SET ArchiveData=@ArchiveData, StartTarget=@StartTarget,
-                                            StartTargetRegionOverride=@StartTargetRegionOverride, AOIVolume=@AOIVolume WHERE DbGuid = @DbGuid",
+                                            StartTargetRegionOverride=@StartTargetRegionOverride, AOIVolume=@AOIVolume,
+                                            GazillioniteBalance=@GazillioniteBalance WHERE DbGuid = @DbGuid",
                                             account.Player, transaction);
                     }
                     else

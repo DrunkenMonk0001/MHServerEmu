@@ -9,7 +9,7 @@ using MHServerEmu.Games.Properties;
 
 namespace MHServerEmu.Games.Entities.Inventories
 {
-    public class Inventory : IEnumerable<Inventory.IterationEntry>
+    public class Inventory
     {
         public const uint InvalidSlot = uint.MaxValue;      // 0xFFFFFFFF / -1
 
@@ -72,10 +72,11 @@ namespace MHServerEmu.Games.Entities.Inventories
 
         public ulong GetAnyEntity()
         {
-            if (_entities.Any())
-                return _entities.First().Value.EntityId;
+            SortedDictionary<uint, InvEntry>.Enumerator enumerator = _entities.GetEnumerator();
+            if (enumerator.MoveNext() == false)
+                return 0;
 
-            return 0;
+            return enumerator.Current.Value.EntityId;
         }
 
         public Entity GetMatchingEntity(PrototypeId entityRef)
@@ -98,11 +99,13 @@ namespace MHServerEmu.Games.Entities.Inventories
 
             int numMatches = 0;
 
+            EntityManager entityManager = Game.EntityManager;
+
             foreach (var entry in this)
             {
                 if (entry.ProtoRef == entityRef)
                 {
-                    Entity entity = Game.EntityManager.GetEntity<Entity>(entry.Id);
+                    Entity entity = entityManager.GetEntity<Entity>(entry.Id);
                     if (entity != null)
                     {
                         numMatches += entity.CurrentStackSize;
@@ -140,9 +143,11 @@ namespace MHServerEmu.Games.Entities.Inventories
             foreach (InvEntry entry in _entities.Values)
                 containedIds[i++] = entry.EntityId;
 
+            EntityManager entityManager = Game.EntityManager;
+
             foreach (ulong containedId in containedIds)
             {
-                Entity contained = Game.EntityManager.GetEntity<Entity>(containedId);
+                Entity contained = entityManager.GetEntity<Entity>(containedId);
                 if (contained == null)
                 {
                     Logger.Warn("DestroyContained(): contained == null");
@@ -150,10 +155,10 @@ namespace MHServerEmu.Games.Entities.Inventories
                 }
 
                 bool isDestroyingAllEntities = false;
-                if (Game.EntityManager == null)
+                if (entityManager == null)
                     Logger.Warn("DestroyContained(): Game.EntityManager == null");
                 else
-                    isDestroyingAllEntities = Game.EntityManager.IsDestroyingAllEntities;
+                    isDestroyingAllEntities = entityManager.IsDestroyingAllEntities;
 
                 // Entities that have the DetachOnContainerDestroyed are not destroyed (unless the EntityManager is currently cleaning up all entities)
                 if (contained.Properties[PropertyEnum.DetachOnContainerDestroyed] && isDestroyingAllEntities == false)
@@ -247,15 +252,22 @@ namespace MHServerEmu.Games.Entities.Inventories
             return InvalidSlot;
         }
 
+        public bool IsSlotAvailableForEntity(Entity entity, bool allowStacking)
+        {
+            return GetFreeSlot(entity, allowStacking, true) != InvalidSlot;
+        }
+
         public uint GetAutoStackSlot(Entity entity, bool isAdding = false)
         {
             if (entity.CanStack() == false || entity.IsAutoStackedWhenAddedToInventory() == false)
                 return InvalidSlot;
-            
+
+            EntityManager entityManager = Game.EntityManager;
+
             foreach (var entry in this)
             {
                 if (entry.Id == entity.Id) continue;     // Stacking with itself sure sounds like a potential dupe
-                Entity existingEntity = Game.EntityManager.GetEntity<Entity>(entry.Id);
+                Entity existingEntity = entityManager.GetEntity<Entity>(entry.Id);
                 
                 if (existingEntity == null)
                 {
@@ -283,8 +295,10 @@ namespace MHServerEmu.Games.Entities.Inventories
             return InventoryResult.Success;
         }
 
-        public InventoryResult PassesEquipmentRestrictions(Entity entity, ref PropertyEnum propertyRestriction)
+        public InventoryResult PassesEquipmentRestrictions(Entity entity, out PropertyEnum propertyRestriction)
         {
+            propertyRestriction = PropertyEnum.Invalid;
+
             InventoryResult result = InventoryResult.Success;
             if (IsEquipment == false) return result;
 
@@ -297,7 +311,7 @@ namespace MHServerEmu.Games.Entities.Inventories
             Item item = entity as Item;
             if (item == null) return Logger.WarnReturn(InventoryResult.InvalidNotAnItem, "PassesEquipmentRestrictions(): item == null");
 
-            result = inventoryAgentOwner.CanEquip(item, ref propertyRestriction);
+            result = inventoryAgentOwner.CanEquip(item, out propertyRestriction);
             if (result == InventoryResult.Success)
             {
                 Avatar inventoryAvatarOwner = inventoryOwner.GetSelfOrOwnerOfType<Avatar>();
@@ -665,7 +679,17 @@ namespace MHServerEmu.Games.Entities.Inventories
 
         private void PostFinalMove(Entity entity, InventoryLocation prevInvLoc, InventoryLocation invLoc)
         {
+            if (entity == null) return;
+            var manager = Game?.EntityManager;
+            if (manager == null) return;
 
+            var oldOwner = manager.GetEntity<Entity>(prevInvLoc.ContainerId);
+            var newOwner = manager.GetEntity<Entity>(invLoc.ContainerId);
+
+            if (oldOwner != null && oldOwner != newOwner)
+                oldOwner.EntityInventoryChangedEvent.Invoke(new(entity));
+
+            newOwner?.EntityInventoryChangedEvent.Invoke(new(entity));
         }
 
         private InventoryResult UnpackArchivedEntity(Entity entity, uint destSlot)
@@ -673,27 +697,61 @@ namespace MHServerEmu.Games.Entities.Inventories
             return Logger.WarnReturn(InventoryResult.Invalid, "UnpackArchivedEntity(): Not yet implemented");
         }
 
-        // Replacement implementation for Inventory::Iterator
-        public IEnumerator<IterationEntry> GetEnumerator()
+        public Enumerator GetEnumerator()
         {
-            foreach (var kvp in _entities)
-                yield return new(kvp);
+            return new(this);
         }
 
-        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
-
-        public readonly struct IterationEntry
+        public struct Enumerator : IEnumerator<Enumerator.Entry>
         {
-            private readonly KeyValuePair<uint, InvEntry> _kvp;
+            private readonly SortedDictionary<uint, InvEntry> _entities;
+            private SortedDictionary<uint, InvEntry>.Enumerator _enumerator;
 
-            public uint Slot { get => _kvp.Key; }
-            public ulong Id { get => _kvp.Value.EntityId; }
-            public PrototypeId ProtoRef { get => _kvp.Value.PrototypeDataRef; }
-            public InventoryMetaData MetaData { get => _kvp.Value.MetaData; }
+            public Entry Current { get; private set; }
+            object IEnumerator.Current { get => Current; }
 
-            public IterationEntry(KeyValuePair<uint, InvEntry> kvp)
+            public Enumerator(Inventory inventory)
             {
-                _kvp = kvp;
+                _entities = inventory._entities;
+                _enumerator = _entities.GetEnumerator();
+            }
+
+            public bool MoveNext()
+            {
+                while (_enumerator.MoveNext())
+                {
+                    Current = new(_enumerator.Current);
+                    return true;
+                }
+
+                Current = default;
+                return false;
+            }
+
+            public void Dispose()
+            {
+                _enumerator.Dispose();
+            }
+
+            public void Reset()
+            {
+                _enumerator.Dispose();
+                _enumerator = _entities.GetEnumerator();
+            }
+
+            public readonly struct Entry
+            {
+                private readonly KeyValuePair<uint, InvEntry> _kvp;
+
+                public uint Slot { get => _kvp.Key; }
+                public ulong Id { get => _kvp.Value.EntityId; }
+                public PrototypeId ProtoRef { get => _kvp.Value.PrototypeDataRef; }
+                public InventoryMetaData MetaData { get => _kvp.Value.MetaData; }
+
+                public Entry(KeyValuePair<uint, InvEntry> kvp)
+                {
+                    _kvp = kvp;
+                }
             }
         }
 

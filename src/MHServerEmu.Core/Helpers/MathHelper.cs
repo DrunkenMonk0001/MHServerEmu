@@ -20,6 +20,7 @@
         public static float SquareRoot(float f) => f > 0.0f ? MathF.Sqrt(f) : 0.0f;
         public static float Square(float v) => v * v;
         public static int RoundDownToInt(float v) => (int)MathF.Floor(v);
+        public static int RoundUpToInt(float v) => (int)MathF.Ceiling(v);
 
         /// <summary>
         /// Determines the index of the highest bit set in a <see cref="ulong"/> value.
@@ -72,12 +73,39 @@
             return value & ~(value - 1);
         }
 
-        public static int RoundToInt(float value) // TODO check where it used
+        public static ulong SwizzleSignBit(long value)
+        {
+            ulong bits = (ulong)value;
+            return (bits << 1) | (bits >> 63);
+        }
+
+        public static long UnswizzleSignBit(ulong bits)
+        {
+            return (long)((bits >> 1) | (bits << 63));
+        }
+
+        public static float Round(float value)
         {
             if (value < 0.0f)
                 return (int)(value - 0.5f);
             else
                 return (int)(value + 0.5f);
+        }
+
+        public static int RoundToInt(float value)
+        {
+            if (value < 0.0f)
+                return (int)(value - 0.5f);
+            else
+                return (int)(value + 0.5f);
+        }
+
+        public static int RoundToInt(double value)
+        {
+            if (value < 0.0)
+                return (int)(value - 0.5);
+            else
+                return (int)(value + 0.5);
         }
 
         public static long RoundToInt64(float value)
@@ -129,6 +157,20 @@
         /// Performs clamp without throwing when min > max.
         /// </summary>
         public static float ClampNoThrow(float value, float min, float max)
+        {
+            if (value < min)
+                return min;
+
+            if (value > max)
+                return max;
+
+            return value;
+        }
+
+        /// <summary>
+        /// Performs clamp without throwing when min > max.
+        /// </summary>
+        public static int ClampNoThrow(int value, int min, int max)
         {
             if (value < min)
                 return min;

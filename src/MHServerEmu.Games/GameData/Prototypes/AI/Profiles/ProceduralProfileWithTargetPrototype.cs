@@ -13,6 +13,7 @@ using MHServerEmu.Games.Entities.Locomotion;
 using MHServerEmu.Games.Events;
 using MHServerEmu.Games.Powers;
 using MHServerEmu.Games.Properties;
+using MHServerEmu.Games.Regions;
 
 namespace MHServerEmu.Games.GameData.Prototypes
 {
@@ -200,7 +201,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
             }
 
             StaticBehaviorReturnType contextResult = StaticBehaviorReturnType.None;
-            float flankTime = ownerController.Blackboard.PropertyCollection[PropertyEnum.AIProceduralNextFlankTime];
+            long flankTime = ownerController.Blackboard.PropertyCollection[PropertyEnum.AIProceduralNextFlankTime];
             if (proceduralAI.GetState(0) == Flank.Instance || currentTime > flankTime)
                 HandleMovementContext(proceduralAI, ownerController, locomotor, proceduralFlankContext.FlankContext, checkPower, out contextResult, proceduralFlankContext);
 
@@ -213,7 +214,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
             if (proceduralFleeContext == null) return StaticBehaviorReturnType.None;
 
             StaticBehaviorReturnType contextResult = StaticBehaviorReturnType.None;
-            float fleeTime = ownerController.Blackboard.PropertyCollection[PropertyEnum.AIProceduralNextFleeTime];
+            long fleeTime = ownerController.Blackboard.PropertyCollection[PropertyEnum.AIProceduralNextFleeTime];
             if (proceduralAI.GetState(0) == Flee.Instance || currentTime > fleeTime)
                 contextResult = HandleContext(proceduralAI, ownerController, proceduralFleeContext.FleeContext, proceduralFleeContext);
 
@@ -244,7 +245,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
             return false;
         }
 
-        protected bool CommonSimplifiedSensory(WorldEntity target, AIController ownerController, ProceduralAI proceduralAI, 
+        protected bool CommonSimplifiedSensory(ref WorldEntity target, AIController ownerController, ProceduralAI proceduralAI, 
             SelectEntityContextPrototype selectTarget, CombatTargetType targetType)
         {
             BehaviorSensorySystem senses = ownerController.Senses;
@@ -458,6 +459,13 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
         //---
 
+        private enum ValidateTargetResult
+        {
+            Success,
+            GenericFailure,
+            PowerFailure
+        }
+
         private static readonly Logger Logger = LogManager.CreateLogger();
 
         private float _orbRadiusSquared;
@@ -483,6 +491,8 @@ namespace MHServerEmu.Games.GameData.Prototypes
             if (blackboard == null) return;
 
             // Delay AI activation to let the drop animation finish before an avatar can pick up this orb
+            // NOTE: For some reason AIStartsEnabled is not set to false for some orb prototypes, so we force set it here.
+            blackboard.PropertyCollection[PropertyEnum.AIStartsEnabled] = false;
             EventPointer<AIController.EnableAIEvent> enableEvent = new();
             aiController.ScheduleAIEvent(enableEvent, TimeSpan.FromMilliseconds(InitialMoveToDelayMS));
 
@@ -520,26 +530,26 @@ namespace MHServerEmu.Games.GameData.Prototypes
             ulong restrictedToPlayerGuid = agent.Properties[PropertyEnum.RestrictedToPlayerGuid];
             if (restrictedToPlayerGuid != 0)
             {
+                // Get the current avatar for the player we are looking for
                 Player player = game.EntityManager.GetEntityByDbGuid<Player>(restrictedToPlayerGuid);
                 if (player != null)
                 {
-                    // Get current avatar for the player we are looking for
                     if (player.CurrentAvatar?.IsInWorld == true)
                         avatar = player.CurrentAvatar;
                 }
-                else
+
+                if (avatar == null)
                 {
-                    // Our player no longer exists
-                    // DestroyOrbOnUnSimOrTargetLoss
+                    if (ShouldDestroyOrbOnUnSimOrTargetLoss(agent))
+                        agent.Destroy();
+
+                    return;
                 }
             }
             else
             {
-                // TODO: non-instanced orbs
-                // TODO: Find the nearest avatar belonging to any player
-                Logger.Warn("Think(): Non-instanced orbs are not yet implemented");
-                agent.Destroy();    // REMOVEME
-                return;
+                // Find the nearest avatar belonging to any player
+                avatar = FindNearestAvatar(agent);
             }
 
             // If we found an avatar, check if it can pick this orb up
@@ -557,24 +567,51 @@ namespace MHServerEmu.Games.GameData.Prototypes
             {
                 // NOTE: Health and endurance orbs follow players, credits and experience orbs do not
 
-                /*
                 BehaviorSensorySystem senses = ownerController.Senses;
-                var target = ownerController.TargetEntity;
+                WorldEntity currentMoveTarget = ownerController.TargetEntity;
+
                 if (senses.ShouldSense())
                 {
-                    // TODO Check target
-                    // InvalidTargetState
-                    if (target is not Avatar) return;
-                    float aggroRange = ownerController.AggroRangeAlly;
-                    // TODO AcceptsAggroRangeBonus
-                    float distanceSq = Vector3.DistanceSquared2D(agent.RegionLocation.Position, target.RegionLocation.Position);
-                    if (distanceSq > MathHelper.Square(aggroRange)) return;
-                    ownerController.SetTargetEntity(target);
+                    switch (ValidateTarget(agent, avatar, true))
+                    {
+                        case ValidateTargetResult.Success:
+                            agent.SetState(PrototypeId.Invalid);
+                            if (currentMoveTarget != avatar)
+                            {
+                                ownerController.SetTargetEntity(avatar);
+                                currentMoveTarget = avatar;
+                            }
+                            break;
+
+                        case ValidateTargetResult.GenericFailure:
+                            agent.SetState(PrototypeId.Invalid);
+                            ownerController.ResetCurrentTargetState();
+                            currentMoveTarget = null;
+                            break;
+
+                        case ValidateTargetResult.PowerFailure:
+                            agent.ApplyStateFromPrototype(InvalidTargetState);  // Play pickup failure animation
+                            ownerController.ResetCurrentTargetState();
+                            currentMoveTarget = null;
+                            break;
+                    }
                 }
-                if (target != null)
+
+                if (currentMoveTarget != null)
                     HandleMovementContext(proceduralAI, ownerController, agent.Locomotor, MoveToTarget, false, out _);
-                */
             }
+        }
+
+        public override void OnSetSimulated(AIController ownerController, bool simulated)
+        {
+            if (simulated)
+                return;
+
+            Agent agent = ownerController.Owner;
+            if (agent == null) return;
+
+            if (ShouldDestroyOrbOnUnSimOrTargetLoss(agent))
+                agent.ScheduleDestroyEvent(TimeSpan.Zero);
         }
 
         private bool TryGetPickedUp(Agent agent, Avatar avatar)
@@ -584,7 +621,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
             OrbPrototype orbProto = agent.Prototype as OrbPrototype;
             if (orbProto == null) return Logger.WarnReturn(false, "TryGetPickedUp(): orbProto == null");
 
-            if (ValidateTarget(agent, avatar) == false)
+            if (ValidateTarget(agent, avatar, false) != ValidateTargetResult.Success)
                 return false;
 
             Player player = avatar.GetOwnerOfType<Player>();
@@ -594,27 +631,55 @@ namespace MHServerEmu.Games.GameData.Prototypes
             if (EffectPower != PrototypeId.Invalid)
                 agent.AIController.AttemptActivatePower(EffectPower, avatar.Id, avatar.RegionLocation.Position);
 
+            // Run OnOrbPickup procs
+            KeywordPrototype orbEntityKeywordProto = GameDatabase.KeywordGlobalsPrototype.OrbEntityKeywordPrototype;
+            if (orbProto.HasKeyword(orbEntityKeywordProto))
+                avatar.TryActivateOnOrbPickupProcs(agent);
+
             // Experience
             // Scale exp based on avatar level rather than orb level
             if (orbProto.GetXPAwarded(avatar.CharacterLevel, out long xp, out long minXP, player.CanUseLiveTuneBonuses()))
             {
                 TuningTable tuningTable = orbProto.IgnoreRegionDifficultyForXPCalc == false ? agent.Region?.TuningTable : null;
-                xp = avatar.ApplyXPModifiers(xp, tuningTable);
-                avatar.AwardXP(xp, agent.Properties[PropertyEnum.ShowXPRewardText]);
+                xp = avatar.ApplyXPModifiers(xp, false, tuningTable);
+                avatar.AwardXP(xp, minXP, agent.Properties[PropertyEnum.ShowXPRewardText]);
+            }
+
+            // Alternate advancement experience
+            if (avatar.Game.InfinitySystemEnabled)
+            {
+                long infinityXP = agent.Properties[PropertyEnum.InfinityXP];
+                if (infinityXP > 0)
+                    player.AwardInfinityXP(infinityXP, true);
+            }
+            else
+            {
+                long omegaXP = agent.Properties[PropertyEnum.OmegaXP];
+                if (omegaXP > 0)
+                    player.AwardOmegaXP(omegaXP, true);
             }
 
             // Credits / currency
-            player.AcquireCurrencyItem(agent);
+            if (player.AcquireCurrencyItem(agent))
+            {
+                avatar.TryActivateOnLootPickupProcs(agent);
+
+                if (agent.Properties.HasProperty(PropertyEnum.RunestonesAmount))
+                    avatar.TryActivateOnRunestonePickupProcs();
+            }
+
+            // Invoke OrbPickUp event
+            agent.Region?.OrbPickUpEvent.Invoke(new(player, agent));            
 
             // "Kill" this orb to play its pickup (death) animation
             agent.Kill(avatar, KillFlags.NoDeadEvent | KillFlags.NoExp | KillFlags.NoLoot);
             return true;
         }
 
-        private bool ValidateTarget(Agent agent, Avatar target)
+        private ValidateTargetResult ValidateTarget(Agent agent, Avatar target, bool checkRange)
         {
-            if (agent == null) return false;
-            if (target == null) return false;
+            if (agent == null) return ValidateTargetResult.GenericFailure;
+            if (target == null) return ValidateTargetResult.GenericFailure;
 
             // TODO: Other restrictions?
 
@@ -623,10 +688,33 @@ namespace MHServerEmu.Games.GameData.Prototypes
             if (restrictedToPlayerGuid != 0)
             {
                 Player player = target.GetOwnerOfType<Player>();
-                if (player == null) return Logger.WarnReturn(false, "ValidateTarget(): player == null");
+                if (player == null) return Logger.WarnReturn(ValidateTargetResult.GenericFailure, "ValidateTarget(): player == null");
 
                 if (player.DatabaseUniqueId != restrictedToPlayerGuid)
-                    return false;
+                    return ValidateTargetResult.GenericFailure;
+            }
+
+            // Make sure this orb is in the same region as the target
+            if (agent.Region != target.Region)
+                return ValidateTargetResult.GenericFailure;
+
+            // Check aggro range for moving orbs
+            if (MoveToTarget != null && checkRange)
+            {
+                float aggroRangeBase = agent.AIController.AggroRangeAlly;
+                float aggroRange = aggroRangeBase;
+
+                if (AcceptsAggroRangeBonus)
+                {
+                    aggroRange += aggroRangeBase * Avatar.GetOrbAggroRangeBonusPct(target.Properties);
+                    aggroRange = MathF.Min(aggroRange, GameDatabase.AIGlobalsPrototype.OrbAggroRangeMax);
+                }
+
+                Vector3 agentPosition = agent.RegionLocation.Position;
+                Vector3 targetPosition = target.RegionLocation.Position;
+
+                if (Vector3.DistanceSquared2D(agentPosition, targetPosition) > MathHelper.Square(aggroRange))
+                    return ValidateTargetResult.GenericFailure;
             }
 
             // Do not allow this orb to be picked up if the avatar is not a valid for its target
@@ -634,13 +722,62 @@ namespace MHServerEmu.Games.GameData.Prototypes
             if (EffectPower != PrototypeId.Invalid)
             {
                 Power power = agent.GetPower(EffectPower);
-                if (power == null) return Logger.WarnReturn(false, "ValidateTarget(): power == null");
+                if (power == null) return Logger.WarnReturn(ValidateTargetResult.GenericFailure, "ValidateTarget(): power == null");
 
                 if (power.IsValidTarget(target) == false)
-                    return false;
+                    return ValidateTargetResult.PowerFailure;
             }
 
-            return true;
+            return ValidateTargetResult.Success;
+        }
+
+        private bool ShouldDestroyOrbOnUnSimOrTargetLoss(Agent agent)
+        {
+            PropertyCollection properties = agent.Properties;
+
+            // Do not destroy experience orbs
+            if (agent.GetXPAwarded(out _, out _, false))
+                return false;
+
+            if (properties.HasProperty(PropertyEnum.OmegaXP) || properties.HasProperty(PropertyEnum.InfinityXP))
+                return false;
+
+            // Do not destroy currency
+            if (properties.HasProperty(PropertyEnum.ItemCurrency) || properties.HasProperty(PropertyEnum.RunestonesAmount))
+                return false;
+
+            // We can add more filters here if needed
+
+            return DestroyOrbOnUnSimOrTargetLoss;
+        }
+
+        private static Avatar FindNearestAvatar(Agent agent)
+        {
+            Avatar target = null;
+
+            if (agent.IsInWorld == false) return Logger.WarnReturn(target, "FindNearestAvatar(): agent.IsInWorld == false");
+
+            Region region = agent.Region;
+            if (region == null) return Logger.WarnReturn(target, "FindNearestAvatar(): region == null");
+
+            Vector3 agentPosition = agent.RegionLocation.Position;
+            float maxAggroRange = GameDatabase.AIGlobalsPrototype.OrbAggroRangeMax;
+
+            float minDistance = float.MaxValue;
+            foreach (Avatar avatar in region.IterateAvatarsInVolume(new(agentPosition, maxAggroRange)))
+            {
+                if (avatar?.IsInWorld != true)
+                    continue;
+
+                float distance = Vector3.DistanceSquared2D(agentPosition, avatar.RegionLocation.Position);
+                if (distance < minDistance)
+                {
+                    minDistance = distance;
+                    target = avatar;
+                }
+            }
+
+            return target;
         }
     }
 
@@ -670,7 +807,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
             if (Power == null || Power.Power == PrototypeId.Invalid) return;
             BehaviorBlackboard blackboard = ownerController.Blackboard;
             WorldEntity target = ownerController.TargetEntity;
-            CommonSimplifiedSensory(target, ownerController, proceduralAI, SelectTarget, CombatTargetType.Hostile);
+            CommonSimplifiedSensory(ref target, ownerController, proceduralAI, SelectTarget, CombatTargetType.Hostile);
 
             StaticBehaviorReturnType contextResult = HandleContext(proceduralAI, ownerController, Power, null);
             if (contextResult == StaticBehaviorReturnType.Running)
@@ -745,7 +882,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
             }
 
             WorldEntity target = ownerController.TargetEntity;
-            if (CommonSimplifiedSensory(target, ownerController, proceduralAI, SelectTarget, CombatTargetType.Hostile) == false) 
+            if (CommonSimplifiedSensory(ref target, ownerController, proceduralAI, SelectTarget, CombatTargetType.Hostile) == false) 
             { 
                 if (SecondaryTargetSelection != null)
                 {
@@ -759,7 +896,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
             if (locomotor.FollowEntityId != targetId)
             {
                 locomotor.FollowEntity(targetId, 0.0f);
-                locomotor.FollowEntityMissingEvent.AddActionBack(ownerController.MissileReturnEvent);
+                locomotor.FollowEntityMissingEvent.AddActionBack(ownerController.MissileReturnAction);
             }
 
         }
@@ -775,7 +912,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
             blackboard.PropertyCollection.RemoveProperty(PropertyEnum.AINextSensoryUpdate);
 
             WorldEntity target = ownerController.TargetEntity;
-            if (CommonSimplifiedSensory(target, ownerController, proceduralAI, SelectTarget, CombatTargetType.Hostile) == false)
+            if (CommonSimplifiedSensory(ref target, ownerController, proceduralAI, SelectTarget, CombatTargetType.Hostile) == false)
             {
                 if (SecondaryTargetSelection != null)
                 {
@@ -791,7 +928,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
             if (target != null)
             {
                 locomotor.FollowEntity(target.Id, 0.0f);
-                locomotor.FollowEntityMissingEvent.AddActionFront(ownerController.MissileReturnEvent);
+                locomotor.FollowEntityMissingEvent.AddActionFront(ownerController.MissileReturnAction);
             }
         }
     }
@@ -808,7 +945,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
             if (game == null) return;
 
             WorldEntity target = ownerController.TargetEntity;
-            if (CommonSimplifiedSensory(target, ownerController, proceduralAI, SelectTarget, CombatTargetType.Hostile) == false) return;
+            if (CommonSimplifiedSensory(ref target, ownerController, proceduralAI, SelectTarget, CombatTargetType.Hostile) == false) return;
 
             Locomotor locomotor = agent.Locomotor;
             if (locomotor == null) return;
@@ -854,7 +991,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
             if (game == null) return;
 
             WorldEntity target = ownerController.TargetEntity;
-            if (CommonSimplifiedSensory(target, ownerController, proceduralAI, SelectTarget, CombatTargetType.Hostile) == false) return;
+            if (CommonSimplifiedSensory(ref target, ownerController, proceduralAI, SelectTarget, CombatTargetType.Hostile) == false) return;
             HandleContext(proceduralAI, ownerController, MoveToTarget);
         }
 
@@ -912,7 +1049,6 @@ namespace MHServerEmu.Games.GameData.Prototypes
                 float distanceToMasterSq = Vector3.DistanceSquared2D(agent.RegionLocation.Position, master.RegionLocation.Position);
                 if (distanceToMasterSq > MaxDistToMasterBeforeTeleport * MaxDistToMasterBeforeTeleport)
                 {
-                    ProceduralAI.Logger.Debug($"Teleport agent {agent.RegionLocation.Position} to master {master.RegionLocation.Position}");
                     HandleContext(proceduralAI, ownerController, TeleportToMasterIfTooFarAway);
                 }
             }

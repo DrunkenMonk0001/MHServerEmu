@@ -33,14 +33,25 @@ namespace MHServerEmu.Games.Loot
         public List<VendorXPSummary> VendorXP { get; } = new();
         public List<CurrencySpec> Currencies { get; } = new();
 
+        public List<ItemSpec> VaporizedItemSpecs { get; } = new();
+        public List<int> VaporizedCredits { get; } = new();
+
         public int NumDrops { get => ItemSpecs.Count + AgentSpecs.Count + Credits.Count + Currencies.Count; }
+
+        public bool IsInPool { get; set; }
+
+        public LootResultSummary() { }
 
         public void Add(in LootResult lootResult)
         {
             switch (lootResult.Type)
             {
                 case LootType.Item:
-                    ItemSpecs.Add(lootResult.ItemSpec);
+                    if (lootResult.IsVaporized)
+                        VaporizedItemSpecs.Add(lootResult.ItemSpec);
+                    else
+                        ItemSpecs.Add(lootResult.ItemSpec);
+
                     Types |= LootType.Item;
                     break;
 
@@ -50,12 +61,15 @@ namespace MHServerEmu.Games.Loot
                     break;
 
                 case LootType.Credits:
-                    Credits.Add(lootResult.Amount);
+                    if (lootResult.IsVaporized)
+                        VaporizedCredits.Add(lootResult.Amount);
+                    else
+                        Credits.Add(lootResult.Amount);
+
                     Types |= LootType.Credits;
                     break;
 
                 case LootType.Experience:
-                    Logger.Debug($"Add(): experience=[{lootResult.Amount}]");
                     Experience += lootResult.Amount;
                     Types |= LootType.Experience;
                     break;
@@ -79,31 +93,27 @@ namespace MHServerEmu.Games.Loot
                     break;
 
                 case LootType.RealMoney:
-                    Logger.Debug($"Add(): realMoney=[{lootResult.Amount}]");
+                    //Logger.Debug($"Add(): realMoney=[{lootResult.Amount}]");
                     RealMoney += lootResult.RealMoneyProto.NumMin;
                     Types |= LootType.RealMoney;
                     break;
 
                 case LootType.CallbackNode:
-                    Logger.Debug($"Add(): callbackNode=[{lootResult.CallbackNodeProto.GetType()}]");
                     CallbackNodes.Add(lootResult.CallbackNodeProto);
                     Types |= LootType.CallbackNode;
                     break;
 
                 case LootType.VanityTitle:
-                    Logger.Debug($"Add(): vanityTitle=[{lootResult.VanityTitleProtoRef.GetName()}]");
                     VanityTitles.Add(lootResult.VanityTitleProtoRef);
                     Types |= LootType.VanityTitle;
                     break;
 
                 case LootType.VendorXP:
-                    Logger.Debug($"Add(): vendorXPSummary=[{lootResult.VendorXPSummary}]");
                     VendorXP.Add(lootResult.VendorXPSummary);
                     Types |= LootType.VendorXP;
                     break;
 
                 case LootType.Currency:
-                    Logger.Debug($"Add(): currencySpec=[{lootResult.CurrencySpec}]");
                     Currencies.Add(lootResult.CurrencySpec);
                     Types |= LootType.Currency;
                     break;
@@ -296,6 +306,9 @@ namespace MHServerEmu.Games.Loot
             VanityTitles.Clear();
             VendorXP.Clear();
             Currencies.Clear();
+
+            VaporizedItemSpecs.Clear();
+            VaporizedCredits.Clear();
         }
 
         public void Dispose()

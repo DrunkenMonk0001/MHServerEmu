@@ -4,8 +4,10 @@ using MHServerEmu.Core.Logging;
 using MHServerEmu.Games.Achievements;
 using MHServerEmu.Games.Dialog;
 using MHServerEmu.Games.GameData.Calligraphy;
+using MHServerEmu.Games.GameData.PatchManager;
 using MHServerEmu.Games.GameData.Prototypes;
 using MHServerEmu.Games.GameData.Tables;
+using MHServerEmu.Games.Leaderboards;
 using MHServerEmu.Games.Locales;
 using MHServerEmu.Games.Properties;
 
@@ -95,6 +97,9 @@ namespace MHServerEmu.Games.GameData
             PropertyInfoTable = new();
             PropertyInfoTable.Initialize();
 
+            // Initialize PrototypePatchManager
+            PrototypePatchManager.Instance.Initialize(config.EnablePatchManager);
+
             // Load globals prototypes
             PrototypeId globalsPrototypeId = GetPrototypeRefByName("Globals/Globals.defaults");
             GlobalsPrototype = GetPrototype<GlobalsPrototype>(globalsPrototypeId);
@@ -141,6 +146,7 @@ namespace MHServerEmu.Games.GameData
             // processAvatarSynergyMap
 
             AchievementDatabase.Instance.Initialize();
+            LeaderboardInfoCache.Instance.Initialize();
 
             // Initialize game data tables
             var tablesWatch = Stopwatch.StartNew();

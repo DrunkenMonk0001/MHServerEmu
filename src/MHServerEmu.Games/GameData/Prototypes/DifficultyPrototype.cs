@@ -1,4 +1,9 @@
-﻿using MHServerEmu.Games.GameData.Calligraphy.Attributes;
+﻿using MHServerEmu.Core.Collections;
+using MHServerEmu.Core.Extensions;
+using MHServerEmu.Core.Logging;
+using MHServerEmu.Core.System.Random;
+using MHServerEmu.Games.GameData.Calligraphy;
+using MHServerEmu.Games.GameData.Calligraphy.Attributes;
 using MHServerEmu.Games.Regions;
 
 namespace MHServerEmu.Games.GameData.Prototypes
@@ -52,6 +57,21 @@ namespace MHServerEmu.Games.GameData.Prototypes
     {
         public PrototypeId NegStatusProp { get; protected set; }
         public NegStatusRankCurveEntryPrototype[] RankEntries { get; protected set; }
+
+        //---
+
+        public CurveId GetCurveRefForRank(Rank rank)
+        {
+            int index = (int)rank;
+            if (index < 0 || index >= RankEntries.Length)
+                return CurveId.Invalid;
+
+            NegStatusRankCurveEntryPrototype entry = RankEntries[index];
+            if (entry.Rank != rank)
+                return CurveId.Invalid;
+
+            return entry.TenacityModifierCurve;
+        }
     }
 
     public class RankAffixTableByDifficultyEntryPrototype : Prototype
@@ -87,9 +107,40 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public TuningDamageByRankPrototype[] TuningDamageByRankDCL { get; protected set; }
         public RankAffixTableByDifficultyEntryPrototype[] RankAffixTableByDifficulty { get; protected set; }
 
-        internal RankAffixEntryPrototype GetDifficultyRankEntry(PrototypeId difficultyTierRef, RankPrototype rankProto)
+        public Picker<RankPrototype> BuildRankPicker(PrototypeId difficultyTierRef, GRandom random, bool noAffixes)
         {
-            throw new NotImplementedException();
+            Picker<RankPrototype> picker = new(random);
+            var table = GetRankAffixTable(difficultyTierRef);
+
+            if (table != null)
+                foreach (var entry in table)
+                    if (entry.Weight > 0 && (noAffixes || entry.GetMaxAffixes() > 0))
+                        picker.Add(entry.Rank.As<RankPrototype>(), entry.Weight);
+
+            return picker;
+        }
+
+        public RankAffixEntryPrototype[] GetRankAffixTable(PrototypeId difficultyTierRef)
+        {
+            if (RankAffixTableByDifficulty.HasValue())
+                foreach (var entry in RankAffixTableByDifficulty)
+                    if (DifficultyTierPrototype.InRange(difficultyTierRef, entry.DifficultyMin, entry.DifficultyMax))
+                        return entry.RankAffixTable;
+
+            return RankAffixTable;
+        }
+
+        public RankAffixEntryPrototype GetDifficultyRankEntry(PrototypeId difficultyTierRef, RankPrototype rankProto)
+        {
+            var table = GetRankAffixTable(difficultyTierRef);
+            if (table != null)
+                foreach (var entry in table)
+                {
+                    var entryRank = entry.Rank.As<RankPrototype>();
+                    if (entryRank != null && entryRank.Rank == rankProto.Rank)
+                        return entry;
+                }
+            return null;
         }
     }
 
@@ -132,6 +183,15 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
             return true;
         }
+
+        public static bool InRange(DifficultyTierPrototype valueProto, DifficultyTierPrototype minProto, DifficultyTierPrototype maxProto)
+        {
+            if (valueProto == null) return false;
+            if (minProto == null && maxProto == null) return true;
+            if (minProto != null && valueProto.Tier < minProto.Tier) return false;
+            if (maxProto != null && valueProto.Tier > maxProto.Tier) return false;
+            return true;
+        }
     }
 
     public class DifficultyGlobalsPrototype : Prototype
@@ -152,5 +212,17 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public CurveId TeamUpDamageScalarFromLevelCurve { get; protected set; }
         public EvalPrototype EvalDamageLevelDeltaMtoP { get; protected set; }
         public EvalPrototype EvalDamageLevelDeltaPtoM { get; protected set; }
+
+        //---
+
+        private static readonly Logger Logger = LogManager.CreateLogger();
+
+        public float GetTeamUpDamageScalar(int combatLevel)
+        {
+            Curve teamUpDamageScalarCurve = TeamUpDamageScalarFromLevelCurve.AsCurve();
+            if (teamUpDamageScalarCurve == null) return Logger.WarnReturn(1f, "GetTeamUpDamageScalar(): teamUpDamageScalarCurve == null");
+
+            return teamUpDamageScalarCurve.GetAt(combatLevel);
+        }
     }
 }

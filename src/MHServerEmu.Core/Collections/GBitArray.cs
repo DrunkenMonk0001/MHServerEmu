@@ -1,11 +1,14 @@
-﻿namespace MHServerEmu.Core.Collections
+﻿using MHServerEmu.Core.Serialization;
+using System.Runtime.InteropServices;
+
+namespace MHServerEmu.Core.Collections
 {
-    public class GBitArray
+    public class GBitArray : ISerialize
     {
         public const int Invalid = -1;
         private const int BitsPerWord = 8 * sizeof(ulong); // bits in ulong
 
-        protected ulong[] _bits; // ulong array of words
+        protected ulong[] _bits = Array.Empty<ulong>(); // ulong array of words
         private int _size; // size in words
 
         public int Size => _size * BitsPerWord;
@@ -20,6 +23,34 @@
         {
             get => Get(index);
             set => Set(index, value);
+        }
+
+        public bool Serialize(Archive archive)
+        {
+            bool success = true;
+
+            if (archive.IsPacking)
+            {
+                uint size = (uint)Size;
+                success &= archive.Transfer(ref size);
+
+                Span<byte> buffer = MemoryMarshal.Cast<ulong, byte>(_bits);
+                success &= archive.WriteBytes(buffer);
+            }
+            else
+            {
+                uint size = 0;
+                success &= archive.Transfer(ref size);
+                Resize((int)size);
+
+                Span<byte> buffer = stackalloc byte[Bytes];
+                success &= archive.ReadBytes(buffer);
+
+                Span<ulong> bits = MemoryMarshal.Cast<byte, ulong>(buffer);
+                bits.CopyTo(_bits);
+            }
+
+            return success;
         }
 
         public ulong Test(int index)
@@ -97,7 +128,7 @@
 
         private void Free()
         {
-            _bits = null;
+            _bits = Array.Empty<ulong>();
             _size = 0;
         }
 
@@ -138,6 +169,32 @@
                     return i;
 
             return Invalid;
+        }
+
+        public bool TestAny(GBitArray other)
+        {
+            int size = Math.Min(_size, other._size);
+            for (int i = 0; i < size; i++)
+                if ((_bits[i] & other._bits[i]) != 0)
+                    return true;
+
+            return false;
+        }
+
+        public bool TestAll(GBitArray other)
+        {
+            for (int i = 0; i < other._size; i++)
+            {
+                if (i < _size)
+                {
+                    if ((_bits[i] & other._bits[i]) != other._bits[i])
+                        return false;
+                }
+                else if (other._bits[i] != 0) 
+                    return false;
+            }
+
+            return true;
         }
 
         public static T And<T>(T left, T right) where T: GBitArray

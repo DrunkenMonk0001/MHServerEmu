@@ -2,6 +2,7 @@
 using MHServerEmu.Core.Collisions;
 using MHServerEmu.Core.Extensions;
 using MHServerEmu.Core.Helpers;
+using MHServerEmu.Core.Memory;
 using MHServerEmu.Core.System.Random;
 using MHServerEmu.Core.VectorMath;
 using MHServerEmu.Games.Behavior;
@@ -163,9 +164,12 @@ namespace MHServerEmu.Games.GameData.Prototypes
         {
             if (power == PrototypeId.Invalid) return;
             if (agent.HasPowerInPowerCollection(power) == false)
-            {
+            {               
+                var ownerController = agent.AIController;
+                if (ownerController == null) return;
+                ownerController.FindMaxLOSPowerRadius(power);
+
                 PowerIndexProperties indexPowerProps = new(agent.Properties[PropertyEnum.PowerRank], agent.CharacterLevel, agent.CombatLevel);
-                // TODO PropertyEnum.AILOSMaxPowerRadius
                 agent.AssignPower(power, indexPowerProps);
             }
         }
@@ -182,6 +186,8 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public virtual void OnEntityAggroedEvent(AIController ownerController, in EntityAggroedGameEvent aggroedEvent) { }
         public virtual void OnMissileReturnEvent(AIController ownerController) { }
         public virtual void OnSetSimulated(AIController ownerController, bool simulated) { }
+        public virtual void OnOwnerGotDamaged(AIController ownerController) { }
+        public virtual void OnOwnerCollide(AIController ownerController, WorldEntity whom) { }
     }
 
     public class ProceduralProfileEnticerPrototype : ProceduralAIProfilePrototype
@@ -539,7 +545,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
                         if (spawnGroup.GetEntities(out List <WorldEntity> allies, filterFlag, agent.Alliance))                        
                             foreach (var ally in allies)
                                 if (ally != agent)
-                                    ally.TriggerEntityActionEvent(EntitySelectorActionEventType.OnAllyDetectedPlayer);                        
+                                    ally.TriggerEntityActionEventAlly(EntitySelectorActionEventType.OnAllyDetectedPlayer);                        
                     }
                 }
 
@@ -822,7 +828,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
             WorldEntity target = ownerController.TargetEntity;
 
-            if (CommonSimplifiedSensory(target, ownerController, proceduralAI, SelectTarget, CombatTargetType.Hostile) == false)
+            if (CommonSimplifiedSensory(ref target, ownerController, proceduralAI, SelectTarget, CombatTargetType.Hostile) == false)
             {
                 HandleMovementContext(proceduralAI, ownerController, agent.Locomotor, PetFollow, false, out var movementResult);
                 if (movementResult != StaticBehaviorReturnType.Running) 
@@ -1022,7 +1028,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
                 if (powerResult == StaticBehaviorReturnType.Running) return;
             }
 
-            CommonSimplifiedSensory(target, ownerController, proceduralAI, SelectTarget, CombatTargetType.Hostile);
+            CommonSimplifiedSensory(ref target, ownerController, proceduralAI, SelectTarget, CombatTargetType.Hostile);
 
             if (master != null && master.IsInWorld)
             {
@@ -1080,7 +1086,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
             if (powerContext == null || powerContext.Power == PrototypeId.Invalid) return;
             BehaviorBlackboard blackboard = ownerController.Blackboard;
             var powerQueue = blackboard.CustomPowerQueue;
-            if (powerQueue != null)
+            if (powerQueue != null && powerQueue.Count > 0)
             {
                 PrototypeId customPowerDataRef = powerQueue.Peek().PowerRef;
                 if (powerContext.Power != customPowerDataRef) return;
@@ -1147,7 +1153,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
                             if (syncAttack.TargetEntity == targetAgent.PrototypeDataRef)
                             {
                                 InitPower(agent, syncAttack.LeaderPower);
-                                InitPower(targetAgent, syncAttack.TargetEntityPower);
+                                InitPower(targetAgent, syncAttack.TargetEntityPower.As<ProceduralUsePowerContextPrototype>());
                                 var targetController = targetAgent.AIController;
                                 if (targetController != null)
                                     targetController.Blackboard.PropertyCollection[PropertyEnum.AISyncAttackTargetPower] = syncAttack.TargetEntityPower;
@@ -1227,18 +1233,27 @@ namespace MHServerEmu.Games.GameData.Prototypes
                 return -1;
             }
 
-            List<int> syncAttackIndices = new ();
+            EntityManager entityManager = game.EntityManager;
+            List<int> syncAttackIndices = ListPool<int>.Instance.Get();
+
             for (int i = 0; i < IDPropertiesLength && i < SyncAttacks.Length; i++)
             {
                 ulong targetId = blackboard.PropertyCollection[IDProperties[i]];
-                Agent target = game.EntityManager.GetEntity<Agent>(targetId);
+                Agent target = entityManager.GetEntity<Agent>(targetId);
                 if (target != null && target.IsDead == false)
                     syncAttackIndices.Add(i);
             }
-            if (syncAttackIndices.Count == 0) return -1;
 
-            int randomIndex = game.Random.Next(0, syncAttackIndices.Count);
-            return syncAttackIndices[randomIndex];
+            int index = -1;
+            if (syncAttackIndices.Count > 0)
+            {
+                int randomIndex = game.Random.Next(0, syncAttackIndices.Count);
+                index = syncAttackIndices[randomIndex];
+            }
+
+            ListPool<int>.Instance.Return(syncAttackIndices);
+
+            return index;
         }
 
         public override void OnPowerStarted(AIController ownerController, ProceduralUsePowerContextPrototype powerContext)

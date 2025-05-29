@@ -1,4 +1,5 @@
 ﻿using System.Text;
+using Gazillion;
 using MHServerEmu.Core.Collections;
 using MHServerEmu.Core.Extensions;
 using MHServerEmu.Core.Helpers;
@@ -9,10 +10,13 @@ using MHServerEmu.Core.System.Random;
 using MHServerEmu.Games.Common;
 using MHServerEmu.Games.Entities.Avatars;
 using MHServerEmu.Games.Entities.Inventories;
+using MHServerEmu.Games.Events;
 using MHServerEmu.Games.GameData;
 using MHServerEmu.Games.GameData.Calligraphy;
 using MHServerEmu.Games.GameData.LiveTuning;
 using MHServerEmu.Games.GameData.Prototypes;
+using MHServerEmu.Games.Loot;
+using MHServerEmu.Games.Network;
 using MHServerEmu.Games.Powers;
 using MHServerEmu.Games.Properties;
 using MHServerEmu.Games.Properties.Evals;
@@ -20,42 +24,68 @@ using MHServerEmu.Games.Regions;
 
 namespace MHServerEmu.Games.Entities.Items
 {
-    public enum ItemActionType
+    public enum InteractionValidateResult       // Result names from CItem::AttemptInteractionBy()
     {
-        None,
-        AssignPower,
-        DestroySelf,
-        GuildUnlock,
-        PrestigeMode,
-        ReplaceSelfItem,
-        ReplaceSelfLootTable,
-        ResetMissions,
-        Respec,
-        SaveDangerRoomScenario,
-        UnlockPermaBuff,
-        UsePower,
-        AwardTeamUpXP,
-        OpenUIPanel
+        Success,
+        ItemNotOwned,
+        Error2,
+        Error3,
+        ItemNotUsable,
+        Error5,
+        Error6,
+        ItemRequirementsNotMet,
+        Error8,
+        InventoryAlreadyUnlocked,
+        CharacterAlreadyUnlocked,
+        CharacterNotYetUnlocked,
+        AvatarUltimateNotUnlocked,
+        AvatarUltimateAlreadyMaxedOut,
+        AvatarUltimateUpgradeCurrentOnly,
+        PlayerAlreadyHasCraftingRecipe,
+        CannotTriggerPower,
+        ItemNotEquipped,
+        DownloadRequired,
+        UnknownFailure
     }
 
-    public class Item : WorldEntity
+    public partial class Item : WorldEntity
     {
         private static readonly Logger Logger = LogManager.CreateLogger();
 
         private ItemSpec _itemSpec = new();
         private List<AffixPropertiesCopyEntry> _affixProperties = new();
 
+        private ulong _tickerId;
+
         public ItemPrototype ItemPrototype { get => Prototype as ItemPrototype; }
+        public RarityPrototype RarityPrototype { get => GameDatabase.GetPrototype<RarityPrototype>(Properties[PropertyEnum.ItemRarity]); }
 
         public ItemSpec ItemSpec { get => _itemSpec; }
         public PrototypeId OnUsePower { get; private set; }
         public PrototypeId OnEquipPower { get; private set; }
 
+        public bool IsEquipped { get => InventoryLocation.InventoryPrototype?.IsEquipmentInventory == true; }
+        public bool IsInBuybackInventory { get => InventoryLocation.InventoryRef == GameDatabase.GlobalsPrototype.VendorBuybackInventory; }
+        
+        public bool BindsToAccountOnPickup { get => Properties[PropertyEnum.ItemBindsToAccountOnPickup]; }
+        public bool BindsToCharacterOnEquip { get => Properties[PropertyEnum.ItemBindsToCharacterOnEquip]; }
         public bool IsBoundToAccount { get => _itemSpec.GetBindingState(); }
+        public bool IsBoundToCharacter { get => _itemSpec.GetBindingState(out PrototypeId agentProtoRef) && agentProtoRef != PrototypeId.Invalid; }
+        public bool IsTradable { get => Properties[PropertyEnum.ItemIsTradable] && _itemSpec.GetTradeRestricted() == false; }
+        public PrototypeId BoundAgentProtoRef { get => _itemSpec.GetBindingState(out PrototypeId agentProtoRef) ? agentProtoRef : PrototypeId.Invalid; }
         public bool WouldBeDestroyedOnDrop { get => IsBoundToAccount || GameDatabase.DebugGlobalsPrototype.TrashedItemsDropInWorld == false; }
-        public bool IsPetItem { get => ItemPrototype?.IsPetItem == true; }
 
-        public Item(Game game) : base(game) { }
+        public bool IsPetItem { get => ItemPrototype?.IsPetItem == true; }
+        public bool IsCraftingRecipe { get => Prototype is CraftingRecipePrototype; }
+        public bool IsRelic { get => Prototype is RelicPrototype; }
+        public bool IsTeamUpGear { get => Prototype is TeamUpGearPrototype; }
+        public bool IsGem { get => ItemPrototype?.IsGem == true; }
+        public bool IsClonedWhenPurchasedFromVendor { get => ItemPrototype?.ClonedWhenPurchasedFromVendor == true; }
+
+        public Item(Game game) : base(game) 
+        {
+            SetFlag(EntityFlags.IsNeverAffectedByPowers, true);
+        }
 
         public override bool Initialize(EntitySettings settings)
         {
@@ -63,7 +93,13 @@ namespace MHServerEmu.Games.Entities.Items
 
             // Apply ItemSpec if one was provided with entity settings
             if (settings.ItemSpec != null)
+            {
                 ApplyItemSpec(settings.ItemSpec);
+
+                // Initialize experience requiremenet for legendary items
+                if (Prototype is LegendaryPrototype)
+                    Properties[PropertyEnum.ExperiencePointsNeeded] = GetAffixLevelUpXPRequirement(0);
+            }
 
             if (Prototype is RelicPrototype)
                 RunRelicEval();
@@ -76,9 +112,14 @@ namespace MHServerEmu.Games.Entities.Items
             if (base.ApplyInitialReplicationState(ref settings) == false)
                 return false;
 
-            // Serialized entities get their ItemSpec from serialized data rather than as a settings field
             if (settings.ArchiveData != null)
+            {
+                // Serialized entities get their ItemSpec from serialized data rather than as a settings field
                 ApplyItemSpec(ItemSpec);
+
+                // Restore affix level from XP for legendary items
+                TryLevelUpAffix(true);
+            }
 
             return true;
         }
@@ -102,6 +143,178 @@ namespace MHServerEmu.Games.Entities.Items
             if (itemProto == null) return Logger.WarnReturn(false, "IsAutoStackedWhenAddedToInventory(): itemProto == null");
             if (itemProto.StackSettings == null) return false;
             return itemProto.StackSettings.AutoStackWhenAddedToInventory;
+        }
+
+        public override void OnSelfAddedToOtherInventory()
+        {
+            InventoryLocation invLoc = InventoryLocation;
+
+            if (invLoc.IsValid)
+            {
+                InventoryPrototype inventoryProto = invLoc.InventoryPrototype;
+                Entity owner = Game.EntityManager.GetEntity<Entity>(invLoc.ContainerId);
+
+                // Account binding
+                if (Game.CustomGameOptions.DisableAccountBinding == false)
+                {
+                    // HACK: Do not account bind tradable items until we get the trade window implemented
+                    if (BindsToAccountOnPickup && IsTradable == false)
+                    {
+                        Player playerOwner = owner?.GetSelfOrOwnerOfType<Player>();
+                        if (playerOwner != null && IsBoundToAccount == false)
+                            SetBinding(true);
+                    }
+                }
+
+                // Character binding
+                if (Game.CustomGameOptions.DisableCharacterBinding == false)
+                {
+                    if (owner is Agent && BindsToCharacterOnEquip && IsBoundToCharacter == false)
+                        SetBinding(true, owner.PrototypeDataRef);
+                }
+
+                // Remove sold price after buyback
+                if (IsInBuybackInventory == false)
+                    Properties.RemoveProperty(PropertyEnum.ItemSoldPrice);
+
+                if (inventoryProto.IsEquipmentInventory)
+                {
+                    // Start ticking
+                    if (owner != null)
+                        StartTicking(owner);
+
+                    // TODO: ScoringEventType.FullyUpgradedPetTech
+
+                    // Update granted power
+                    if (GetPowerGranted(out PrototypeId powerProtoRef))
+                    {
+                        if (owner is Avatar avatar)
+                            avatar.InitPowerFromCreationItem(this);
+                        else if (owner is Player player)
+                            player.InitPowerFromCreationItem(this);
+                    }
+
+                    // Apply team-up affixes to avatar if needed
+                    if (inventoryProto.Category == InventoryCategory.TeamUpEquipment)
+                    {
+                        if (owner is not Agent ownerAgent)
+                        {
+                            Logger.Warn("OnSelfAddedToOtherInventory(): owner is not Agent ownerAgent");
+                            return;
+                        }
+
+                        Player owningPlayer = ownerAgent.GetOwnerOfType<Player>();
+                        if (owningPlayer == null)
+                        {
+                            Logger.Warn("OnSelfAddedToOtherInventory(): player == null");
+                            return;
+                        }
+
+                        Avatar avatar = owningPlayer.CurrentAvatar;
+                        if (avatar != null && avatar.IsInWorld && avatar.CurrentTeamUpAgent == ownerAgent)
+                            ApplyTeamUpAffixesToAvatar(avatar);
+                    }
+                }
+            }
+
+            base.OnSelfAddedToOtherInventory();
+        }
+
+        public override void OnSelfRemovedFromOtherInventory(InventoryLocation prevInvLoc)
+        {
+            base.OnSelfRemovedFromOtherInventory(prevInvLoc);
+
+            if (prevInvLoc.IsValid == false)
+                return;
+
+            InventoryPrototype inventoryProto = prevInvLoc.InventoryPrototype;
+            Entity prevOwner = Game.EntityManager.GetEntity<Entity>(prevInvLoc.ContainerId);
+
+            if (inventoryProto.Category == InventoryCategory.TeamUpEquipment)
+            {
+                Player playerOwner = prevOwner?.GetOwnerOfType<Player>();
+                Avatar avatar = playerOwner?.CurrentAvatar;
+
+                if (avatar != null && avatar.IsInWorld && avatar.CurrentTeamUpAgent == prevOwner)
+                    RemoveTeamUpAffixesFromAvatar(avatar);
+            }
+
+            if (prevOwner != null && inventoryProto.IsEquipmentInventory)
+                StopTicking(prevOwner);
+
+            // TODO: ScoringEventType.FullyUpgradedPetTech
+        }
+
+        public bool ApplyTeamUpAffixesToAvatar(Avatar avatar)
+        {
+            if (GetOwnerOfType<Player>() != avatar.GetOwnerOfType<Player>()) return Logger.WarnReturn(false, "ApplyTeamUpAffixesToAvatar(): GetOwnerOfType<Player>() != avatar.GetOwnerOfType<Player>()");
+            
+            foreach (AffixPropertiesCopyEntry copyEntry in _affixProperties)
+            {
+                if (copyEntry.Properties == null || copyEntry.AffixProto == null)
+                {
+                    Logger.Warn("ApplyTeamUpAffixesToAvatar(): copyEntry.Properties == null || copyEntry.AffixProto == null");
+                    continue;
+                }
+
+                if (copyEntry.AffixProto is not AffixTeamUpPrototype affixProto)
+                    continue;
+
+                if (affixProto.IsAppliedToOwnerAvatar == false)
+                    continue;
+
+                bool didAssignAllPowers = avatar.UpdateProcEffectPowers(copyEntry.Properties, true);
+                if (didAssignAllPowers == false)
+                    Logger.Warn($"ApplyTeamUpAffixesToAvatar(): UpdateProcEffectPowers failed in ApplyTeamUpAffixesToAvatar for affix=[{affixProto}] item=[{this}] avatar=[{avatar}]");
+
+                if (avatar.Properties.HasChildCollection(copyEntry.Properties))
+                    continue;
+                
+                avatar.Properties.AddChildCollection(copyEntry.Properties);
+            }
+
+            return true;
+        }
+
+        public void RemoveTeamUpAffixesFromAvatar(Avatar avatar)
+        {
+            foreach (AffixPropertiesCopyEntry copyEntry in _affixProperties)
+            {
+                if (copyEntry.Properties == null || copyEntry.AffixProto == null)
+                {
+                    Logger.Warn("RemoveTeamUpAffixesFromAvatar(): copyEntry.Properties == null || copyEntry.AffixProto == null");
+                    continue;
+                }
+
+                if (copyEntry.AffixProto is not AffixTeamUpPrototype affixProto)
+                    continue;
+
+                if (affixProto.IsAppliedToOwnerAvatar == false)
+                    continue;
+
+                if (avatar.Properties.HasChildCollection(copyEntry.Properties) == false)
+                    continue;
+
+                if (copyEntry.Properties.RemoveFromParent(avatar.Properties))
+                    avatar.UpdateProcEffectPowers(copyEntry.Properties, false);
+            }
+        }
+
+        public void StartTicking(Entity owner)
+        {
+            if (_tickerId != PropertyTicker.InvalidId)
+            {
+                Logger.Warn("StartTicking(): _tickerId != PropertyTicker.InvalidId");
+                return;
+            }
+
+            _tickerId = owner.StartPropertyTicker(Properties, Id, Id, TimeSpan.FromMilliseconds(1000));
+        }
+
+        public void StopTicking(Entity owner)
+        {
+            owner.StopPropertyTicker(_tickerId);
+            _tickerId = PropertyTicker.InvalidId;
         }
 
         public override void OnPropertyChange(PropertyId id, PropertyValue newValue, PropertyValue oldValue, SetPropertyFlags flags)
@@ -130,11 +343,11 @@ namespace MHServerEmu.Games.Entities.Items
 
                     if (delta > 0)
                     {
-                        // TODO: PlayerCollectedItemGameEvent
+                        region.PlayerCollectedItemEvent.Invoke(new(owner, this, delta));
                     }
                     else if (delta < 0)
                     {
-                        // TODO: PlayerLostItemGameEvent
+                        region.PlayerLostItemEvent.Invoke(new(owner, this, delta));
                     }
 
                     break;
@@ -168,12 +381,75 @@ namespace MHServerEmu.Games.Entities.Items
             return true;
         }
 
+        public PrototypeId GetBoundAgentProtoRef()
+        {
+            _itemSpec.GetBindingState(out PrototypeId agentProtoRef);
+            return agentProtoRef;
+        }
+
+        public bool SetBinding(bool bound, PrototypeId agentProtoRef = PrototypeId.Invalid, bool? tradeRestricted = null)
+        {
+            if (_itemSpec.SetBindingState(bound, agentProtoRef, tradeRestricted) == false)
+                return false;
+
+            Player player = GetOwnerOfType<Player>();
+            if (player != null && player.InterestedInEntity(this, AOINetworkPolicyValues.AOIChannelOwner))
+            {
+                var messageBuilder = NetMessageItemBindingChanged.CreateBuilder()
+                    .SetItemId(Id)
+                    .SetAccountBound(bound)
+                    .SetCharacterProtoId((ulong)agentProtoRef);
+
+                if (tradeRestricted != null)
+                    messageBuilder.SetTradeRestricted(tradeRestricted == true);
+
+                player.SendMessage(messageBuilder.Build());
+            }
+
+            return true;
+        }
+
+        public bool GetPowerGranted(out PrototypeId powerProtoRef)
+        {
+            powerProtoRef = PrototypeId.Invalid;
+
+            PrototypeId onUsePower = OnUsePower;
+            if (onUsePower != PrototypeId.Invalid)
+            {
+                powerProtoRef = onUsePower;
+                return true;
+            }
+
+            PrototypeId onEquipPower = OnEquipPower;
+            if (onEquipPower != PrototypeId.Invalid)
+            {
+                powerProtoRef = onEquipPower;
+                return true;
+            }
+
+            return false;
+        }
+
         public uint GetVendorBaseXPGain(Player player)
         {
             if (player == null) return Logger.WarnReturn(0u, "GetVendorBaseXPGain(): player == null");
             float xpGain = GetSellPrice(player);
             xpGain *= LiveTuningManager.GetLiveGlobalTuningVar(Gazillion.GlobalTuningVar.eGTV_VendorXPGain);
             return (uint)xpGain;
+        }
+
+        public uint GetVendorXPGain(WorldEntity vendor, Player player)
+        {
+            if (player == null) return Logger.WarnReturn(0u, "GetVendorXPGain(): player == null");
+
+            // This eval simply returns 1 even back in 1.10
+            using EvalContextData evalContext = ObjectPoolManager.Instance.Get<EvalContextData>();
+            evalContext.SetReadOnlyVar_PropertyCollectionPtr(EvalContext.Other, Properties);
+            evalContext.SetReadOnlyVar_PropertyCollectionPtr(EvalContext.Entity, vendor?.Properties);
+            float xpMult = Eval.RunFloat(GameDatabase.AdvancementGlobalsPrototype.VendorLevelingEval, evalContext);
+
+            uint baseXPGain = GetVendorBaseXPGain(player);
+            return (uint)(baseXPGain * xpMult);
         }
 
         public uint GetSellPrice(Player player)
@@ -207,36 +483,6 @@ namespace MHServerEmu.Games.Entities.Items
         {
             base.BuildString(sb);
             sb.AppendLine($"{nameof(_itemSpec)}: {_itemSpec}");
-        }
-
-        public override void OnSelfRemovedFromOtherInventory(InventoryLocation prevInvLoc)
-        {
-            base.OnSelfRemovedFromOtherInventory(prevInvLoc);
-
-            // Destroy summoned pet
-            if (prevInvLoc.IsValid && prevInvLoc.InventoryConvenienceLabel == InventoryConvenienceLabel.PetItem)
-            {
-                var itemProto = ItemPrototype;
-                if (itemProto?.ActionsTriggeredOnItemEvent?.Choices == null) return;
-                var itemActionProto = itemProto.ActionsTriggeredOnItemEvent.Choices[0];
-                if (itemActionProto is ItemActionUsePowerPrototype itemActionUsePowerProto){
-                    var powerRef = itemActionUsePowerProto.Power;
-                    var avatar = Game.EntityManager.GetEntity<Avatar>(prevInvLoc.ContainerId);
-                    Power power = avatar?.GetPower(powerRef);
-                    if (power == null) return;
-                    if (power.Prototype is SummonPowerPrototype summonPowerProto)
-                    {
-                        PropertyId summonedEntityCountProp = new(PropertyEnum.PowerSummonedEntityCount, powerRef);
-                        if (avatar.Properties[PropertyEnum.PowerToggleOn, powerRef])
-                        {
-                            EntityHelper.DestroySummonerFromPowerPrototype(avatar, summonPowerProto);
-                            avatar.Properties[PropertyEnum.PowerToggleOn, powerRef] = false;
-                            avatar.Properties.AdjustProperty(-1, summonedEntityCountProp);
-                        }
-                    }
-                }
-
-            }
         }
 
         public bool DecrementStack(int count = 1)
@@ -274,7 +520,7 @@ namespace MHServerEmu.Games.Entities.Items
             if (ApplyItemSpecProperties() == false)
                 return Logger.WarnReturn(false, "ApplyItemSpec(): Failed to apply ItemSpec properties");
 
-            itemProto.OnApplyItemSpec(this, _itemSpec);     // TODO (needed for PetTech affixes)
+            itemProto.OnApplyItemSpec(this, _itemSpec);
 
             GRandom random = new(_itemSpec.Seed);
 
@@ -294,25 +540,36 @@ namespace MHServerEmu.Games.Entities.Items
                 }
             }
 
-            // NOTE: RNG is reseeded for each affix individually
+            // NOTE: RNG is reseeded for each affix individually.
+            // Save the current state of random to restore it later for rolling action index.
+            int indexSeed = random.GetSeed();
 
             // Apply built-in affixes
-            foreach (BuiltInAffixDetails builtInAffixDetails in itemProto.GenerateBuiltInAffixDetails(_itemSpec))
+            List<BuiltInAffixDetails> detailsList = ListPool<BuiltInAffixDetails>.Instance.Get();
+            if (itemProto.GenerateBuiltInAffixDetails(_itemSpec, detailsList))
             {
-                AffixPrototype affixProto = builtInAffixDetails.AffixEntryProto.Affix.As<AffixPrototype>();
-                if (affixProto == null)
+                foreach (BuiltInAffixDetails builtInAffixDetails in detailsList)
                 {
-                    Logger.Warn("ApplyItemSpec(): affixProto == null");
-                    continue;
-                }
+                    AffixPrototype affixProto = builtInAffixDetails.AffixEntryProto.Affix.As<AffixPrototype>();
+                    if (affixProto == null)
+                    {
+                        Logger.Warn("ApplyItemSpec(): affixProto == null");
+                        continue;
+                    }
 
-                random.Seed(builtInAffixDetails.Seed);
-                OnAffixAdded(random, affixProto, builtInAffixDetails.ScopeProtoRef, builtInAffixDetails.AvatarProtoRef, builtInAffixDetails.LevelRequirement);
+                    random.Seed(builtInAffixDetails.Seed);
+                    OnAffixAdded(random, affixProto, builtInAffixDetails.ScopeProtoRef, builtInAffixDetails.AvatarProtoRef, builtInAffixDetails.LevelRequirement);
+                }
             }
 
+            ListPool<BuiltInAffixDetails>.Instance.Return(detailsList);
+
             // Apply rolled affixes
-            foreach (AffixSpec affixSpec in _itemSpec.AffixSpecs)
+            IReadOnlyList<AffixSpec> affixSpecs = _itemSpec.AffixSpecs;
+            for (int i = 0; i < affixSpecs.Count; i++)
             {
+                AffixSpec affixSpec = affixSpecs[i];
+
                 if (affixSpec.Seed == 0) return Logger.WarnReturn(false, "ApplyItemSpec(): affixSpec.Seed == 0");
                 random.Seed(affixSpec.Seed);
                 
@@ -327,7 +584,8 @@ namespace MHServerEmu.Games.Entities.Items
             {
                 if (triggeredActions.PickMethod == PickMethod.PickWeight)
                 {
-                    // It seems this is reusing the seed of the last rolled affix?
+                    // Restore the previously saved index seed so that affixes don't affect which index gets picked.
+                    random.Seed(indexSeed);
                     Picker<int> picker = new(random);
 
                     for (int i = 0; i < triggeredActions.Choices.Length; i++)
@@ -383,11 +641,12 @@ namespace MHServerEmu.Games.Entities.Items
                 {
                     foreach (ItemBindingSettingsEntryPrototype perRaritySettingProto in itemProto.BindingSettings.PerRaritySettings)
                     {
-                        if (perRaritySettingProto.RarityFilter != _itemSpec.RarityProtoRef) continue;
+                        if (perRaritySettingProto.RarityFilter != _itemSpec.RarityProtoRef)
+                            continue;
 
-                        Properties[PropertyEnum.ItemBindsToAccountOnPickup] = defaultSettings.BindsToAccountOnPickup;
-                        Properties[PropertyEnum.ItemBindsToCharacterOnEquip] = defaultSettings.BindsToCharacterOnEquip;
-                        Properties[PropertyEnum.ItemIsTradable] = defaultSettings.IsTradable;
+                        Properties[PropertyEnum.ItemBindsToAccountOnPickup] = perRaritySettingProto.BindsToAccountOnPickup;
+                        Properties[PropertyEnum.ItemBindsToCharacterOnEquip] = perRaritySettingProto.BindsToCharacterOnEquip;
+                        Properties[PropertyEnum.ItemIsTradable] = perRaritySettingProto.IsTradable;
                     }
                 }
             }
@@ -411,59 +670,408 @@ namespace MHServerEmu.Games.Entities.Items
             return true;
         }
 
-        public void InteractWithAvatar(Avatar avatar)
+        public bool InteractWithAvatar(Avatar avatar)
         {
-            var player = avatar.GetOwnerOfType<Player>();
-            if (player == null) return;
+            Player player = avatar?.GetOwnerOfType<Player>();
+            if (player == null) return Logger.WarnReturn(false, "InteractWithAvatar(): player == null");
 
-            var itemProto = ItemPrototype;
+            ItemPrototype itemProto = ItemPrototype;
+            if (itemProto == null) return Logger.WarnReturn(false, "InteractWithAvatar(): itemProto == null");
+
+            if (PlayerCanUse(player, avatar) != InteractionValidateResult.Success)
+                return false;
+
+            bool wasUsed = false;
+            bool isConsumable = false;
 
             if (itemProto.ActionsTriggeredOnItemEvent != null && itemProto.ActionsTriggeredOnItemEvent.Choices.HasValue())
-                if (itemProto.ActionsTriggeredOnItemEvent.PickMethod == PickMethod.PickAll) // TODO : other pick method
+            {
+                if (itemProto.ActionsTriggeredOnItemEvent.PickMethod == PickMethod.PickWeight)
                 {
-                    foreach (var choice in itemProto.ActionsTriggeredOnItemEvent.Choices)
+                    // Do just the action that was picked when this item was rolled
+                    ItemActionBasePrototype[] choices = itemProto.ActionsTriggeredOnItemEvent.Choices;
+
+                    int actionIndex = Properties[PropertyEnum.ItemEventActionIndex];
+                    if (actionIndex < 0 || actionIndex >= choices.Length)
+                        return Logger.WarnReturn(false, "InteractWithAvatar(): actionIndex < 0 || actionIndex >= choices.Length");
+
+                    Prototype choiceProto = choices[actionIndex];
+                    if (choiceProto == null) return Logger.WarnReturn(false, "InteractWithAvatar(): choiceProto == null");
+
+                    // Action entries can be single actions or action sets
+
+                    // First check if the picked action is a set
+                    if (choiceProto is ItemActionSetPrototype actionSetProto)
                     {
-                        if (choice is not ItemActionPrototype itemActionProto) continue;
-                        TriggerActionEvent(itemActionProto, player, avatar);
+                        // Only the top level action index is rolled, so we can't have any RNG in action sets
+                        if (actionSetProto.PickMethod != PickMethod.PickAll)
+                            return Logger.WarnReturn(false, "InteractWithAvatar(): actionSetProto.PickMethod != PickMethod.PickAll");
+
+                        if (actionSetProto.Choices == null)
+                            return Logger.WarnReturn(false, "InteractWithAvatar(): actionSetProto.Choices == null");
+
+                        foreach (ItemActionBasePrototype actionBaseProto in actionSetProto.Choices)
+                        {
+                            if (actionBaseProto is not ItemActionPrototype actionProto)
+                            {
+                                // Nesting of action sets is not supported by this system
+                                Logger.Warn("InteractWithAvatar(): actionBaseProto is not ItemActionPrototype itemActionProto");
+                                continue;
+                            }
+
+                            TriggerItemActionOnUse(actionProto, player, avatar, ref wasUsed, ref isConsumable);
+                        }
+                    }
+                    else if (choiceProto is ItemActionPrototype actionProto)
+                    {
+                        // If this is not a set, handle it as a single action
+                        TriggerItemActionOnUse(actionProto, player, avatar, ref wasUsed, ref isConsumable);
                     }
                 }
-        }
-
-        private void TriggerActionEvent(ItemActionPrototype itemActionProto, Player player, Avatar avatar)
-        {
-            if (itemActionProto.TriggeringEvent != ItemEventType.OnUse) return;
-
-            // TODO ItemActionPrototype.ActionType
-
-            if (itemActionProto is ItemActionUsePowerPrototype itemActionUsePowerProto)
-                TriggerActionUsePower(avatar, itemActionUsePowerProto.Power);
-        }
-
-        private void TriggerActionUsePower(Avatar avatar, PrototypeId powerRef)
-        {
-            if (avatar.HasPowerInPowerCollection(powerRef) == false)
-                avatar.AssignPower(powerRef, new(0, avatar.CharacterLevel, avatar.CombatLevel));
-
-            // TODO move this to powers
-            Power power = avatar.GetPower(powerRef);
-            if (power == null) return;
-
-            if (power.Prototype is SummonPowerPrototype summonPowerProto)
-            {
-                PropertyId summonedEntityCountProp = new(PropertyEnum.PowerSummonedEntityCount, powerRef);
-                if (avatar.Properties[PropertyEnum.PowerToggleOn, powerRef])
+                else if (itemProto.ActionsTriggeredOnItemEvent.PickMethod == PickMethod.PickAll)
                 {
-                    EntityHelper.DestroySummonerFromPowerPrototype(avatar, summonPowerProto);
-                    avatar.Properties[PropertyEnum.PowerToggleOn, powerRef] = false;
-                    avatar.Properties.AdjustProperty(-1, summonedEntityCountProp);
-                }
-                else
-                {
-                    EntityHelper.SummonEntityFromPowerPrototype(avatar, summonPowerProto);
-                    avatar.Properties[PropertyEnum.PowerToggleOn, powerRef] = true;
-                    avatar.Properties.AdjustProperty(1, summonedEntityCountProp);
+                    // Do all actions OnUse actions if this item doesn't use random actions
+
+                    foreach (ItemActionBasePrototype actionBaseProto in itemProto.ActionsTriggeredOnItemEvent.Choices)
+                    {
+                        // PickAll is not compatible with action sets
+                        if (actionBaseProto is not ItemActionPrototype actionProto)
+                        {
+                            Logger.Warn("InteractWithAvatar(): actionBaseProto is not ItemActionPrototype itemActionProto");
+                            continue;
+                        }
+
+                        TriggerItemActionOnUse(actionProto, player, avatar, ref wasUsed, ref isConsumable);
+                    }
                 }
             }
+
+            // Do special interactions for specific item types
+            switch (itemProto)
+            {
+                case CharacterTokenPrototype characterTokenProto:
+                    wasUsed |= DoCharacterTokenInteraction(characterTokenProto, player, avatar);
+                    break;
+
+                case InventoryStashTokenPrototype inventoryStashTokenProto:
+                    wasUsed |= DoInventoryStashTokenInteraction(inventoryStashTokenProto, player);
+                    break;
+
+                case EmoteTokenPrototype emoteTokenProto:
+                    wasUsed |= DoEmoteTokenInteraction(emoteTokenProto, player);
+                    break;
+
+                case CraftingRecipePrototype craftingRecipeProto:
+                    wasUsed |= DoCraftingRecipeInteraction(craftingRecipeProto, player);
+                    break;
+            }
+
+            // Consume if this is a consumable item that was successfully used
+            // NOTE: Power-based consumable items get consumed when their power is activated in OnUsePowerActivated().
+            if (isConsumable && wasUsed)
+                DecrementStack();
+
+            return true;
+        }
+
+        private bool DoCharacterTokenInteraction(CharacterTokenPrototype characterTokenProto, Player player, Avatar avatar)
+        {
+            bool wasUsed = false;
+
+            PrototypeId characterProtoRef = characterTokenProto.Character;
+
+            EntityPrototype characterProto = characterTokenProto.Character.As<EntityPrototype>();
+            if (characterProto == null) return Logger.WarnReturn(false, "DoCharacterTokenInteraction(): characterProto == null");
+
+            if (characterProto is AvatarPrototype)
+            {
+                if (characterTokenProto.GrantsCharacterUnlock && player.HasAvatarFullyUnlocked(characterProtoRef) == false)
+                {
+                    wasUsed = player.UnlockAvatar(characterProtoRef, true);
+                }
+
+                if (wasUsed == false && characterTokenProto.GrantsUltimateUpgrade)
+                {
+                    // Upgrade ultimate if the token wasn't used to unlock the avatar
+                    if (avatar.PrototypeDataRef != characterTokenProto.Character) return Logger.WarnReturn(false, "DoCharacterTokenInteraction(): avatar.PrototypeDataRef != characterTokenProto.Character");
+
+                    if (avatar.CanUpgradeUltimate() == InteractionValidateResult.Success)
+                    {
+                        avatar.Properties.AdjustProperty(1, PropertyEnum.AvatarPowerUltimatePoints);
+                        wasUsed = true;
+                    }
+                }
+            }
+            else if (characterProto is AgentTeamUpPrototype)
+            {
+                if (player.IsTeamUpAgentUnlocked(characterProtoRef) == false)
+                    wasUsed = player.UnlockTeamUpAgent(characterProtoRef);
+            }
+
+            return wasUsed;
+        }
+
+        private bool DoInventoryStashTokenInteraction(InventoryStashTokenPrototype inventoryStashTokenProto, Player player)
+        {
+            // TODO
+            return false;
+        }
+
+        private bool DoEmoteTokenInteraction(EmoteTokenPrototype emoteTokenProto, Player player)
+        {
+            // TODO
+            return false;
+        }
+
+        private bool DoCraftingRecipeInteraction(CraftingRecipePrototype craftingRecipeProto, Player player)
+        {
+            // TODO
+            return false;
+        }
+
+        public bool OnUsePowerActivated()
+        {
+            // This method mostly mirrors InteractWithAvatar, but for the OnUsePowerActivated event
+
+            ItemPrototype itemProto = ItemPrototype;
+            if (itemProto == null) return Logger.WarnReturn(false, "OnUsePowerActivated(): itemProto == null");
+
+            if (itemProto.ActionsTriggeredOnItemEvent == null || itemProto.ActionsTriggeredOnItemEvent.Choices.IsNullOrEmpty())
+                return true;
+
+            if (itemProto.ActionsTriggeredOnItemEvent.PickMethod == PickMethod.PickWeight)
+            {
+                // Do just the action that was picked when this item was rolled
+                ItemActionBasePrototype[] choices = itemProto.ActionsTriggeredOnItemEvent.Choices;
+
+                int actionIndex = Properties[PropertyEnum.ItemEventActionIndex];
+                if (actionIndex < 0 || actionIndex >= choices.Length)
+                    return Logger.WarnReturn(false, "OnUsePowerActivated(): actionIndex < 0 || actionIndex >= choices.Length");
+
+                Prototype choiceProto = choices[actionIndex];
+                if (choiceProto == null) return Logger.WarnReturn(false, "OnUsePowerActivated(): choiceProto == null");
+
+                // Action entries can be single actions or action sets
+
+                // First check if the picked action is a set
+                if (choiceProto is ItemActionSetPrototype actionSetProto)
+                {
+                    if (actionSetProto.Choices == null)
+                        return Logger.WarnReturn(false, "OnUsePowerActivated(): actionSetProto.Choices == null");
+
+                    foreach (ItemActionBasePrototype actionBaseProto in actionSetProto.Choices)
+                    {
+                        if (actionBaseProto is not ItemActionPrototype actionProto)
+                        {
+                            // Nesting of action sets is not supported by this system
+                            Logger.Warn("OnUsePowerActivated(): actionBaseProto is not ItemActionPrototype actionProto");
+                            continue;
+                        }
+
+                        if (TriggerItemActionOnUsePowerActivated(actionProto))
+                            return true;
+                    }
+                }
+                else if (choiceProto is ItemActionPrototype actionProto)
+                {
+                    // If this is not a set, handle it as a single action
+                    if (TriggerItemActionOnUsePowerActivated(actionProto))
+                        return true;
+                }
+            }
+            else if (itemProto.ActionsTriggeredOnItemEvent.PickMethod == PickMethod.PickAll)
+            {
+                foreach (ItemActionBasePrototype actionBaseProto in itemProto.ActionsTriggeredOnItemEvent.Choices)
+                {
+                    // PickAll is not compatible with action sets
+                    if (actionBaseProto is not ItemActionPrototype actionProto)
+                    {
+                        Logger.Warn("OnUsePowerActivated(): actionBaseProto is not ItemActionPrototype actionProto");
+                        continue;
+                    }
+
+                    if (TriggerItemActionOnUsePowerActivated(actionProto))
+                        return true;
+                }
+            }
+
+            return true;
+        }
+
+        public int GetAffixLevelCap()
+        {
+            return GameDatabase.AdvancementGlobalsPrototype.GetItemAffixLevelCap();
+        }
+
+        public void AwardAffixXP(long amount)
+        {
+            if (Properties[PropertyEnum.ItemAffixLevel] >= GetAffixLevelCap())
+                return;
+
+            Properties.AdjustProperty((int)amount, PropertyEnum.ExperiencePoints);
+            TryLevelUpAffix(false);
+        }
+
+        private long GetAffixLevelUpXPRequirement(int level)
+        {
+            return GameDatabase.AdvancementGlobalsPrototype.GetItemAffixLevelUpXPRequirement(level);
+        }
+
+        public int GetDisplayItemLevel()
+        {
+            var itemProto = ItemPrototype;
+            if (itemProto.EvalDisplayLevel == null) return 0;
+
+            using EvalContextData evalContext = ObjectPoolManager.Instance.Get<EvalContextData>();
+            evalContext.Game = Game;
+            evalContext.SetReadOnlyVar_EntityPtr(EvalContext.Default, this);
+            return Eval.RunInt(itemProto.EvalDisplayLevel, evalContext);
+        }
+
+        protected override void InitializeProcEffectPowers()
+        {
+            // Don't do anything for items because they are not supposed to do any procs on their own
+        }
+
+        private bool TryLevelUpAffix(bool isDeserializing)
+        {
+            if (Prototype is not LegendaryPrototype)
+                return false;
+
+            int affixLevelCap = GetAffixLevelCap();
+
+            int oldAffixLevel = Properties[PropertyEnum.ItemAffixLevel];
+            long experiencePoints = Properties[PropertyEnum.ExperiencePoints];
+            long experiencePointsNeeded = Properties[PropertyEnum.ExperiencePointsNeeded];
+
+            // Validate loaded experience numbers if we are deserializing
+            if (isDeserializing)
+            {
+                long affixLevelUpXPRequirement = GetAffixLevelUpXPRequirement(oldAffixLevel);
+                if (affixLevelUpXPRequirement != experiencePointsNeeded)
+                {
+                    // Rescale experience for the current cap
+                    double ratio = (double)experiencePoints / experiencePointsNeeded;
+                    experiencePoints = (long)(affixLevelUpXPRequirement * ratio);
+                    experiencePointsNeeded = affixLevelUpXPRequirement;
+
+                    Properties[PropertyEnum.ExperiencePoints] = experiencePoints;
+                    Properties[PropertyEnum.ExperiencePointsNeeded] = experiencePointsNeeded;
+                }
+                else if (oldAffixLevel == affixLevelCap && experiencePoints > 0)
+                {
+                    // Capped legendaries should not have any experience
+                    experiencePoints = 0;
+                    Properties[PropertyEnum.ExperiencePoints] = 0;
+                }
+            }
+
+            // Level up
+            int newAffixLevel = oldAffixLevel;
+            while (newAffixLevel < affixLevelCap && experiencePoints >= experiencePointsNeeded)
+            {
+                experiencePoints -= experiencePointsNeeded;
+                experiencePointsNeeded = GetAffixLevelUpXPRequirement(++newAffixLevel);
+
+                // Check for infinite loops with bad data
+                if (experiencePointsNeeded <= 0)
+                {
+                    Logger.Warn("TryLevelUpAffix(): experiencePointsNeeded <= 0");
+                    break;
+                }
+            }
+
+            // Remove overcapped experience
+            if (newAffixLevel == affixLevelCap)
+                experiencePoints = 0;
+
+            // Update properties
+            if (newAffixLevel != oldAffixLevel)
+            {
+                Properties[PropertyEnum.ItemAffixLevel] = newAffixLevel;
+                Properties[PropertyEnum.ExperiencePoints] = experiencePoints;
+                Properties[PropertyEnum.ExperiencePointsNeeded] = experiencePointsNeeded;
+
+                if (isDeserializing == false)
+                    AwardLevelUpAffixes(oldAffixLevel, newAffixLevel);
+            }
+
+            if (isDeserializing || oldAffixLevel != newAffixLevel)
+            {
+                OnAffixLevelUp();
+                return true;
+            }
+
+            return false;
+        }
+
+        private void AwardLevelUpAffixes(int oldAffixLevel, int newAffixLevel)
+        {
+            foreach (AffixPropertiesCopyEntry copyEntry in _affixProperties)
+            {
+                if (copyEntry.AffixProto == null)
+                {
+                    Logger.Warn("AwardLevelUpAffixes(): copyEntry.AffixProto == null");
+                    continue;
+                }
+
+                if (copyEntry.LevelRequirement > oldAffixLevel && copyEntry.LevelRequirement <= newAffixLevel)
+                {
+                    // Attach affix properties if we now match the level requirement
+                    WorldEntity owner = GetOwnerOfType<WorldEntity>();
+                    if (owner != null && IsEquipped)
+                    {
+                        if (owner.UpdateProcEffectPowers(copyEntry.Properties, true) == false)
+                            Logger.Warn($"AwardLevelUpAffixes(): UpdateProcEffectPowers failed for affixLevel=[{copyEntry.LevelRequirement}] affix=[{copyEntry.AffixProto}] item=[{this}] owner=[{owner}]");
+                    }
+
+                    Properties.AddChildCollection(copyEntry.Properties);
+                }
+                else if (copyEntry.LevelRequirement <= oldAffixLevel && copyEntry.LevelRequirement > newAffixLevel)
+                {
+                    // Detach affix properties if we no longer match the level requirement
+                    if (copyEntry.Properties == null)
+                    {
+                        Logger.Warn("AwardLevelUpAffixes(): copyEntry.Properties == null");
+                        continue;
+                    }
+
+                    if (copyEntry.Properties.RemoveFromParent(Properties))
+                    {
+                        WorldEntity owner = GetOwnerOfType<WorldEntity>();
+                        if (owner != null && IsEquipped)
+                            owner.UpdateProcEffectPowers(copyEntry.Properties, false);
+                    }
+                }
+            }
+        }
+
+        private void OnAffixLevelUp()
+        {
+            RefreshProcPowerIndexProperties();
+
+            // Restart tickers
+            InventoryLocation invLoc = InventoryLocation;
+            if (invLoc.IsValid)
+            {
+                InventoryPrototype inventoryProto = invLoc.InventoryPrototype;
+                WorldEntity owner = Game.EntityManager.GetEntity<WorldEntity>(invLoc.ContainerId);
+
+                if (owner != null && inventoryProto.IsEquipmentInventory && owner.IsInWorld && owner.IsSimulated)
+                {
+                    StopTicking(owner);
+                    StartTicking(owner);
+                }
+            }
+
+            if (Prototype is LegendaryPrototype && Properties[PropertyEnum.ItemAffixLevel] == GetAffixLevelCap()) // TODO check GetAffixLevelCap
+            { 
+                var player = GetOwnerOfType<Player>();
+                player?.OnScoringEvent(new(ScoringEventType.FullyUpgradedLegendaries));
+            }
+
+            NetMessageLevelUp levelUpMessage = NetMessageLevelUp.CreateBuilder().SetEntityID(Id).Build();
+            Game.NetworkManager.SendMessageToInterested(levelUpMessage, this, AOINetworkPolicyValues.AOIChannelOwner | AOINetworkPolicyValues.AOIChannelProximity);
         }
 
         private bool OnBuiltInPropertyRoll(float randomMult, PropertyPickInRangeEntryPrototype pickInRangeProto)
@@ -500,11 +1108,10 @@ namespace MHServerEmu.Games.Entities.Items
             {
                 Properties[pickInRangeProto.Prop] = GenerateIntWithinRange(randomMult, valueMin, valueMax);
             }
-            else
-            {
-                // The client doesn't have assignment for bool properties here for some reason
-                Logger.Warn($"OnBuiltInPropertyRoll(): Unhandled property data type {propDataType}");
-            }
+
+            // The client doesn't have assignment for bool properties here.
+            // Entity/Items/Armor/UniquePrototypes/Avatars/AnyHero/Slot4/Unique189.prototype has a bool range property (CCResistAlwaysAll),
+            // but it seems to be a mistake, since it uses Difficulty/Curves/Items/TenacityItemCurve.curve[ItemLevelProp] to calculate its range.
 
             return true;
         }
@@ -516,7 +1123,7 @@ namespace MHServerEmu.Games.Entities.Items
 
             if (propDataType != PropertyDataType.Real && propDataType != PropertyDataType.Integer && propDataType != PropertyDataType.Asset)
             {
-                return Logger.WarnReturn(false, "OnBuiltInPropertyRoll(): The following Item has a built-in set PropertyEntry with a property " +
+                return Logger.WarnReturn(false, "OnBuiltInPropertySet(): The following Item has a built-in set PropertyEntry with a property " +
                     $"that is not an int/float/asset prop, which doesn't work!\nItem: [{this}]\nProperty: [{propertyInfo.PropertyName}]");
             }
 
@@ -808,12 +1415,6 @@ namespace MHServerEmu.Games.Entities.Items
             return (int)GenerateTruncatedFloatWithinRange(randomMult, min, max);
         }
 
-        private PrototypeId GetTriggeredPower(ItemEventType eventType, ItemActionType actionType)
-        {
-            //Logger.Warn($"GetTriggeredPower(): Not yet implemented (eventType={eventType}, actionType={actionType})");
-            return PrototypeId.Invalid;
-        }
-
         private bool RunRelicEval()
         {
             if (Prototype is not RelicPrototype relicProto)
@@ -829,7 +1430,410 @@ namespace MHServerEmu.Games.Entities.Items
 
         private void RefreshProcPowerIndexProperties()
         {
+            int itemLevel = Properties[PropertyEnum.ItemLevel];
+            float itemVariation = Properties[PropertyEnum.ItemVariation];
+            int stackCount = CurrentStackSize;
+
+            // Use a temporary property collection to store proc properties
+            // because we can't modify our collections while iterating.
+            using PropertyCollection procProperties = ObjectPoolManager.Instance.Get<PropertyCollection>();
+            foreach (PropertyEnum procProperty in Property.ProcPropertyTypesAll)
+                procProperties.CopyPropertyRange(Properties, procProperty);
+
+            foreach (var kvp in procProperties)
+            {
+                Property.FromParam(kvp.Key, 1, out PrototypeId procPowerProtoRef);
+
+                Properties[PropertyEnum.ProcPowerItemLevel, procPowerProtoRef] = itemLevel;
+                Properties[PropertyEnum.ProcPowerItemVariation, procPowerProtoRef] = itemVariation;
+                Properties[PropertyEnum.ProcPowerInvStackCount, procPowerProtoRef] = stackCount;
+            }
+        }
+
+        private PrototypeId GetTriggeredPower(ItemEventType eventType, ItemActionType actionType)
+        {
+            // This has similar overall structure to HasItemActionType()
+
+            ItemPrototype itemProto = ItemPrototype;
+            if (itemProto == null) return Logger.WarnReturn(PrototypeId.Invalid, "GetTriggeredPower(): itemProto == null");
+
+            if (itemProto.ActionsTriggeredOnItemEvent == null || itemProto.ActionsTriggeredOnItemEvent.Choices.IsNullOrEmpty())
+                return PrototypeId.Invalid;
+
+            ItemActionBasePrototype[] choices = itemProto.ActionsTriggeredOnItemEvent.Choices;
+
+            if (itemProto.ActionsTriggeredOnItemEvent.PickMethod == PickMethod.PickWeight)
+            {
+                // Check just the action that was picked when this item was rolled
+                int actionIndex = Properties[PropertyEnum.ItemEventActionIndex];
+                if (actionIndex < 0 || actionIndex >= choices.Length)
+                    return Logger.WarnReturn(PrototypeId.Invalid, "GetTriggeredPower(): actionIndex < 0 || actionIndex >= choices.Length");
+
+                Prototype choiceProto = choices[actionIndex];
+                if (choiceProto == null) return Logger.WarnReturn(PrototypeId.Invalid, "GetTriggeredPower(): choiceProto == null");
+
+                // Action entries can be single actions or action sets
+
+                // First check if the picked action is a set
+                if (choiceProto is ItemActionSetPrototype actionSetProto)
+                {
+                    if (actionSetProto.Choices.IsNullOrEmpty())
+                        return PrototypeId.Invalid;
+
+                    return GetTriggeredPowerFromActionSet(actionSetProto.Choices, eventType, actionType);
+                }
+
+                // If this is not a set, handle it as a single action
+                if (actionType == ItemActionType.AssignPower && choiceProto is ItemActionAssignPowerPrototype assignPowerProto)
+                    return assignPowerProto.Power;
+
+                if (actionType == ItemActionType.UsePower && choiceProto is ItemActionUsePowerPrototype usePowerProto)
+                    return usePowerProto.Power;
+            }
+            else if (itemProto.ActionsTriggeredOnItemEvent.PickMethod == PickMethod.PickAll)
+            {
+                // Check all actions if this item doesn't use random actions
+                return GetTriggeredPowerFromActionSet(choices, eventType, actionType);
+            }
+
+            return PrototypeId.Invalid;
+        }
+
+        private static PrototypeId GetTriggeredPowerFromActionSet(ItemActionBasePrototype[] actions, ItemEventType eventType, ItemActionType actionType)
+        {
+            foreach (ItemActionBasePrototype actionBaseProto in actions)
+            {
+                // There should be no nested action sets
+                if (actionBaseProto is not ItemActionPrototype actionProto)
+                {
+                    Logger.Warn("GetTriggeredPowerFromActionSet(): itemActionBaseProto is not ItemActionPrototype itemActionProto");
+                    continue;
+                }
+
+                if (actionProto.TriggeringEvent != eventType)
+                    continue;
+
+                if (actionType == ItemActionType.AssignPower && actionProto is ItemActionAssignPowerPrototype assignPowerProto)
+                    return assignPowerProto.Power;
+
+                if (actionType == ItemActionType.UsePower && actionProto is ItemActionUsePowerPrototype usePowerProto)
+                    return usePowerProto.Power;
+            }
+
+            return PrototypeId.Invalid;
+        }
+
+        private bool HasItemActionType(ItemActionType actionType)
+        {
+            ItemPrototype itemProto = ItemPrototype;
+            if (itemProto == null) return Logger.WarnReturn(false, "HasItemActionType(): itemProto == null");
+
+            if (itemProto.ActionsTriggeredOnItemEvent == null || itemProto.ActionsTriggeredOnItemEvent.Choices.IsNullOrEmpty())
+                return false;
+
+            ItemActionBasePrototype[] choices = itemProto.ActionsTriggeredOnItemEvent.Choices;
+
+            if (itemProto.ActionsTriggeredOnItemEvent.PickMethod == PickMethod.PickWeight)
+            {
+                // Check just the action that was picked when this item was rolled
+                int actionIndex = Properties[PropertyEnum.ItemEventActionIndex];
+                if (actionIndex < 0 || actionIndex >= choices.Length)
+                    return Logger.WarnReturn(false, "HasItemActionType(): actionIndex < 0 || actionIndex >= choices.Length");
+
+                Prototype choiceProto = choices[actionIndex];
+                if (choiceProto == null) return Logger.WarnReturn(false, "HasItemActionType(): choiceProto == null");
+
+                // Action entries can be single actions or action sets
+
+                // First check if the picked action is a set
+                if (choiceProto is ItemActionSetPrototype actionSetProto)
+                {
+                    if (actionSetProto.Choices.IsNullOrEmpty())
+                        return false;
+
+                    return HasItemAction(actionSetProto.Choices, actionType);
+                }
+
+                // If this is not a set, handle it as a single action
+                if (choiceProto is ItemActionPrototype actionProto)
+                    return actionProto.ActionType == actionType;
+
+            }
+            else if (itemProto.ActionsTriggeredOnItemEvent.PickMethod == PickMethod.PickAll)
+            {
+                // Check all actions if this item doesn't use random actions
+                return HasItemAction(itemProto.ActionsTriggeredOnItemEvent.Choices, actionType);
+            }
+
+            return false;
+        }
+
+        private static bool HasItemAction(ItemActionBasePrototype[] actions, ItemActionType actionType)
+        {
+            foreach (ItemActionBasePrototype actionBaseProto in actions)
+            {
+                if (actionBaseProto is ItemActionPrototype action && action.ActionType == actionType)
+                    return true;
+            }
+
+            return false;
+        }
+
+        private InteractionValidateResult PlayerCanUse(Player player, Avatar avatar, bool checkPower = true, bool checkInventory = true)
+        {
+            if (player == null) return Logger.WarnReturn(InteractionValidateResult.UnknownFailure, "PlayerCanUse(): player == null");
+
+            int currentStackSize = CurrentStackSize;
+            if (currentStackSize < 1)
+                return InteractionValidateResult.UnknownFailure;
+
+            if (player.Owns(this) == false)
+                return InteractionValidateResult.ItemNotOwned;
+
+            ItemPrototype itemProto = ItemPrototype;
+            if (itemProto == null) return Logger.WarnReturn(InteractionValidateResult.UnknownFailure, "PlayerCanUse(): itemProto == null");
+
+            if (itemProto.IsUsable == false)
+                return InteractionValidateResult.ItemNotUsable;
+
+            //
+            // Inventory validation
+            //
+
+            if (checkInventory)
+            {
+                InventoryLocation invLoc = InventoryLocation;
+                InventoryCategory category = invLoc.InventoryCategory;
+                InventoryConvenienceLabel convenienceLabel = invLoc.InventoryConvenienceLabel;
+
+                if (category != InventoryCategory.PlayerGeneral &&
+                    category != InventoryCategory.PlayerGeneralExtra &&
+                    convenienceLabel != InventoryConvenienceLabel.PvP)
+                {
+                    // Additional validation for non-general inventories
+                    if (category == InventoryCategory.PlayerStashGeneral ||
+                        category == InventoryCategory.PlayerStashAvatarSpecific)
+                    {
+                        // Validate that the player is near a STASH
+                        WorldEntity dialogTarget = player.GetDialogTarget(true);
+                        if (dialogTarget == null || dialogTarget.Properties[PropertyEnum.OpenPlayerStash] == false)
+                            return InteractionValidateResult.UnknownFailure;
+                    }
+                    else if (category == InventoryCategory.AvatarEquipment)
+                    {
+                        // Do not allow items equipped on library avatars to be used
+                        Avatar containerAvatar = Game.EntityManager.GetEntity<Avatar>(invLoc.ContainerId);
+                        if (containerAvatar?.IsInWorld != true)
+                            return InteractionValidateResult.UnknownFailure;
+                    }
+                    else if (convenienceLabel == InventoryConvenienceLabel.DeliveryBox)
+                    {
+                        // Only containers can be used from the delivery box
+                        if (itemProto.IsContainer == false)
+                            return InteractionValidateResult.UnknownFailure;
+                    }
+                    else
+                    {
+                        // Using items from other inventory types is not allowed
+                        return InteractionValidateResult.UnknownFailure;
+                    }
+                }
+
+                if (itemProto.AbilitySettings?.OnlySlottableWhileEquipped == true && IsEquipped == false)
+                    return InteractionValidateResult.ItemNotEquipped;
+            }
+            
+            //
+            // Level validation
+            //
+
+            int characterLevel = avatar.CharacterLevel;
+            int characterLevelRequirement = (int)(float)Properties[PropertyEnum.Requirement, PropertyEnum.CharacterLevel];
+            
+            // Character level requirement for use is always equal at least to the item's level
+            if (characterLevelRequirement <= 0)
+                characterLevelRequirement = Properties[PropertyEnum.ItemLevel];
+
+            if (characterLevel < characterLevelRequirement)
+                return InteractionValidateResult.ItemRequirementsNotMet;
+
+            int prestigeLevel = avatar.PrestigeLevel;
+            int prestigeLevelRequirement = (int)(float)Properties[PropertyEnum.Requirement, PropertyEnum.AvatarPrestigeLevel];
+            if (prestigeLevel < prestigeLevelRequirement)
+                return InteractionValidateResult.ItemRequirementsNotMet;
+
+            //
+            // Eval-based validation
+            //
+
+            if (itemProto.EvalCanUse != null)
+            {
+                EvalContextData evalContext = ObjectPoolManager.Instance.Get<EvalContextData>();
+                evalContext.SetReadOnlyVar_EntityPtr(EvalContext.Default, this);
+                evalContext.SetReadOnlyVar_EntityPtr(EvalContext.Entity, avatar);
+                evalContext.SetVar_Int(EvalContext.Var1, player.GetLevelCapForCharacter(avatar.PrototypeDataRef));
+
+                if (Eval.RunBool(itemProto.EvalCanUse, evalContext) == false)
+                    return InteractionValidateResult.ItemRequirementsNotMet;
+            }
+
+            //
+            // Subtype-specific validation
+            //
+            
+            switch (itemProto)
+            {
+                case CharacterTokenPrototype characterTokenProto:
+                    return PlayerCanUseCharacterToken(player, avatar, characterTokenProto);
+
+                case InventoryStashTokenPrototype inventoryStashTokenProto:
+                    return PlayerCanUseInventoryStashToken(player, inventoryStashTokenProto);
+
+                case EmoteTokenPrototype emoteTokenProto:
+                    return PlayerCanUseEmoteToken(player, emoteTokenProto);
+            }
+
+            if (IsCraftingRecipe)
+                return PlayerCanUseCraftingRecipe(player);
+
+            if (HasItemActionType(ItemActionType.PrestigeMode))
+                return PlayerCanUsePrestigeMode(avatar);
+
+            if (HasItemActionType(ItemActionType.AwardTeamUpXP))
+                return PlayerCanUseAwardTeamUpXP(player, avatar);
+
+            AvatarPrototype avatarProto = avatar.AvatarPrototype;
+            if (avatarProto == null) return Logger.WarnReturn(InteractionValidateResult.UnknownFailure, "PlayerCanUse(): avatarProto == null");
+
+            if (itemProto.IsUsableByAgent(avatarProto) == false)
+                return InteractionValidateResult.ItemRequirementsNotMet;
+
+            if (checkPower && HasItemActionType(ItemActionType.UsePower))
+                return PlayerCanUsePowerAction(player, avatar);
+
+            return InteractionValidateResult.Success;
+        }
+
+        private InteractionValidateResult PlayerCanUseCharacterToken(Player player, Avatar avatar, CharacterTokenPrototype characterTokenProto)
+        {
+            if (characterTokenProto.IsLiveTuningEnabled() == false)
+                return InteractionValidateResult.ItemNotUsable;
+
+            if (characterTokenProto.GrantsCharacterUnlock)
+            {
+                // If this is an unlock token and the character is locked, this is valid use
+                if (characterTokenProto.HasUnlockedCharacter(player) == false)
+                    return InteractionValidateResult.Success;
+
+                // If this character is already unlocked and this token cannot be used to upgrade the ultimate, there is nothing to do
+                if (characterTokenProto.GrantsUltimateUpgrade == false)
+                    return InteractionValidateResult.CharacterAlreadyUnlocked;
+            }
+
+            if (characterTokenProto.GrantsUltimateUpgrade)
+            {
+                // Team-ups do not have ultimate powers, so these checks concern only avatars
+
+                // Cannot upgrade ultimates of locked avatars
+                if (player.HasAvatarFullyUnlocked(characterTokenProto.Character) == false)
+                    return InteractionValidateResult.CharacterNotYetUnlocked;
+
+                // Cannot upgrade ultimates of library avatars
+                if (avatar.PrototypeDataRef != characterTokenProto.Character)
+                    return InteractionValidateResult.AvatarUltimateUpgradeCurrentOnly;
+
+                // Skipping AvatarMode check present in the client here because avatar modes never got implemented
+
+                return avatar.CanUpgradeUltimate();
+            }
+
+            return InteractionValidateResult.UnknownFailure;
+        }
+
+        private InteractionValidateResult PlayerCanUseInventoryStashToken(Player player, InventoryStashTokenPrototype inventoryStashTokenProto)
+        {
             // TODO
+            Logger.Debug($"PlayerCanUseInventoryStashToken(): {inventoryStashTokenProto}");
+            return InteractionValidateResult.UnknownFailure;
+        }
+
+        private InteractionValidateResult PlayerCanUseEmoteToken(Player player, EmoteTokenPrototype emoteTokenProto)
+        {
+            // TODO
+            Logger.Debug($"PlayerCanUseEmoteToken(): {emoteTokenProto}");
+            return InteractionValidateResult.UnknownFailure;
+        }
+
+        private InteractionValidateResult PlayerCanUseCraftingRecipe(Player player)
+        {
+            // TODO
+            Logger.Debug($"PlayerCanUseCraftingRecipe()");
+            return InteractionValidateResult.UnknownFailure;
+        }
+
+        private InteractionValidateResult PlayerCanUsePrestigeMode(Avatar avatar)
+        {
+            if (avatar.CanActivatePrestigeMode() == false)
+                return InteractionValidateResult.ItemNotUsable;
+
+            return InteractionValidateResult.Success;
+        }
+
+        private InteractionValidateResult PlayerCanUseAwardTeamUpXP(Player player, Avatar avatar)
+        {
+            // TODO
+            Logger.Debug($"PlayerCanUseAwardTeamUpXP(): {avatar}");
+            return InteractionValidateResult.UnknownFailure;
+        }
+
+        private InteractionValidateResult PlayerCanUsePowerAction(Player player, Avatar avatar)
+        {
+            PowerPrototype powerProto = OnUsePower.As<PowerPrototype>();
+            if (powerProto == null) return Logger.WarnReturn(InteractionValidateResult.UnknownFailure, "PlayerCanUsePowerAction(): powerProto == null");
+
+            // Run the usual power validation check if it is assigned already
+            Power power = avatar.GetPower(powerProto.DataRef);
+            if (power != null && power.CanTrigger(PowerActivationSettingsFlags.Item) != PowerUseResult.Success)
+                return InteractionValidateResult.CannotTriggerPower;
+
+            return InteractionValidateResult.Success;
+        }
+
+        public void SetScenarioProperties(PropertyCollection properties)
+        {
+            properties.CopyProperty(Properties, PropertyEnum.DifficultyTier);
+            properties.CopyPropertyRange(Properties, PropertyEnum.RegionAffix);
+            properties.CopyProperty(Properties, PropertyEnum.RegionAffixDifficulty);
+
+            PrototypeId itemRarityRef = Properties[PropertyEnum.ItemRarity];
+            var itemRarityProto = itemRarityRef.As<RarityPrototype>();
+            if (itemRarityProto != null)
+                properties[PropertyEnum.ItemRarity] = itemRarityRef;
+
+            var affixLimits = ItemPrototype.GetAffixLimits(itemRarityRef, LootContext.Drop);
+            if (affixLimits != null)
+            {
+                properties[PropertyEnum.DifficultyIndex] = affixLimits.RegionDifficultyIndex;
+                properties[PropertyEnum.DamageRegionMobToPlayer] = affixLimits.DamageRegionMobToPlayer;
+                properties[PropertyEnum.DamageRegionPlayerToMob] = affixLimits.DamageRegionPlayerToMob;
+            }
+
+            properties[PropertyEnum.DangerRoomScenarioItemDbGuid] = DatabaseUniqueId; 
+        }
+
+        public bool IsGear(AvatarPrototype avatarProto)
+        {
+            if (Prototype is not ArmorPrototype armorProto) return false;
+
+            return armorProto.GetInventorySlotForAgent(avatarProto) switch
+            {
+                EquipmentInvUISlot.Gear01 
+                or EquipmentInvUISlot.Gear02 
+                or EquipmentInvUISlot.Gear03 
+                or EquipmentInvUISlot.Gear04 
+                or EquipmentInvUISlot.Gear05 => true,
+                _ => false,
+            };
         }
     }
 }

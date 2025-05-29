@@ -190,7 +190,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
             long currentTime, UsePowerContextPrototype powerContext, ProceduralUsePowerContextPrototype proceduralPowerContext)
         {
             var collection = ownerController.Blackboard.PropertyCollection;
-            int agroTime = collection[PropertyEnum.AIAggroTime] + collection[PropertyEnum.AIInitialCooldownMSForPower, powerContext.Power];
+            long agroTime = (long)collection[PropertyEnum.AIAggroTime] + (long)collection[PropertyEnum.AIInitialCooldownMSForPower, powerContext.Power];
             if (currentTime >= agroTime)
             {
                 if (currentTime >= collection[PropertyEnum.AIProceduralPowerSpecificCDTime, powerContext.Power])
@@ -221,6 +221,17 @@ namespace MHServerEmu.Games.GameData.Prototypes
             var contextResult = base.HandleUsePowerContext(ownerController, proceduralAI, random, currentTime, powerContext, proceduralContext);
             UpdateNextAttackThinkTime(ownerController.Blackboard, random, currentTime, contextResult);
             return contextResult;
+        }
+
+        public override void ProcessInterrupts(AIController ownerController, BehaviorInterruptType interrupt)
+        {
+            if (interrupt.HasFlag(BehaviorInterruptType.Alerted))
+            {
+                var proceduralAI = ownerController.Brain;
+                if (proceduralAI == null) return;
+                if (ownerController.Senses.GetCurrentTarget() != null)
+                    proceduralAI.ClearOverrideBehavior(OverrideType.Full);
+            }
         }
 
         private void UpdateNextAttackThinkTime(BehaviorBlackboard blackboard, GRandom random, long currentTime, StaticBehaviorReturnType contextResult)
@@ -1295,7 +1306,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
             long currentTime = (long)game.CurrentTime.TotalMilliseconds;
 
             WorldEntity target = ownerController.TargetEntity;
-            if (CommonSimplifiedSensory(target, ownerController, proceduralAI, SelectTarget, CombatTargetType.Hostile) == false) return;
+            if (CommonSimplifiedSensory(ref target, ownerController, proceduralAI, SelectTarget, CombatTargetType.Hostile) == false) return;
 
             GRandom random = game.Random;
             Picker<ProceduralUsePowerContextPrototype> powerPicker = new(random);
@@ -1317,7 +1328,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
             long currentTime = (long)game.CurrentTime.TotalMilliseconds;
 
             WorldEntity target = ownerController.TargetEntity;
-            if (CommonSimplifiedSensory(target, ownerController, proceduralAI, SelectTarget, CombatTargetType.Ally) == false) return;
+            if (CommonSimplifiedSensory(ref target, ownerController, proceduralAI, SelectTarget, CombatTargetType.Ally) == false) return;
 
             GRandom random = game.Random;
             Picker<ProceduralUsePowerContextPrototype> powerPicker = new(random);
@@ -1339,7 +1350,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
             long currentTime = (long)game.CurrentTime.TotalMilliseconds;
 
             WorldEntity target = ownerController.TargetEntity;
-            if (CommonSimplifiedSensory(target, ownerController, proceduralAI, SelectTarget, CombatTargetType.Hostile) == false) return;
+            if (CommonSimplifiedSensory(ref target, ownerController, proceduralAI, SelectTarget, CombatTargetType.Hostile) == false) return;
 
             GRandom random = game.Random;
             Picker<ProceduralUsePowerContextPrototype> powerPicker = new(random);
@@ -1421,7 +1432,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
             if (owningController == null) return;
             var collection = owningController.Blackboard.PropertyCollection;
             collection[PropertyEnum.AIAggroDropRange] = AggroDropRadius;
-            collection[PropertyEnum.AIAggroDropByLOSChance] = AggroDropByLOSChance / 100.0f;
+            collection[PropertyEnum.AIAggroDropByLOSChance] = MathHelper.ClampNoThrow(AggroDropByLOSChance, 0.0f, 1.0f); // Prototype have 100
             collection[PropertyEnum.AIAggroRangeHostile] = AggroRadius;
 
             InitPower(agent, PrimaryPower);
@@ -1933,7 +1944,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
             WorldEntity target = ownerController.TargetEntity;
 
             if (blackboard.PropertyCollection[PropertyEnum.AICustomStateVal1] == StateMoveToOwner
-                || CommonSimplifiedSensory(target, ownerController, proceduralAI, SelectTarget, CombatTargetType.Hostile) == false)
+                || CommonSimplifiedSensory(ref target, ownerController, proceduralAI, SelectTarget, CombatTargetType.Hostile) == false)
             {
                 MoveToOwner(ownerController, master);
                 return;
@@ -2027,7 +2038,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
             WorldEntity target = ownerController.TargetEntity;
 
-            if (CommonSimplifiedSensory(target, ownerController, proceduralAI, SelectTarget, CombatTargetType.Hostile) == false)
+            if (CommonSimplifiedSensory(ref target, ownerController, proceduralAI, SelectTarget, CombatTargetType.Hostile) == false)
             {
                 HandleMovementContext(proceduralAI, ownerController, agent.Locomotor, PetFollow, false, out _);
                 return;
@@ -2124,6 +2135,10 @@ namespace MHServerEmu.Games.GameData.Prototypes
             }
         }
 
+        public override void OnOwnerGotDamaged(AIController ownerController)
+        {
+            ownerController.Blackboard.PropertyCollection[PropertyEnum.AICustomStateVal1] = 1;
+        }
     }
 
     public class ProceduralProfileBotAIPrototype : ProceduralProfileWithAttackPrototype
@@ -2258,7 +2273,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
             if( state != EnrageState.Enraging)
             {
                 WorldEntity target = ownerController.TargetEntity;
-                if (CommonSimplifiedSensory(target, ownerController, proceduralAI, SelectTarget, CombatTargetType.Hostile) == false) return;
+                if (CommonSimplifiedSensory(ref target, ownerController, proceduralAI, SelectTarget, CombatTargetType.Hostile) == false) return;
 
                 GRandom random = game.Random;
                 Picker<ProceduralUsePowerContextPrototype> powerPicker = new(random);
@@ -2322,8 +2337,21 @@ namespace MHServerEmu.Games.GameData.Prototypes
         {
             base.PopulatePowerPicker(ownerController, powerPicker);
             int stateVal = ownerController.Blackboard.PropertyCollection[PropertyEnum.AIEnrageState];
-            if (stateVal == 3)
+            if (stateVal == (int)EnrageState.Enraged)
                 ownerController.AddPowersToPicker(powerPicker, PostEnragePowers);
+        }
+
+        public override void OnOwnerGotDamaged(AIController ownerController)
+        {
+            Agent agent = ownerController.Owner;
+            if (agent == null) return;
+            if (agent.Properties.HasProperty(PropertyEnum.EnrageStartTime) == false)
+            {
+                Game game = agent.Game;
+                if (game == null) return;
+                TimeSpan currentTime = game.CurrentTime;
+                agent.Properties[PropertyEnum.EnrageStartTime] = currentTime + TimeSpan.FromMinutes(EnrageTimerInMinutes);
+            }
         }
     }
 
@@ -2380,7 +2408,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
             }
 
             WorldEntity target = ownerController.TargetEntity;
-            if (CommonSimplifiedSensory(target, ownerController, proceduralAI, SelectTarget, CombatTargetType.Hostile) == false)
+            if (CommonSimplifiedSensory(ref target, ownerController, proceduralAI, SelectTarget, CombatTargetType.Hostile) == false)
             {
                 HandleMovementContext(proceduralAI, ownerController, agent.Locomotor, MoveToAvatarAlly, false, out _);
                 return;

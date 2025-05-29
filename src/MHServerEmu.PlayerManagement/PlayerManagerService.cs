@@ -3,8 +3,6 @@ using Google.ProtocolBuffers;
 using MHServerEmu.Core.Config;
 using MHServerEmu.Core.Logging;
 using MHServerEmu.Core.Network;
-using MHServerEmu.Core.Network.Tcp;
-using MHServerEmu.Core.System.Time;
 using MHServerEmu.DatabaseAccess.Models;
 using MHServerEmu.Frontend;
 using MHServerEmu.Games;
@@ -14,7 +12,7 @@ namespace MHServerEmu.PlayerManagement
     /// <summary>
     /// An <see cref="IGameService"/> that manages connected players and routes messages to relevant <see cref="Game"/> instances.
     /// </summary>
-    public class PlayerManagerService : IGameService, IFrontendService, IMessageBroadcaster
+    public class PlayerManagerService : IGameService, IMessageBroadcaster
     {
         // TODO: Implement a way to request saves from the game without disconnecting.
 
@@ -60,7 +58,7 @@ namespace MHServerEmu.PlayerManagement
 
         public void Run()
         {
-            _gameManager.CreateGame();
+            _gameManager.InitializeGames(Config.GameInstanceCount, Config.PlayerCountDivisor);
         }
 
         public void Shutdown()
@@ -78,25 +76,67 @@ namespace MHServerEmu.PlayerManagement
             }
         }
 
-        public void Handle(ITcpClient tcpClient, MessagePackage message)
+        public void ReceiveServiceMessage<T>(in T message) where T : struct, IGameServiceMessage
         {
-            var client = (FrontendClient)tcpClient;
-            message.Protocol = typeof(ClientToGameServerMessage);
-
-            // Timestamp sync messages
-            if (message.Id == (uint)ClientToGameServerMessage.NetMessageSyncTimeRequest || message.Id == (uint)ClientToGameServerMessage.NetMessagePing)
+            switch (message)
             {
-                message.GameTimeReceived = Clock.GameTime;
-                message.DateTimeReceived = Clock.UnixTime;
+                case GameServiceProtocol.AddClient addClient:
+                    OnAddClient(addClient);
+                    break;
+
+                case GameServiceProtocol.RemoveClient removeClient:
+                    OnRemoveClient(removeClient);
+                    break;
+
+                case GameServiceProtocol.RouteMessageBuffer routeMessagePackage:
+                    OnRouteMessageBuffer(routeMessagePackage);
+                    break;
+
+                case GameServiceProtocol.RouteMessage routeMessage:
+                    OnRouteMessage(routeMessage);
+                    break;
+
+                case GameServiceProtocol.LeaderboardStateChange leaderboardStateChange:
+                    // REMOVEME: This should be handled by the GameInstanceService on its own
+                    _gameManager.BroadcastServiceMessage(leaderboardStateChange);
+                    break;
+
+                case GameServiceProtocol.LeaderboardRewardRequestResponse leaderboardRewardRequestResponse:
+                    // REMOVEME: This should be handled by the GameInstanceService on its own
+                    OnLeaderboardRewardRequestResponse(leaderboardRewardRequestResponse);
+                    break;
+
+                default:
+                    Logger.Warn($"ReceiveServiceMessage(): Unhandled service message type {typeof(T).Name}");
+                    break;
             }
+        }
+
+        public string GetStatus()
+        {
+            lock (_pendingSaveDict)
+                return $"Games: {_gameManager.GameCount} | Sessions: {_sessionManager.ActiveSessionCount} [{_sessionManager.PendingSessionCount}] | Pending Saves: {_pendingSaveDict.Count}";
+        }
+
+        private void OnAddClient(in GameServiceProtocol.AddClient addClient)
+        {
+            AddClient((FrontendClient)addClient.Client);
+        }
+
+        private void OnRemoveClient(in GameServiceProtocol.RemoveClient removeClient)
+        {
+            RemoveClient((FrontendClient)removeClient.Client);
+        }
+
+        private void OnRouteMessageBuffer(in GameServiceProtocol.RouteMessageBuffer routeMessageBuffer)
+        {
+            FrontendClient client = (FrontendClient)routeMessageBuffer.Client;
+            MessageBuffer messageBuffer = routeMessageBuffer.MessageBuffer;
 
             // Self-handle or route messages
-            switch ((ClientToGameServerMessage)message.Id)
+            switch ((ClientToGameServerMessage)messageBuffer.MessageId)
             {
-                case ClientToGameServerMessage.NetMessageReadyForGameJoin:  OnReadyForGameJoin(client, message); break;
-                case ClientToGameServerMessage.NetMessageSyncTimeRequest:   OnSyncTimeRequest(client, message); break;
-                case ClientToGameServerMessage.NetMessagePing:              OnPing(client, message); break;
-                case ClientToGameServerMessage.NetMessageFPS:               OnFps(client, message); break;
+                case ClientToGameServerMessage.NetMessageReadyForGameJoin:  OnReadyForGameJoin(client, messageBuffer); break;
 
                 default:
                     // Route the rest of messages to the game the player is currently in
@@ -104,47 +144,50 @@ namespace MHServerEmu.PlayerManagement
 
                     if (game == null)
                     {
-                        Logger.Warn($"Handle(): Cannot route {(ClientToGameServerMessage)message.Id}, the player {client.Session.Account} is not in a game");
+                        Logger.Warn($"Handle(): Cannot route {(ClientToGameServerMessage)messageBuffer.MessageId}, the player {client.Session.Account} is not in a game");
                         return;
                     }
 
-                    game.PostMessage(client, message);
+                    game.ReceiveMessageBuffer(client, messageBuffer);
                     break;
             }
         }
 
-        public void Handle(ITcpClient client, IEnumerable<MessagePackage> messages)
+        private void OnRouteMessage(in GameServiceProtocol.RouteMessage routeMessage)
         {
-            foreach (MessagePackage message in messages)
-                Handle(client, message);
+            IFrontendClient client = routeMessage.Client;
+            MailboxMessage message = routeMessage.Message;
+
+            switch ((FrontendProtocolMessage)message.Id)
+            {
+                case FrontendProtocolMessage.ClientCredentials: OnClientCredentials(client, message); break;
+
+                default: Logger.Warn($"Handle(): Unhandled {(ClientToGameServerMessage)message.Id} [{message.Id}]"); break;
+            }
         }
 
-        public void Handle(ITcpClient client, MailboxMessage message)
+        private bool OnLeaderboardRewardRequestResponse(in GameServiceProtocol.LeaderboardRewardRequestResponse leaderboardRewardRequestResponse)
         {
-            Logger.Warn($"Handle(): Unhandled MailboxMessage");
-        }
+            // REMOVEME: This should be handled by the GameInstanceService on its own
+            ulong gameId = 0;
+            lock (_playerDict)
+            {
+                if (_playerDict.TryGetValue(leaderboardRewardRequestResponse.ParticipantId, out FrontendClient client))
+                    gameId = client.GameId;
+            }
 
-        public string GetStatus()
-        {
-            lock (_pendingSaveDict)
-                return $"Sessions: {_sessionManager.SessionCount} | Games: {_gameManager.GameCount} | Pending Saves: {_pendingSaveDict.Count}";
+            Game game = _gameManager.GetGameById(gameId);
+            if (game == null) return Logger.WarnReturn(false, "OnLeaderboardRewardRequestResponse(): game == null");
+
+            game.ReceiveServiceMessage(leaderboardRewardRequestResponse);
+            return true;
         }
 
         #endregion
 
-        #region IFrontendService Implementation
+        #region Client Management
 
-        public void ReceiveFrontendMessage(FrontendClient client, IMessage message)
-        {
-            switch (message)
-            {
-                case InitialClientHandshake handshake: OnInitialClientHandshake(client, handshake); break;
-                case ClientCredentials credentials: OnClientCredentials(client, credentials); break;
-                default: Logger.Warn($"ReceiveFrontendMessage(): Unhandled message {message.DescriptorForType.Name}"); break;
-            }
-        }
-
-        public bool AddFrontendClient(FrontendClient client)
+        public bool AddClient(FrontendClient client)
         {
             if (client.Session == null || client.Session.Account == null)
                 return Logger.WarnReturn(false, $"AddFrontendClient(): Client [{client}] has no valid session assigned");
@@ -171,10 +214,15 @@ namespace MHServerEmu.PlayerManagement
             return true;
         }
 
-        public bool RemoveFrontendClient(FrontendClient client)
+        public bool RemoveClient(FrontendClient client)
         {
             if (client.Session == null || client.Session.Account == null)
                 return Logger.WarnReturn(false, $"RemoveFrontendClient(): Client [{client}] has no valid session assigned");
+
+            // Remove the player in reverse (Game -> Session -> PlayerManager)
+            // This is to make sure the player is removed from the game even if there is some issue with their session.
+            GetGameByPlayer(client)?.RemoveClient(client);
+            _sessionManager.RemoveActiveSession(client.Session.Id);
 
             ulong playerDbId = (ulong)client.Session.Account.Id;
 
@@ -183,9 +231,6 @@ namespace MHServerEmu.PlayerManagement
                 if (_playerDict.Remove(playerDbId) == false)
                     return Logger.WarnReturn(false, $"RemoveFrontendClient(): Client [{client}] not found");
             }
-
-            _sessionManager.RemoveSession(client.Session.Id);
-            GetGameByPlayer(client)?.RemoveClient(client);
 
             // Account data is saved asynchronously as a task because it takes some time for a player to leave a game
             lock (_pendingSaveDict)
@@ -217,7 +262,7 @@ namespace MHServerEmu.PlayerManagement
         /// <summary>
         /// Retrieves the <see cref="ClientSession"/> for the specified session id. Returns <see langword="true"/> if successful.
         /// </summary>
-        public bool TryGetSession(ulong sessionId, out ClientSession session) => _sessionManager.TryGetSession(sessionId, out session);
+        public bool TryGetSession(ulong sessionId, out ClientSession session) => _sessionManager.TryGetActiveSession(sessionId, out session);
 
         /// <summary>
         /// Retrieves the <see cref="FrontendClient"/> for the specified session id. Returns <see langword="true"/> if successful.
@@ -400,18 +445,15 @@ namespace MHServerEmu.PlayerManagement
         }
 
         /// <summary>
-        /// Handles <see cref="InitialClientHandshake"/>.
-        /// </summary>
-        private void OnInitialClientHandshake(FrontendClient client, InitialClientHandshake handshake)
-        {
-            client.FinishedPlayerManagerHandshake = true;
-        }
-
-        /// <summary>
         /// Handles <see cref="ClientCredentials"/>.
         /// </summary>
-        private void OnClientCredentials(FrontendClient client, ClientCredentials credentials)
+        private bool OnClientCredentials(IFrontendClient client, MailboxMessage message)
         {
+            var clientCredentials = message.As<ClientCredentials>();
+            if (clientCredentials == null) return Logger.WarnReturn(false, "OnClientCredentials(): clientCredentials == null");
+
+            FrontendClient frontendClient = (FrontendClient)client;
+
             if (Config.SimulateQueue)
             {
                 Logger.Debug("Responding with LoginQueueStatus message");
@@ -420,14 +462,14 @@ namespace MHServerEmu.PlayerManagement
                     .SetNumberOfPlayersInLine(Config.QueueNumberOfPlayersInLine)
                     .Build());
 
-                return;
+                return false;
             }
 
-            if (_sessionManager.VerifyClientCredentials(client, credentials) == false)
+            if (_sessionManager.VerifyClientCredentials(frontendClient, clientCredentials) == false)
             {
-                Logger.Warn($"OnClientCredentials(): Failed to verify client credentials, disconnecting client on {client.Connection}");
+                Logger.Warn($"OnClientCredentials(): Failed to verify client credentials, disconnecting client [{frontendClient}]");
                 client.Disconnect();
-                return;
+                return false;
             }
 
             // Success!
@@ -436,24 +478,18 @@ namespace MHServerEmu.PlayerManagement
                 .SetRandomNumberIndex(0)
                 .SetEncryptedRandomNumber(ByteString.Empty)
                 .Build());
+
+            return true;
         }
 
         /// <summary>
         /// Handles <see cref="NetMessageReadyForGameJoin"/>.
         /// </summary>
-        private bool OnReadyForGameJoin(FrontendClient client, MessagePackage message)
+        private bool OnReadyForGameJoin(IFrontendClient client, MessageBuffer messageBuffer)
         {
-            // NetMessageReadyForGameJoin contains a bug where wipesDataIfMismatchedInDb is marked as required but the client
-            // doesn't include it. To avoid an exception we build a partial message from the data we receive.
-            NetMessageReadyForGameJoin readyForGameJoin;
-            try
-            {
-                readyForGameJoin = NetMessageReadyForGameJoin.CreateBuilder().MergeFrom(message.Payload).BuildPartial();
-            }
-            catch
-            {
-                return Logger.ErrorReturn(false, "OnReadyForGameJoin(): Failed to deserialize");
-            }
+            // There is a client-side bug with NetMessageReadyForGameJoin that requires special handling, see DeserializeReadyForGameJoin() for more info.
+            var readyForGameJoin = messageBuffer.DeserializeReadyForGameJoin();
+            if (readyForGameJoin == null) return Logger.WarnReturn(false, "OnReadyForGameJoin(): readyForGameJoin == null");
 
             Logger.Info($"Received NetMessageReadyForGameJoin from client [{client}], logging in");
             //Logger.Trace(readyForGameJoin.ToString());
@@ -461,76 +497,7 @@ namespace MHServerEmu.PlayerManagement
             // Log the player in
             client.SendMessage(MuxChannel, NetMessageReadyAndLoggedIn.DefaultInstance); // add report defect (bug) config here
 
-            // Sync time
-            client.SendMessage(MuxChannel, NetMessageInitialTimeSync.CreateBuilder()
-                .SetGameTimeServerSent(Clock.GameTime.Ticks / 10)
-                .SetDateTimeServerSent(Clock.UnixTime.Ticks / 10)
-                .Build());
-
             return true;
-        }
-
-        /// <summary>
-        /// Handles <see cref="NetMessageSyncTimeRequest"/>.
-        /// </summary>
-        private bool OnSyncTimeRequest(FrontendClient client, MessagePackage message)
-        {
-            var request = message.Deserialize() as NetMessageSyncTimeRequest;
-            if (request == null) return Logger.WarnReturn(false, $"OnSyncTimeRequest(): Failed to retrieve message");
-
-            //Logger.Debug($"NetMessageSyncTimeRequest:\n{request}");
-
-            var reply = NetMessageSyncTimeReply.CreateBuilder()
-                .SetGameTimeClientSent(request.GameTimeClientSent)
-                .SetGameTimeServerReceived(message.GameTimeReceived.Ticks / 10)
-                .SetGameTimeServerSent(Clock.GameTime.Ticks / 10)
-                .SetDateTimeClientSent(request.DateTimeClientSent)
-                .SetDateTimeServerReceived(message.DateTimeReceived.Ticks / 10)
-                .SetDateTimeServerSent(Clock.UnixTime.Ticks / 10)
-                .SetDialation(1.0f)
-                .SetGametimeDialationStarted(0)
-                .SetDatetimeDialationStarted(0)
-                .Build();
-
-            //Logger.Debug($"NetMessageSyncTimeReply:\n{reply}");
-
-            client.SendMessage(MuxChannel, reply);
-            return true;
-        }
-
-        /// <summary>
-        /// Handles <see cref="NetMessagePing"/>.
-        /// </summary>
-        private bool OnPing(FrontendClient client, MessagePackage message)
-        {
-            var ping = message.Deserialize() as NetMessagePing;
-            if (ping == null) return Logger.WarnReturn(false, $"OnPing(): Failed to retrieve message");
-
-            //Logger.Debug($"NetMessagePing:\n{ping}");
-
-            var response = NetMessagePingResponse.CreateBuilder()
-                .SetDisplayOutput(ping.DisplayOutput)
-                .SetRequestSentClientTime(ping.SendClientTime)
-                .SetRequestSentGameTime(ping.SendGameTime)
-                .SetRequestNetReceivedGameTime((ulong)message.GameTimeReceived.TotalMilliseconds)
-                .SetResponseSendTime((ulong)Clock.GameTime.TotalMilliseconds)
-                .SetServerTickforecast(0)   // server tick time ms
-                .SetGameservername("BOPR-MHVGIS2")
-                .SetFrontendname("bopr-mhfes2")
-                .Build();
-
-            //Logger.Debug($"NetMessagePingResponse:\n{response}");
-
-            client.SendMessage(MuxChannel, response);
-            return true;
-        }
-
-        /// <summary>
-        /// Handles <see cref="NetMessageFPS"/>.
-        /// </summary>
-        private void OnFps(FrontendClient client, MessagePackage message)
-        {
-            //Logger.Debug($"NetMessageFPS:\n{fps}");
         }
 
         #endregion

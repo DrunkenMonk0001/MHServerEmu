@@ -10,6 +10,8 @@ using MHServerEmu.Games.Loot;
 using MHServerEmu.Games.Network;
 using MHServerEmu.Games.Powers;
 using MHServerEmu.Games.Properties;
+using MHServerEmu.Games.Social;
+using MHServerEmu.Games.Social.Communities;
 
 namespace MHServerEmu.Games.GameData.Prototypes
 {
@@ -45,6 +47,12 @@ namespace MHServerEmu.Games.GameData.Prototypes
                 default:
                     return LootRollResult.Failure;
             }
+
+            // Never roll XP for capped starter avatars
+            Player player = settings.Player;
+            Avatar avatar = player?.CurrentAvatar;
+            if (avatar != null && player.HasAvatarAsCappedStarter(avatar) && agentProto.HasKeyword(GameDatabase.KeywordGlobalsPrototype.OrbExperienceEntityKeywordPrototype))
+                return result;
 
             RestrictionTestFlags restrictionFlags = RestrictionTestFlags.All;
             if (settings.DropChanceModifiers.HasFlag(LootDropChanceModifiers.PreviewOnly) || settings.DropChanceModifiers.HasFlag(LootDropChanceModifiers.IgnoreCooldown))
@@ -101,10 +109,112 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
         private static readonly Logger Logger = LogManager.CreateLogger();
 
+        public override void Visit<T>(T visitor)
+        {
+            base.Visit(visitor);
+
+            OnTokenUnavailable?.Visit(visitor);
+        }
+
         protected internal override LootRollResult Roll(LootRollSettings settings, IItemResolver resolver)
         {
-            Logger.Warn($"Roll(): AllowedTokenType={AllowedTokenType}, FilterType={FilterType}");
-            return base.Roll(settings, resolver);
+            if (FilterType == CharacterFilterType.DropUnownedAvatarOnly && settings.Player == null)
+                return Logger.WarnReturn(LootRollResult.Failure, $"Roll(): No player for filter type {FilterType}");
+
+            ItemPrototype itemProto = null;
+
+            // Build picker
+            Picker<Prototype> picker = new(resolver.Random);
+
+            foreach (PrototypeId charTokenProtoRef in DataDirectory.Instance.IteratePrototypesInHierarchy<CharacterTokenPrototype>(PrototypeIterateFlags.NoAbstractApprovedOnly))
+            {
+                CharacterTokenPrototype charTokenProto = charTokenProtoRef.As<CharacterTokenPrototype>();
+
+                if (charTokenProto.TokenType != AllowedTokenType)
+                    continue;
+
+                // Skip tokens that don't have an ES cost
+                ItemCostPrototype itemCostProto = charTokenProto.Cost;
+                if (itemCostProto == null || itemCostProto.HasEternitySplintersComponent() == false)
+                    continue;
+
+                bool addToPicker = true;
+
+                switch (FilterType)
+                {
+                    case CharacterFilterType.DropCurrentAvatarOnly:
+                        addToPicker = charTokenProto.Character == settings.UsableAvatar.DataRef;
+                        if (addToPicker)
+                            itemProto = charTokenProto;
+                        break;
+
+                    case CharacterFilterType.DropUnownedAvatarOnly:
+                        addToPicker = charTokenProto.HasUnlockedCharacter(settings.Player) == false;
+                        break;
+
+                    // Add by default if no filter is specified
+                }
+
+                if (addToPicker)
+                    picker.Add(charTokenProto);
+            }
+
+            // Fallback if failed to find anything to pick
+            if (picker.Empty())
+            {
+                if (OnTokenUnavailable == null)
+                {
+                    resolver.ClearPending();
+                    return LootRollResult.Failure;
+                }
+
+                return OnTokenUnavailable.Select(settings, resolver);
+            }
+
+            // Pick and push to the resolver
+            LootRollResult result = LootRollResult.NoRoll;
+            AvatarPrototype usableAvatarProto = settings.UsableAvatar;
+
+            int level = resolver.ResolveLevel(settings.Level, settings.UseLevelVerbatim);
+            AvatarPrototype resolvedAvatarProto = resolver.ResolveAvatarPrototype(usableAvatarProto, settings.ForceUsable, settings.UsablePercent);
+            PrototypeId rollFor = resolvedAvatarProto != null ? resolvedAvatarProto.DataRef : PrototypeId.Invalid;
+
+            PrototypeId? rarityProtoRef = resolver.ResolveRarity(settings.Rarities, level, null);
+            if (rarityProtoRef == PrototypeId.Invalid)
+            {
+                resolver.ClearPending();
+                return LootRollResult.Failure;
+            }
+
+            using DropFilterArguments filterArgs = ObjectPoolManager.Instance.Get<DropFilterArguments>();
+            DropFilterArguments.Initialize(filterArgs, itemProto, rollFor, level, rarityProtoRef.Value, 0, EquipmentInvUISlot.Invalid, resolver.LootContext);
+            filterArgs.DropDistanceSq = settings.DropDistanceSq;
+
+            if (LootUtilities.PickValidItem(resolver, picker, null, filterArgs, ref itemProto, RestrictionTestFlags.All, ref rarityProtoRef) == false)
+            {
+                resolver.ClearPending();
+                return LootRollResult.Failure;
+            }
+
+            filterArgs.Rarity = rarityProtoRef.Value;
+            filterArgs.ItemProto = itemProto;
+
+            RestrictionTestFlags restrictionFlags = RestrictionTestFlags.All;
+            if (settings.DropChanceModifiers.HasFlag(LootDropChanceModifiers.IgnoreCooldown) ||
+                settings.DropChanceModifiers.HasFlag(LootDropChanceModifiers.PreviewOnly))
+            {
+                restrictionFlags &= ~RestrictionTestFlags.Cooldown;
+            }
+
+            result |= resolver.PushItem(filterArgs, restrictionFlags, 1, null);
+
+            if (result.HasFlag(LootRollResult.Failure))
+            {
+                resolver.ClearPending();
+                return LootRollResult.Failure;
+            }
+
+            return resolver.ProcessPending(settings) ? result : LootRollResult.Failure;
         }
     }
 
@@ -330,6 +440,12 @@ namespace MHServerEmu.Games.GameData.Prototypes
         {
             LootRollResult result = LootRollResult.NoRoll;
 
+            // Never roll XP for capped starter avatars
+            Player player = settings.Player;
+            Avatar avatar = player?.CurrentAvatar;
+            if (avatar != null && player.HasAvatarAsCappedStarter(avatar))
+                return result;
+
             if (XPCurve == CurveId.Invalid)
                 return result;
 
@@ -387,8 +503,6 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
         public override void OnResultsEvaluation(Player player, WorldEntity dropper)
         {
-            Logger.Debug($"OnResultsEvaluation(): BannerMessage={BannerMessage.GetName()}");
-
             player.SendBannerMessage(BannerMessage.As<BannerMessagePrototype>());
         }
 
@@ -408,8 +522,6 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
         public override void OnResultsEvaluation(Player player, WorldEntity dropper)
         {
-            Logger.Debug($"OnResultsEvaluation(): Power={Power.GetName()}");
-
             if (dropper == null)
             {
                 Logger.Warn("OnResultsEvaluation(): dropper == null");
@@ -452,8 +564,6 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
         public override void OnResultsEvaluation(Player player, WorldEntity dropper)
         {
-            Logger.Debug($"OnResultsEvaluation(): RecipientVisualEffect={RecipientVisualEffect.GetName()}, DropperVisualEffect={DropperVisualEffect.GetName()}");
-
             Game game = player?.Game;
             if (game == null) return;
 
@@ -498,15 +608,37 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
         public override void OnResultsEvaluation(Player player, WorldEntity dropper)
         {
-            Logger.Debug($"OnResultsEvaluation(): ChatMessage={ChatMessage}, MessageScope={MessageScope}");
+            ChatManager chatManager = player.Game.ChatManager;
+            CircleId circleId = CircleId.__None;
 
-            // TODO: Use MessageScope
-            NetMessageChatFromGameSystem chatFromGameSystem = NetMessageChatFromGameSystem.CreateBuilder()
-                .SetSourceStringId((ulong)GameDatabase.GlobalsPrototype.SystemLocalized)
-                .SetMessageStringId((ulong)ChatMessage)
-                .Build();
+            switch (MessageScope)
+            {
+                case PlayerScope.CurrentRecipientOnly:
+                    chatManager.SendChatFromGameSystem(ChatMessage, player);
+                    return;
 
-            player.SendMessage(chatFromGameSystem);
+                case PlayerScope.Party:
+                    circleId = CircleId.__Party;
+                    break;
+
+                case PlayerScope.Nearby:
+                    circleId = CircleId.__Nearby;
+                    break;
+
+                case PlayerScope.Friends:
+                    circleId = CircleId.__Friends;
+                    break;
+
+                case PlayerScope.Guild:
+                    circleId = CircleId.__Guild;
+                    break;
+
+                default:
+                    Logger.Warn($"OnResultsEvaluation(): Unknown message scope {MessageScope}");
+                    return;
+            }
+
+            chatManager.SendChatFromGameSystem(ChatMessage, player, circleId);
         }
 
         protected internal override LootRollResult Roll(LootRollSettings settings, IItemResolver resolver)
@@ -569,7 +701,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
             VendorXPCapInfoPrototype vendorXPCapInfoProto = null;
             foreach (VendorXPCapInfoPrototype currentInfoProto in GameDatabase.LootGlobalsPrototype.VendorXPCapInfo)
             {
-                if (currentInfoProto.DataRef == Vendor)
+                if (currentInfoProto.Vendor == Vendor)
                 {
                     vendorXPCapInfoProto = currentInfoProto;
                     break;
@@ -581,16 +713,19 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
             if (vendorXPCapInfoProto != null && settings.DropChanceModifiers.HasFlag(LootDropChanceModifiers.IgnoreCap) == false)
             {
-                // NOTE: This loot drop type can modify the player's VendorXPCapCounter property while it is being rolled.
-                // The only vendor this can theoretically happen with in 1.52 is Entity/Characters/Vendors/VendorTypes/VendorRaidGenosha.prototype.
-                Logger.Debug($"Roll(): Vendor={Vendor.GetName()}, XP={XP}");
-
+                // This code handles weekly caps for Entity/Characters/Vendors/VendorTypes/VendorRaidGenosha.prototype.
                 Player player = resolver.Player;
                 if (player == null)
                     return Logger.WarnReturn(LootRollResult.NoRoll, "Roll(): Unable to get player when rewarding VendorXP");
 
                 int vendorXPCapCounter = player.Properties[PropertyEnum.VendorXPCapCounter, Vendor];
                 bool shouldAdjustCounter = settings.DropChanceModifiers.HasFlag(LootDropChanceModifiers.PreviewOnly) == false && player.IsInGame;
+                if (shouldAdjustCounter)
+                {
+                    // Reset the counter if a rollover has happened
+                    if (player.TryDoVendorXPCapRollover(vendorXPCapInfoProto))
+                        vendorXPCapCounter = 0;
+                }
 
                 if (vendorXPCapCounter + xpAmount > vendorXPCapInfoProto.Cap)
                     xpAmount = Math.Max(0, vendorXPCapInfoProto.Cap - vendorXPCapCounter);

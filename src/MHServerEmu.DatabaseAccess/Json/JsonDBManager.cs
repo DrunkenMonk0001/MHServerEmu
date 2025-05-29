@@ -40,14 +40,9 @@ namespace MHServerEmu.DatabaseAccess.Json
             {
                 Logger.Info($"Found existing account file {FileHelper.GetRelativePath(_accountFilePath)}");
 
-                try
-                {
-                    _account = FileHelper.DeserializeJson<DBAccount>(_accountFilePath, _jsonOptions);
-                }
-                catch
-                {
+                _account = FileHelper.DeserializeJson<DBAccount>(_accountFilePath, _jsonOptions);
+                if (_account == null)
                     Logger.Warn($"Initialize(): Failed to load existing account data, resetting");
-                }
             }
 
             if (_account == null)
@@ -75,6 +70,17 @@ namespace MHServerEmu.DatabaseAccess.Json
         {
             account = _account;
             return true;
+        }
+
+        public bool TryGetPlayerName(ulong id, out string playerName)
+        {
+            playerName = $"Player{id}";
+            return true;
+        }
+
+        public bool GetPlayerNames(Dictionary<ulong, string> playerNames)
+        {
+            return false;
         }
 
         public bool QueryIsPlayerNameTaken(string playerName)
@@ -126,6 +132,5 @@ namespace MHServerEmu.DatabaseAccess.Json
 
             _lastBackupTime = now;
         }
-
     }
 }

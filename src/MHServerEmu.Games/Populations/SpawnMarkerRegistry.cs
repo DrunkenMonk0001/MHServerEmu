@@ -19,6 +19,8 @@ namespace MHServerEmu.Games.Populations
         private SpawnReservationMap _regionLookup = new();
         private Dictionary<PrototypeId, SpawnReservationMap> _areaLookup = new();
         private Dictionary<uint, SpawnReservationMap> _cellLookup = new();
+        private Picker<SpawnReservation> _reusablePicker = new();   // TODO: Replace with pooling
+        public TimeSpan _respawnDelay;
 
         public SpawnMarkerRegistry(Region region)
         {
@@ -102,23 +104,20 @@ namespace MHServerEmu.Games.Populations
                 if (spawnMarker != null && spawnMarker.Type != MarkerType.Prop)
                 {
                     var filterRef = GameDatabase.GetDataRefByPrototypeGuid(entityMarker.FilterGuid);
-
                     if (cell.Region.CheckMarkerFilter(filterRef))
                     {
                         if (entityMarker.EntityGuid == 0) continue;
                         var markerRef = GameDatabase.GetDataRefByPrototypeGuid(entityMarker.EntityGuid);
-                        if (markerRef == 0) continue;
+                        if (markerRef == PrototypeId.Invalid) continue;
 
                         Vector3 cellPos = entityMarker.Position - cell.Prototype.BoundingBox.Center;
                         Vector3 regionPos = cell.RegionBounds.Center + cellPos;
 
-                        if (!cell.RegionBounds.IntersectsXY(regionPos))
-                        {
+                        if (cell.RegionBounds.IntersectsXY(regionPos) == false)
                             Logger.Warn($"[DESIGN]Trying to add marker outside of cell bounds. " +
                                 $"CELL={GameDatabase.GetFormattedPrototypeName(cell.PrototypeDataRef)}, BOUNDS={cell.RegionBounds}, " +
                                 $"MARKER={GameDatabase.GetFormattedPrototypeName(markerRef)}, REGIONPOS={regionPos}, CELLPOS={marker.Position}");
-                            continue;
-                        }
+
                         //Logger.Debug($"Marker [{GameDatabase.GetFormattedPrototypeName(markerRef)}] {regionPos}");
                         AddSpawnTypeLocation(markerRef, marker.Position, marker.Rotation, cell, ++id);
                     }
@@ -288,46 +287,70 @@ namespace MHServerEmu.Games.Populations
             return false;
         }
 
-        public SpawnReservation ReserveFreeReservation(PrototypeId markerRef, GRandom random, Cell spawnCell, List<PrototypeId> spawnAreas, List<PrototypeId> spawnCells)
+        bool PickReservation(Picker<SpawnReservation> picker, PrototypeId markerRef, SpawnLocation spawnLocation, SpawnFlags flag)
         {
-            Picker<SpawnReservation> picker = new(random);
+            var spawnAreas = spawnLocation.SpawnAreas;
+            var spawnCells = spawnLocation.SpawnCells;
 
-            var spawnCellRef = spawnCell.PrototypeDataRef;
-            var spawnCellId = spawnCell.Id;
-            var spawnAreaRef = spawnCell.Area.PrototypeDataRef;
-
-            // picker add
-            if (spawnCells.Any())
+            if (spawnCells.Count > 0)
             {
-                foreach (var cellref in spawnCells)
+                foreach (var spawnCell in spawnCells)
                 {
-                    if (spawnCellRef != cellref) continue;
+                    var spawnCellId = spawnCell.Id;
                     if (_cellLookup.TryGetValue(spawnCellId, out var spawnMap) == false || spawnMap == null) continue;
                     if (spawnMap.TryGetValue(markerRef, out var list) == false || list == null) continue;
+                    var spawnArea = spawnCell.Area;
                     foreach (var testReservation in list)
                     {
-                        if (testReservation.State != MarkerState.Free) continue;
-                        if (spawnAreas?.Contains(spawnAreaRef) == false) continue;
-                        picker.Add(testReservation);
+                        if (spawnAreas.Count > 0 && spawnAreas.Contains(spawnArea) == false) continue;
+                        if (TestReservation(testReservation, flag, true))
+                            picker.Add(testReservation);
                     }
                 }
             }
-            else if (spawnAreas.Any())
+            else if (spawnAreas.Count > 0)
             {
-                foreach (var areaRef in spawnAreas)
+                foreach (var spawnArea in spawnAreas)
                 {
-                    if (areaRef != spawnAreaRef) continue;
+                    var spawnAreaRef = spawnArea.PrototypeDataRef;
                     if (_areaLookup.TryGetValue(spawnAreaRef, out var spawnMap) == false || spawnMap == null) continue;
                     if (spawnMap.TryGetValue(markerRef, out var list) == false || list == null) continue;
                     foreach (var testReservation in list)
-                    {
-                        if (testReservation.State != MarkerState.Free) continue;
-                        picker.Add(testReservation);
-                    }
+                        if (TestReservation(testReservation, flag, true))
+                            picker.Add(testReservation);
                 }
             }
+            else
+            {
+                if (_regionLookup.TryGetValue(markerRef, out var list) && list != null)
+                    foreach (var testReservation in list)
+                        if (TestReservation(testReservation, flag, true))
+                            picker.Add(testReservation);
+            }
+            return picker.Empty() == false;
+        }
 
-            if (picker.Empty() == false && picker.Pick(out SpawnReservation reservation))
+        public SpawnReservation ReserveFreeReservation(PrototypeId markerRef, GRandom random, SpawnLocation spawnLocation, SpawnFlags flag, int respawnDelayMS)
+        {
+            Picker<SpawnReservation> picker = _reusablePicker;  // TODO: replace with pooling
+            picker.Initialize(random);
+            _respawnDelay = TimeSpan.FromMilliseconds(respawnDelayMS);
+
+            bool canPick = PickReservation(picker, markerRef, spawnLocation, flag);
+
+            if (canPick == false && flag.HasFlag(SpawnFlags.IgnoreSimulated))
+            {
+                flag &= ~SpawnFlags.IgnoreSimulated;
+                canPick = PickReservation(picker, markerRef, spawnLocation, flag);
+            }
+
+            if (canPick == false && flag.HasFlag(SpawnFlags.IgnoreBlackout) == false)
+            {
+                flag |= SpawnFlags.IgnoreBlackout;
+                canPick = PickReservation(picker, markerRef, spawnLocation, flag);
+            }
+
+            if (canPick && picker.Pick(out SpawnReservation reservation))
             {
                 reservation.State = MarkerState.Reserved;
                 return reservation;
@@ -347,14 +370,80 @@ namespace MHServerEmu.Games.Populations
             return null;
         }
 
-        public int CalcFreeReservation(PrototypeId markerRef, PrototypeId spawnAreaRef)
+        public SpawnReservation GetReservationInCell(uint cellId, int id)
+        {
+            List<SpawnReservation> reservations = new();
+            GetReservationsInCell(cellId, reservations);
+            foreach (var reservation in reservations)
+                if (reservation.Id == id) return reservation;
+            return null;
+        }
+
+        public void OnSimulation(Cell cell, int numPlayers)
+        {
+            List<SpawnReservation> reservations = new();
+
+            if (numPlayers == 0)
+            {
+                GetReservationsInCell(cell.Id, reservations);
+                foreach (var reservation in reservations)
+                    if (reservation.Cell == cell)
+                    {
+                        reservation.Simulated = false;
+                        reservation.LastFreeTime = TimeSpan.Zero;
+                    }
+            }
+            else if (numPlayers == 1)
+            {
+                GetReservationsInCell(cell.Id, reservations);
+                foreach (var reservation in reservations)
+                    if (reservation.Cell == cell)
+                        reservation.Simulated = true;
+            }
+        }
+
+        public bool TestReservation(SpawnReservation reservation, SpawnFlags flag, bool checkRespawn = false, bool checkFree = true)
+        {
+            if (checkFree && reservation.State != MarkerState.Free) return false;
+            if (flag.HasFlag(SpawnFlags.IgnoreSimulated) && reservation.Simulated) return false;
+            if (flag.HasFlag(SpawnFlags.IgnoreBlackout) == false && reservation.BlackOutZones > 0) return false;
+            if (checkRespawn && _respawnDelay != TimeSpan.Zero)
+            {
+                var reservationTime = Game.Current.CurrentTime - reservation.LastFreeTime;
+                if (reservationTime < _respawnDelay) return false;
+            }
+            return true;
+        }
+
+        public int CalcFreeReservation(PrototypeId markerRef, SpawnFlags flag = SpawnFlags.IgnoreBlackout)
+        {
+            int count = 0;
+            if (_regionLookup.TryGetValue(markerRef, out var list) && list != null)
+                foreach (var testReservation in list)
+                    if (TestReservation(testReservation, flag)) count++;
+            return count;
+        }
+
+        public int CalcMarkerReservations(PrototypeId markerRef, PrototypeId spawnAreaRef, SpawnFlags flag = SpawnFlags.IgnoreBlackout)
         {
             int count = 0;
             if (_areaLookup.TryGetValue(spawnAreaRef, out var spawnMap) && spawnMap != null)
                 if (spawnMap.TryGetValue(markerRef, out var list) == false && list != null)
                     foreach (var testReservation in list)
-                        if (testReservation.State == MarkerState.Free) count++;
+                        if (TestReservation(testReservation, flag, false, false)) count++;
             return count;
+        }
+
+        public void AddBlackOutZone(BlackOutZone zone)
+        {
+            foreach (var reservation in _reservationOctree.IterateElementsInVolume(zone.Sphere))
+                reservation.BlackOutZones++;
+        }
+
+        public void RemoveBlackOutZone(BlackOutZone zone)
+        {
+            foreach (var reservation in _reservationOctree.IterateElementsInVolume(zone.Sphere))
+                reservation.BlackOutZones--;
         }
     }
 }

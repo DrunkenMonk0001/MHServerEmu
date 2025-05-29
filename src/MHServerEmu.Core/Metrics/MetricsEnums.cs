@@ -8,8 +8,9 @@
 
     public enum GamePerformanceMetricEnum
     {
-        Invalid,
+        Invalid = -1,
         FrameTime,
+        FrameProcessServiceMessagesTime,
         FrameTriggerEventsTime,
         FrameLocomoteEntitiesTime,
         FramePhysicsResolveEntitiesTime,
@@ -19,6 +20,9 @@
         TimeSkip,
         ScheduledEventsPerUpdate,
         EventSchedulerFramesPerUpdate,
-        RemainingScheduledEvents
+        RemainingScheduledEvents,
+        EntityCount,
+        PlayerCount,
+        NumGameMetrics
     }
 }

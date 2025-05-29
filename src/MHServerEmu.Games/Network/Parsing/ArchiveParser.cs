@@ -9,9 +9,13 @@ using MHServerEmu.Games.GameData.Prototypes;
 using MHServerEmu.Games.Missions;
 using MHServerEmu.Games.Navi;
 using MHServerEmu.Games.Powers;
+using MHServerEmu.Games.Powers.Conditions;
 using MHServerEmu.Games.Properties;
 using MHServerEmu.Games.Regions.ObjectiveGraphs;
 
+// This was previously used for our packet parsing functionality, which we no longer need. I am leaving this here just for reference.
+
+#if false
 namespace MHServerEmu.Games.Network.Parsing
 {
     public static class ArchiveParser
@@ -512,14 +516,14 @@ namespace MHServerEmu.Games.Network.Parsing
             Serializer.Transfer(archive, ref conditionId);
             sb.AppendLine($"conditionId: {conditionId}");
 
-            if (fieldFlags.HasFlag(ConditionSerializationFlags.NoCreatorId) == false)
+            if (fieldFlags.HasFlag(ConditionSerializationFlags.CreatorIsOwner) == false)
             {
                 ulong creatorId = 0;
                 Serializer.Transfer(archive, ref creatorId);
                 sb.AppendLine($"creatorId: {creatorId}");
             }
 
-            if (fieldFlags.HasFlag(ConditionSerializationFlags.NoUltimateCreatorId) == false)
+            if (fieldFlags.HasFlag(ConditionSerializationFlags.CreatorIsUltimateCreator) == false)
             {
                 ulong ultimateCreatorId = 0;
                 Serializer.Transfer(archive, ref ultimateCreatorId);
@@ -547,7 +551,7 @@ namespace MHServerEmu.Games.Network.Parsing
                 sb.AppendLine($"creatorPowerIndex: {creatorPowerIndex}");
             }
 
-            if (fieldFlags.HasFlag(ConditionSerializationFlags.OwnerAssetRefOverride))
+            if (fieldFlags.HasFlag(ConditionSerializationFlags.HasOwnerAssetRefOverride))
             {
                 ulong ownerAssetRef = 0;
                 Serializer.Transfer(archive, ref ownerAssetRef);
@@ -572,7 +576,7 @@ namespace MHServerEmu.Games.Network.Parsing
                 sb.AppendLine($"duration: {duration}");
             }
 
-            if (fieldFlags.HasFlag(ConditionSerializationFlags.UpdateIntervalOverride))
+            if (fieldFlags.HasFlag(ConditionSerializationFlags.HasUpdateIntervalOverride))
             {
                 int updateIntervalMS = 0;
                 Serializer.Transfer(archive, ref updateIntervalMS);
@@ -582,7 +586,7 @@ namespace MHServerEmu.Games.Network.Parsing
             sb.Append("properties: ");
             ParseReplicatedPropertyCollection(archive, sb);
 
-            if (fieldFlags.HasFlag(ConditionSerializationFlags.CancelOnFlagsOverride))
+            if (fieldFlags.HasFlag(ConditionSerializationFlags.HasCancelOnFlagsOverride))
             {
                 uint cancelOnFlags = 0;
                 Serializer.Transfer(archive, ref cancelOnFlags);
@@ -878,3 +882,4 @@ namespace MHServerEmu.Games.Network.Parsing
         }
     }
 }
+#endif

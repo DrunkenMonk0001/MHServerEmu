@@ -10,11 +10,12 @@ using MHServerEmu.Core.VectorMath;
 using MHServerEmu.Games.Entities;
 using MHServerEmu.Games.Entities.Avatars;
 using MHServerEmu.Games.Entities.Inventories;
-using MHServerEmu.Games.Entities.Items;
 using MHServerEmu.Games.GameData;
 using MHServerEmu.Games.GameData.Prototypes;
+using MHServerEmu.Games.MetaGames;
 using MHServerEmu.Games.Properties;
 using MHServerEmu.Games.Regions;
+using MHServerEmu.Games.Social.Communities;
 
 namespace MHServerEmu.Games.Network
 {
@@ -128,9 +129,21 @@ namespace MHServerEmu.Games.Network
 
                 switch (update.Operation)
                 {
-                    case InterestTrackOperation.Remove: RemoveEntity(update.Entity); break;
-                    case InterestTrackOperation.Modify: ModifyEntity(update.Entity, update.InterestPolicies); break;
-                    default: Logger.Warn($"Update(): Invalid pre-environment update: {update}"); break;
+                    case InterestTrackOperation.Remove:
+                        // NOTE: Some entities that were enqueued during proximity scan could have
+                        // already been removed along with their owner, so we need to validate this
+                        // removal here.
+                        if (InterestedInEntity(update.Entity.Id))
+                            RemoveEntity(update.Entity);
+                        break;
+
+                    case InterestTrackOperation.Modify:
+                        ModifyEntity(update.Entity, update.InterestPolicies);
+                        break;
+                    
+                    default:
+                        Logger.Warn($"Update(): Invalid pre-environment update: {update}");
+                        break;
                 }
             }
 
@@ -252,9 +265,11 @@ namespace MHServerEmu.Games.Network
             // Clear entities if requested
             if (clearingAllInterest)
             {
+                EntityManager entityManager = _playerConnection.Game.EntityManager;
+
                 foreach (var kvp in _trackedEntities)
                 {
-                    Entity entity = _playerConnection.Game.EntityManager.GetEntity<Entity>(kvp.Key);
+                    Entity entity = entityManager.GetEntity<Entity>(kvp.Key);
                     if (entity != null)
                         SetEntityInterestPolicies(entity, InterestTrackOperation.Remove);
                 }
@@ -300,6 +315,8 @@ namespace MHServerEmu.Games.Network
             // Teleport the player into our destination region if we have one
             if (newRegion != null)
             {
+                newRegion.PlayerRegionChangeEvent.Invoke(new(player));
+
                 if (startPosition == null)
                     return Logger.WarnReturn(false, "SetRegion(): No valid start position is provided");
 
@@ -397,12 +414,13 @@ namespace MHServerEmu.Games.Network
 
         public string DebugPrint()
         {
+            EntityManager entityManager = _game.EntityManager;
             StringBuilder sb = new();
 
             sb.AppendLine($"------ AOI SERVER DEBUG REPORT [{_trackedEntities.Count,3}] ------");
 
             foreach (var kvp in _trackedEntities)
-                sb.AppendLine($"{_game.EntityManager.GetEntity<Entity>(kvp.Key)}, interestPolicies={kvp.Value.InterestPolicies}");
+                sb.AppendLine($"{entityManager.GetEntity<Entity>(kvp.Key)}, interestPolicies={kvp.Value.InterestPolicies}");
 
             return sb.ToString();
         }
@@ -432,7 +450,7 @@ namespace MHServerEmu.Games.Network
 
             RegionManager manager = _game.RegionManager;
             Stack<Cell> invisibleCells = new();
-            bool environmentUpdate = false;
+            bool regenNavi = false;
 
             // search invisible cells
             foreach (var cellStatus in _trackedCells)
@@ -448,8 +466,7 @@ namespace MHServerEmu.Games.Network
             {
                 Cell cell = invisibleCells.Pop();
                 RemoveCell(cell);
-                // EnvironmentUpdate
-                environmentUpdate |= cell.Area.IsDynamicArea == false;
+                regenNavi |= cell.HasNavigationData;
             }
 
             // Add new cells
@@ -461,12 +478,49 @@ namespace MHServerEmu.Games.Network
                 if (cell.RegionBounds.Intersects(_visibleVolume))
                 {
                     AddCell(cell);
-                    // EnvironmentUpdate
-                    environmentUpdate |= cell.Area.IsDynamicArea == false;
+                    regenNavi |= cell.HasNavigationData;
                 }
             }
 
-            return environmentUpdate;
+            return regenNavi;
+        }
+
+        public bool RemoveCells(HashSet<Area> areas, HashSet<Cell> cells)
+        {
+            bool regenNavi = false;
+
+            foreach (var cell in cells)
+            {
+                RemoveCell(cell);
+                regenNavi |= cell.HasNavigationData;
+            }
+
+            foreach (var area in areas)
+                RemoveArea(area);
+
+            return regenNavi;
+        }
+
+        public void AddCellsFromVolume(Aabb volume, HashSet<Area> areas, HashSet<Cell> cells, ref bool regenNavi)
+        {
+            foreach (var cell in Region.IterateCellsInVolume(volume))
+            {
+                uint cellId = cell.Id;
+                if (_trackedCells.ContainsKey(cellId)) continue;
+
+                Area area = cell.Area;
+                uint areaId = area.Id;
+                if (_trackedAreas.ContainsKey(areaId) == false)
+                {
+                    AddArea(area, false);
+                    areas.Add(area);
+                }
+
+                AddCell(cell);
+                cells.Add(cell);
+
+                regenNavi |= cell.HasNavigationData;
+            }
         }
 
         private void ScanEntities()
@@ -499,6 +553,8 @@ namespace MHServerEmu.Games.Network
             }
 
             // Update existing entities
+            EntityManager entityManager = _game.EntityManager;
+
             foreach (var kvp in _trackedEntities)
             {
                 ulong entityId = kvp.Key;
@@ -508,7 +564,7 @@ namespace MHServerEmu.Games.Network
                 if (interestStatus.LastUpdateFrame >= _currentFrame) continue;
                 interestStatus.LastUpdateFrame = _currentFrame;
 
-                Entity entity = _game.EntityManager.GetEntity<Entity>(entityId);
+                Entity entity = entityManager.GetEntity<Entity>(entityId);
                 if (entity == null)
                 {
                     Logger.Warn("UpdateEntities(): entity == null");
@@ -599,7 +655,7 @@ namespace MHServerEmu.Games.Network
             }
         }
 
-        private void RegenerateClientNavi()
+        public void RegenerateClientNavi()
         {
             SendMessage(NetMessageEnvironmentUpdate.CreateBuilder().SetFlags(1).Build());
         }
@@ -697,6 +753,13 @@ namespace MHServerEmu.Games.Network
 
             entity.OnPostAOIAddOrRemove(_playerConnection.Player, InterestTrackOperation.Modify, newInterestPolicies, previousInterestPolicies);
 
+            // Update nearby players in the community panel
+            if (addedInterestPolicies.HasFlag(AOINetworkPolicyValues.AOIChannelProximity) ||
+                removedInterestPolicies.HasFlag(AOINetworkPolicyValues.AOIChannelProximity))
+            {
+                UpdateNearbyCommunity(entity, newInterestPolicies.HasFlag(AOINetworkPolicyValues.AOIChannelProximity));
+            }
+
             // Notify client of the added policies (entityDataId unused)
             SendMessage(NetMessageInterestPolicies.CreateBuilder()
                 .SetIdEntity(entity.Id)
@@ -715,6 +778,8 @@ namespace MHServerEmu.Games.Network
         /// </summary>
         private void ConsiderContainedEntities(Entity owner, InterestTrackOperation operation)
         {
+            EntityManager entityManager = _game.EntityManager;
+
             foreach (Inventory inventory in new InventoryIterator(owner))
             {
                 AOINetworkPolicyValues inventoryInterestPolicies = GetInventoryInterestPolicies(inventory);
@@ -725,7 +790,7 @@ namespace MHServerEmu.Games.Network
 
                 foreach (var inventoryEntry in inventory)
                 {
-                    Entity containedEntity = _game.EntityManager.GetEntity<Entity>(inventoryEntry.Id);
+                    Entity containedEntity = entityManager.GetEntity<Entity>(inventoryEntry.Id);
                     if (containedEntity == null)
                     {
                         Logger.Warn("UpdateEntityInventories(): containedEntity == null");
@@ -808,6 +873,11 @@ namespace MHServerEmu.Games.Network
             Player player = _playerConnection.Player;
             entity.OnChangePlayerAOI(player, operation, newInterestPolicies, previousInterestPolicies, archiveInterestPolicies);
             entity.OnPostAOIAddOrRemove(player, operation, newInterestPolicies, previousInterestPolicies);
+
+            // Update nearby players in the community panel
+            bool isNearby = operation == InterestTrackOperation.Add && newInterestPolicies.HasFlag(AOINetworkPolicyValues.AOIChannelProximity);
+            UpdateNearbyCommunity(entity, isNearby);
+
             return true;
         }
 
@@ -846,16 +916,15 @@ namespace MHServerEmu.Games.Network
             if (restrictedToPlayerGuid != 0 && restrictedToPlayerGuid != player.DatabaseUniqueId)
                 return AOINetworkPolicyValues.AOIChannelNone;
 
-            //      Add more filters here
+            // Add more filters here
+            WorldEntity worldEntity = entity as WorldEntity;
+            if (worldEntity != null && GameDatabase.InteractionManager.GetVisibilityStatus(player, worldEntity) == false)
+                return AOINetworkPolicyValues.AOIChannelNone;
 
             AOINetworkPolicyValues newInterestPolicies = AOINetworkPolicyValues.AOIChannelNone;
 
-            if (entity is WorldEntity worldEntity)
+            if (worldEntity != null)
             {
-                // Do not add dead non-destructible entities to AOI that weren't there already
-                if (worldEntity.IsDead && worldEntity.IsDestructible == false && currentInterestPolicies == AOINetworkPolicyValues.AOIChannelNone)
-                    return AOINetworkPolicyValues.AOIChannelNone;
-
                 // Make sure this world entity is in the same region as our interest
                 bool isInRegion = worldEntity.IsInWorld && worldEntity.TestStatus(EntityStatus.ExitingWorld) == false && worldEntity.Region == Region;
 
@@ -875,9 +944,14 @@ namespace MHServerEmu.Games.Network
                     newInterestPolicies |= AOINetworkPolicyValues.AOIChannelDiscovery;
             }
 
+            // MetaGame is always in proximity
+            if (entity is MetaGame metaGame && metaGame.GetRegion() == Region)
+                newInterestPolicies |= AOINetworkPolicyValues.AOIChannelProximity;
+
             // Ownership
-            // NOTE: IsOwnedBy() returns true for itself, so the player entity bound to this AOI effectively owns itself
-            if (entity.IsOwnedBy(player.Id))
+            // NOTE: IsOwnedBy() returns true for itself, so the player entity bound to this AOI effectively owns itself without being in an inventory.
+            // Non-player entities need to be in an inventory that has been revealed to the player, or the UI will break when the client requests interest (e.g. vendors).
+            if (entity.IsOwnedBy(player.Id) && (inventory == null || inventoryInterestPolicies.HasFlag(AOINetworkPolicyValues.AOIChannelOwner)))
                 newInterestPolicies |= AOINetworkPolicyValues.AOIChannelOwner;
 
             // TODO: Party, Trade
@@ -889,6 +963,9 @@ namespace MHServerEmu.Games.Network
             return newInterestPolicies;
         }
 
+        /// <summary>
+        /// Returns <see cref="AOINetworkPolicyValues"/> for the provided <see cref="Inventory"/>.
+        /// </summary>
         private AOINetworkPolicyValues GetInventoryInterestPolicies(Inventory inventory)
         {
             // Inventory is going to be null in recursive checks when we reach the top of the hierarchy
@@ -929,6 +1006,38 @@ namespace MHServerEmu.Games.Network
             }
 
             return interestPolicies;
+        }
+
+        /// <summary>
+        /// Adds or removes the <see cref="Player"/> who owns the provided <see cref="Entity"/>
+        /// to this <see cref="AreaOfInterest"/>'s owner's <see cref="Community"/>.
+        /// </summary>
+        private bool UpdateNearbyCommunity(Entity entity, bool isNearby)
+        {
+            if (entity is not Avatar avatar)
+                return true;
+
+            Community community = _playerConnection.Player?.Community;
+            if (community == null) return Logger.WarnReturn(false, "UpdateNearbyCommunity(): community == null");
+
+            Player entityOwner = entity.GetOwnerOfType<Player>();
+            if (entityOwner == null)
+                return true;
+
+            if (isNearby)
+            {
+                community.AddMember(entityOwner.DatabaseUniqueId, entityOwner.GetName(), CircleId.__Nearby);
+            }
+            else
+            {
+                bool interestedInCurrentAvatar = entityOwner.CurrentAvatar != null &&
+                    InterestedInEntity(entityOwner.CurrentAvatar.Id, AOINetworkPolicyValues.AOIChannelProximity);
+
+                if (interestedInCurrentAvatar == false)
+                    community.RemoveMember(entityOwner.DatabaseUniqueId, CircleId.__Nearby);
+            }
+
+            return true;
         }
 
         private void CalcVolumes(Vector3 playerPosition)

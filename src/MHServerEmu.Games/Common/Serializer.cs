@@ -1,6 +1,7 @@
-﻿using MHServerEmu.Core.Serialization;
+﻿using MHServerEmu.Core.Collections;
 using MHServerEmu.Core.Extensions;
 using MHServerEmu.Core.Logging;
+using MHServerEmu.Core.Serialization;
 using MHServerEmu.Core.VectorMath;
 using MHServerEmu.Games.Entities;
 using MHServerEmu.Games.GameData;
@@ -29,6 +30,7 @@ namespace MHServerEmu.Games.Common
         public static bool Transfer(Archive archive, ref ulong ioData) => archive.Transfer(ref ioData);
         public static bool Transfer(Archive archive, ref float ioData) => archive.Transfer(ref ioData);
         public static bool Transfer<T>(Archive archive, ref T ioData) where T: ISerialize => archive.Transfer(ref ioData);
+        public static bool Transfer<T>(Archive archive, T ioData) where T: class, ISerialize => archive.Transfer(ref ioData);   // It doesn't matter if ref types are passed by ref or not
         public static bool Transfer(Archive archive, ref Vector3 ioData) => archive.Transfer(ref ioData);
         public static bool TransferFloatFixed(Archive archive, ref float ioData, int precision) => archive.TransferFloatFixed(ref ioData, precision);
         public static bool TransferVectorFixed(Archive archive, ref Vector3 ioData, int precision) => archive.TransferVectorFixed(ref ioData, precision);
@@ -789,7 +791,7 @@ namespace MHServerEmu.Games.Common
 
 
         // Class-specific
-        public static bool Transfer(Archive archive, ref SortedSet<AvailableBadges> ioData)
+        public static bool Transfer(Archive archive, ref SortedVector<AvailableBadges> ioData)
         {
             bool success = true;
 

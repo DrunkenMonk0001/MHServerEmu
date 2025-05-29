@@ -5,8 +5,10 @@ using MHServerEmu.Core.System.Random;
 using MHServerEmu.Games.Entities;
 using MHServerEmu.Games.Entities.Items;
 using MHServerEmu.Games.GameData;
+using MHServerEmu.Games.GameData.Calligraphy;
 using MHServerEmu.Games.GameData.Prototypes;
 using MHServerEmu.Games.Loot.Specs;
+using MHServerEmu.Games.Missions;
 using MHServerEmu.Games.Properties;
 using MHServerEmu.Games.Regions;
 
@@ -15,11 +17,9 @@ namespace MHServerEmu.Games.Loot
     /// <summary>
     /// A general-purpose implementation of <see cref="IItemResolver"/>.
     /// </summary>
-    public class ItemResolver : IItemResolver
+    public class ItemResolver : IItemResolver, IPoolable, IDisposable
     {
         private static readonly Logger Logger = LogManager.CreateLogger();
-
-        private readonly Picker<AvatarPrototype> _avatarPicker;
 
         private readonly int _itemLevelMin;
         private readonly int _itemLevelMax;
@@ -29,15 +29,42 @@ namespace MHServerEmu.Games.Loot
 
         private readonly ItemResolverContext _context = new();
 
-        public GRandom Random { get; }
+        private Picker<int> _levelOffsetPicker;
+        private Picker<AvatarPrototype> _avatarPicker;
 
-        public LootContext LootContext { get => _context.LootContext; }
+        public GRandom Random { get; private set; }
+        public LootResolverFlags Flags { get; private set; }
+
+        // CUSTOM: See LootTablePrototype.PickLiveTuningNodes() for why we need this
+        public LootContext LootContext { get => LootContextOverride != LootContext.None ? LootContextOverride : _context.LootContext; }
+        public LootContext LootContextOverride { get; set; }
         public Player Player { get => _context.Player; }
         public Region Region { get => _context.Region; }
 
-        public ItemResolver(GRandom random)
+        public bool IsInPool { get; set; }
+
+        public ItemResolver()
+        {
+            // Cache item level limits from the ItemLevel property prototype
+            // For reference, this is 1-75 in 1.52, but it was 1-100 in 1.10
+            PropertyInfoPrototype propertyInfoProto = GameDatabase.PropertyInfoTable.LookupPropertyInfo(PropertyEnum.ItemLevel).Prototype;
+            _itemLevelMin = (int)propertyInfoProto.Min;
+            _itemLevelMax = (int)propertyInfoProto.Max;
+        }
+
+        public void Initialize(GRandom random)
         {
             Random = random;
+
+            // NOTE: We have to rebuild pickers on each initialization because they use the same GRandom as the resolver.
+            // TODO: Move this to the constructor when we implement poolable pickers with reassignable GRandom instances.
+
+            // Cache mob level to item level offset picker
+            // NOTE: In version 1.52 the only possible offset is 3, but it's more varied in older versions of the game (e.g. 1.10).
+            _levelOffsetPicker = new(random);
+            Curve curve = GameDatabase.LootGlobalsPrototype.LootLevelDistribution.AsCurve();
+            for (int i = curve.MinPosition; i <= curve.MaxPosition; i++)
+                _levelOffsetPicker.Add(i, curve.GetIntAt(i));
 
             // Cache avatar picker for smart loot
             _avatarPicker = new(random);
@@ -50,12 +77,21 @@ namespace MHServerEmu.Games.Loot
                 AvatarPrototype avatarProto = avatarProtoRef.As<AvatarPrototype>();
                 _avatarPicker.Add(avatarProto);
             }
+        }
 
-            // Cache item level limits from the ItemLevel property prototype
-            // For reference, this is 1-75 in 1.52, but it was 1-100 in 1.10
-            PropertyInfoPrototype propertyInfoProto = GameDatabase.PropertyInfoTable.LookupPropertyInfo(PropertyEnum.ItemLevel).Prototype;
-            _itemLevelMin = (int)propertyInfoProto.Min;
-            _itemLevelMax = (int)propertyInfoProto.Max;
+        public void ResetForPool()
+        {
+            _avatarPicker = default;
+
+            Random = default;
+            Flags = default;
+
+            LootContextOverride = default;
+        }
+
+        public void Dispose()
+        {
+            ObjectPoolManager.Instance.Return(this);
         }
 
         /// <summary>
@@ -69,6 +105,22 @@ namespace MHServerEmu.Games.Loot
             _context.Set(lootContext, player, sourceEntity);
         }
 
+        public void SetContext(Mission mission, Player player)
+        {
+            _pendingItemList.Clear();
+            _processedItemList.Clear();
+
+            _context.Set(mission, player);
+        }
+
+        public void SetFlags(LootResolverFlags flags, bool value)
+        {
+            if (value)
+                Flags |= flags;
+            else
+                Flags &= ~flags;
+        }
+
         #region Push Functions
 
         // These functions are used to "push" intermediary data from rolling loot tables.
@@ -76,11 +128,13 @@ namespace MHServerEmu.Games.Loot
 
         public LootRollResult PushItem(DropFilterArguments filterArgs, RestrictionTestFlags restrictionFlags, int stackCount, IEnumerable<LootMutationPrototype> mutations)
         {
-            if (CheckItem(filterArgs, restrictionFlags, false) == false)
+            if (CheckItem(filterArgs, restrictionFlags, false, stackCount) == false)
                 return LootRollResult.Failure;
 
             ItemSpec itemSpec = new(filterArgs.ItemProto.DataRef, filterArgs.Rarity, filterArgs.Level,
                 0, Array.Empty<AffixSpec>(), Random.Next(), PrototypeId.Invalid);
+
+            itemSpec.StackCount = stackCount;
 
             LootResult lootResult = new(itemSpec);
             PendingItem pendingItem = new(lootResult, filterArgs.RollFor);
@@ -210,7 +264,7 @@ namespace MHServerEmu.Games.Loot
             }
             else if (worldEntityProto is ItemPrototype)
             {
-                if (CheckItem(filterArgs, restrictionFlags, false) == false)
+                if (CheckItem(filterArgs, restrictionFlags, false, stackCount) == false)
                     return LootRollResult.Failure;
             }
             else
@@ -237,8 +291,9 @@ namespace MHServerEmu.Games.Loot
 
         public int ResolveLevel(int level, bool useLevelVerbatim)
         {
-            // NOTE: In version 1.52 MobLevelToItemLevel.curve is empty, so we can always treat this as if useLevelVerbatim is set.
-            // If we were to support older versions (most likely predating level scaling) we would have to properly implement this.
+            // NOTE: In 1.52 this offsets by +3 if not using level verbatim
+            if (useLevelVerbatim == false && _levelOffsetPicker.Pick(out int offset))
+                level += offset;
 
             // Clamp to the range defined in the property info because some modifiers apply a bigger offset (e.g. Doom artifacts with +99 to level)
             level = Math.Clamp(level, _itemLevelMin, _itemLevelMax);
@@ -265,13 +320,13 @@ namespace MHServerEmu.Games.Loot
             using DropFilterArguments filterArgs = ObjectPoolManager.Instance.Get<DropFilterArguments>();
             DropFilterArguments.Initialize(filterArgs, LootContext);
 
-            List<RarityEntry> rarityEntryList = ListPool<RarityEntry>.Instance.Rent();
+            List<RarityEntry> rarityEntryList = ListPool<RarityEntry>.Instance.Get();
             float weightSum = 0f;
 
             foreach (PrototypeId rarityProtoRef in DataDirectory.Instance.IteratePrototypesInHierarchy<RarityPrototype>(PrototypeIterateFlags.NoAbstractApprovedOnly))
             {
                 // Skip rarities that don't match the provided filter
-                if (rarityFilter.Count > 0 && rarityFilter.Contains(rarityProtoRef) == false)
+                if (rarityFilter != null && rarityFilter.Count > 0 && rarityFilter.Contains(rarityProtoRef) == false)
                     continue;
 
                 // Skip rarities that don't match the provided item prototype
@@ -383,41 +438,64 @@ namespace MHServerEmu.Games.Loot
         {
             foreach (PendingItem pendingItem in _pendingItemList)
             {
-                // Non-item loot does not need additional processing
-                if (pendingItem.LootResult.Type != LootType.Item)
+                // Check vaporization
+                LootContext context = LootContext;
+                bool isVaporized = false;
+
+                if (settings.DropChanceModifiers.HasFlag(LootDropChanceModifiers.PreviewOnly) == false &&
+                    (context == LootContext.Drop || context == LootContext.MissionReward))
                 {
-                    _processedItemList.Add(pendingItem.LootResult);
-                    continue;
+                    isVaporized = LootVaporizer.ShouldVaporizeLootResult(settings.Player, pendingItem.LootResult, pendingItem.RollFor);
                 }
 
-                // Items need to have their affixes rolled
-                ItemSpec itemSpec = pendingItem.LootResult.ItemSpec;
+                switch (pendingItem.LootResult.Type)
+                {
+                    case LootType.Item:
+                        {
+                            // Roll affixes for new items that didn't get vaporized
+                            ItemSpec itemSpec = pendingItem.LootResult.ItemSpec;
 
-                using LootCloneRecord affixArgs = ObjectPoolManager.Instance.Get<LootCloneRecord>();
-                LootCloneRecord.Initialize(affixArgs, LootContext, itemSpec, pendingItem.RollFor);
+                            if (pendingItem.IsClone == false && isVaporized == false)
+                            {
+                                using LootCloneRecord affixArgs = ObjectPoolManager.Instance.Get<LootCloneRecord>();
+                                LootCloneRecord.Initialize(affixArgs, context, itemSpec, pendingItem.RollFor);
 
-                MutationResults result = LootUtilities.UpdateAffixes(this, affixArgs, AffixCountBehavior.Roll, itemSpec, settings);
+                                MutationResults result = LootUtilities.UpdateAffixes(this, affixArgs, AffixCountBehavior.Roll, itemSpec, settings);
 
-                if (result.HasFlag(MutationResults.Error))
-                    Logger.Warn($"ProcessPending(): Error when rolling affixes, result={result}");
+                                if (result.HasFlag(MutationResults.Error))
+                                    Logger.Warn($"ProcessPending(): Error when rolling affixes, result={result}");
+                            }
 
-                // Modify the item spec using output "restrictions" (OutputLevelPrototype, OutputRarityPrototype)
-                ItemPrototype itemProto = itemSpec.ItemProtoRef.As<ItemPrototype>();
-                RestrictionTestFlags flagsToAdjust = RestrictionTestFlags.Level | RestrictionTestFlags.Rarity | RestrictionTestFlags.Output;
+                            // Modify the item spec using output "restrictions" (OutputLevelPrototype, OutputRarityPrototype)
+                            ItemPrototype itemProto = itemSpec.ItemProtoRef.As<ItemPrototype>();
+                            RestrictionTestFlags flagsToAdjust = RestrictionTestFlags.Level | RestrictionTestFlags.Rarity | RestrictionTestFlags.Output;
 
-                using DropFilterArguments restrictionArgs = ObjectPoolManager.Instance.Get<DropFilterArguments>();
-                DropFilterArguments.Initialize(restrictionArgs, itemProto, itemSpec.EquippableBy, itemSpec.ItemLevel, itemSpec.RarityProtoRef, 0, EquipmentInvUISlot.Invalid, LootContext);
-                
-                itemProto.MakeRestrictionsDroppable(restrictionArgs, flagsToAdjust, out RestrictionTestFlags adjustResultFlags);
+                            using DropFilterArguments restrictionArgs = ObjectPoolManager.Instance.Get<DropFilterArguments>();
+                            DropFilterArguments.Initialize(restrictionArgs, itemProto, itemSpec.EquippableBy, itemSpec.ItemLevel, itemSpec.RarityProtoRef, 0, EquipmentInvUISlot.Invalid, context);
 
-                if (adjustResultFlags.HasFlag(RestrictionTestFlags.OutputLevel))
-                    itemSpec.ItemLevel = restrictionArgs.Level;
+                            itemProto.MakeRestrictionsDroppable(restrictionArgs, flagsToAdjust, out RestrictionTestFlags adjustResultFlags);
 
-                if (adjustResultFlags.HasFlag(RestrictionTestFlags.OutputRarity))
-                    itemSpec.RarityProtoRef = restrictionArgs.Rarity;
+                            if (adjustResultFlags.HasFlag(RestrictionTestFlags.OutputLevel))
+                                itemSpec.ItemLevel = restrictionArgs.Level;
 
-                // Push the final processed item
-                _processedItemList.Add(new(itemSpec));
+                            if (adjustResultFlags.HasFlag(RestrictionTestFlags.OutputRarity))
+                                itemSpec.RarityProtoRef = restrictionArgs.Rarity;
+
+                            // Push the final processed item
+                            _processedItemList.Add(new(itemSpec, isVaporized));
+                        }
+
+                        break;
+
+                    case LootType.Credits:
+                        _processedItemList.Add(new(LootType.Credits, pendingItem.LootResult.Amount, isVaporized));
+                        break;
+
+                    default:
+                        // Non-item loot does not need additional processing
+                        _processedItemList.Add(pendingItem.LootResult);
+                        break;
+                }
             }
 
             _pendingItemList.Clear();
@@ -434,19 +512,22 @@ namespace MHServerEmu.Games.Loot
 
         private readonly struct PendingItem
         {
-            public LootResult LootResult { get; }
-            public PrototypeId RollFor { get; }
+            public readonly LootResult LootResult;
+            public readonly PrototypeId RollFor;
+            public readonly bool IsClone;
 
             public PendingItem(in LootResult lootResult)
             {
                 LootResult = lootResult;
                 RollFor = PrototypeId.Invalid;
+                IsClone = false;
             }
 
-            public PendingItem(in LootResult lootResult, PrototypeId rollFor)
+            public PendingItem(in LootResult lootResult, PrototypeId rollFor, bool isClone = false)
             {
                 LootResult = lootResult;
                 RollFor = rollFor;
+                IsClone = isClone;
             }
         }
     }

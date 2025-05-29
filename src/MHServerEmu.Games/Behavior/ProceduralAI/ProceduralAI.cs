@@ -1,11 +1,11 @@
 ﻿using MHServerEmu.Core.Logging;
-using MHServerEmu.DatabaseAccess.Models;
 using MHServerEmu.Games.Behavior.StaticAI;
 using MHServerEmu.Games.Entities;
 using MHServerEmu.Games.Entities.Avatars;
 using MHServerEmu.Games.GameData;
 using MHServerEmu.Games.GameData.Prototypes;
 using MHServerEmu.Games.Properties;
+using MHServerEmu.Games.Regions;
 
 namespace MHServerEmu.Games.Behavior.ProceduralAI
 {
@@ -69,7 +69,7 @@ namespace MHServerEmu.Games.Behavior.ProceduralAI
                 ulong masterAvatarDbGuid = agent.Properties[PropertyEnum.AIMasterAvatarDbGuid];
                 if (masterAvatarDbGuid != 0)
                 {
-                    var avatar = _game.EntityManager.GetEntityByDbGuid<Player>(masterAvatarDbGuid); // TODO AvatarDB
+                    var avatar = _game.EntityManager.GetEntityByDbGuid<Avatar>(masterAvatarDbGuid);
                     if (avatar != null)
                         _owningController.Blackboard.PropertyCollection[PropertyEnum.AIAssistedEntityID] = avatar.Id;
                 }
@@ -310,6 +310,11 @@ namespace MHServerEmu.Games.Behavior.ProceduralAI
             _proceduralPtr.Profile?.OnEntityDeadEvent(_owningController, deadEvent);
         }
 
+        public void OnOwnerGotDamaged()
+        {
+            _proceduralPtr.Profile?.OnOwnerGotDamaged(_owningController);
+        }
+
         public void OnAIBroadcastBlackboardEvent(in AIBroadcastBlackboardGameEvent broadcastEvent)
         {
             _proceduralPtr.Profile?.OnAIBroadcastBlackboardEvent(_owningController, broadcastEvent);
@@ -335,10 +340,25 @@ namespace MHServerEmu.Games.Behavior.ProceduralAI
             _proceduralPtr.Profile?.OnSetSimulated(_owningController, simulated);
         }
 
+        public void OnOwnerCollide(WorldEntity whom)
+        {
+            _proceduralPtr.Profile?.OnOwnerCollide(_owningController, whom);
+        }
+
         public void OnPropertyChange(PropertyId id, PropertyValue newValue, PropertyValue oldValue, SetPropertyFlags flags)
         {
             switch (id.Enum)
             {
+                case PropertyEnum.AllianceOverride:
+                case PropertyEnum.Confused:
+                    _owningController.ResetCurrentTargetState();
+                    break;
+
+                case PropertyEnum.TauntersID:
+                    if (oldValue == 0ul)
+                        _owningController.ResetCurrentTargetState();
+                    break;
+
                 case PropertyEnum.AIFullOverride:
                 case PropertyEnum.AIPartialOverride:
 
@@ -353,6 +373,15 @@ namespace MHServerEmu.Games.Behavior.ProceduralAI
                     else
                         ClearOverrideBehavior(overrideType);
 
+                    break;
+                case PropertyEnum.AIMasterAvatarDbGuid:
+                    ulong masterAvatarDbGuid = newValue;
+                    if (masterAvatarDbGuid != 0)
+                    {
+                        var avatar = _game.EntityManager.GetEntityByDbGuid<Avatar>(masterAvatarDbGuid);
+                        if (avatar != null)
+                            _owningController.Blackboard.PropertyCollection[PropertyEnum.AIAssistedEntityID] = avatar.Id;
+                    }
                     break;
             }
         }

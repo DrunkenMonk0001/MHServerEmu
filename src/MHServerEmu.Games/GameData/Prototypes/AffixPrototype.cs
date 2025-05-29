@@ -1,4 +1,5 @@
-﻿using MHServerEmu.Core.Extensions;
+﻿using MHServerEmu.Core.Collections;
+using MHServerEmu.Core.Extensions;
 using MHServerEmu.Core.Logging;
 using MHServerEmu.Core.Memory;
 using MHServerEmu.Core.System.Random;
@@ -52,31 +53,32 @@ namespace MHServerEmu.Games.GameData.Prototypes
     [AssetEnum]
     public enum OmegaPageType
     {
-        Psionics = 12,
+        NeuralEnhancement = 0,
         CosmicEntities = 1,
         ArcaneAttunement = 2,
         InterstellarExploration = 3,
         SpecialWeapons = 4,
         ExtraDimensionalTravel = 5,
-        MolecularAdjustment = 13,
+        Xenobiology = 6,
         RadioactiveOrigins = 7,
         TemporalManipulation = 8,
         Nanotechnology = 9,
         SupernaturalInvestigation = 10,
         HumanAugmentation = 11,
-        NeuralEnhancement = 0,
-        Xenobiology = 6,
+        Psionics = 12,
+        MolecularAdjustment = 13,
     }
 
     [AssetEnum((int)None)]
     public enum InfinityGem
     {
-        Soul = 3,
-        Time = 5,
-        Space = 4,
         Mind = 0,
-        Reality = 2,
         Power = 1,
+        Reality = 2,
+        Soul = 3,
+        Space = 4,
+        Time = 5,
+        NumGems = 6,
         None = 7,
     }
 
@@ -91,6 +93,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         Player,
         GroupBoss,
         TeamUp,
+        Max
     }
 
     [AssetEnum((int)Default)]
@@ -133,14 +136,16 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public virtual bool HasBonusPropertiesToApply { get => Properties != null || PropertyEntries != null; }
 
         [DoNotCopy]
+        public bool IsPetTechAffix { get => Position >= AffixPosition.PetTech1 && Position <= AffixPosition.PetTech5; }
+
+        [DoNotCopy]
         public bool IsGemAffix { get => Position >= AffixPosition.Socket1 && Position <= AffixPosition.Socket3; }
 
         public override void PostProcess()
         {
             base.PostProcess();
 
-            List<PrototypeId> categoryList = new();
-
+            List<PrototypeId> categoryList = ListPool<PrototypeId>.Instance.Get();
             foreach (var affixCategoryTableEntry in GameDatabase.LootGlobalsPrototype.AffixCategoryTable)
             {
                 foreach (PrototypeId affixProtoRef in affixCategoryTableEntry.Affixes)
@@ -151,6 +156,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
             }
 
             _categoryKeywordsMask = KeywordPrototype.GetBitMaskForKeywordList(categoryList);
+            ListPool<PrototypeId>.Instance.Return(categoryList);
 
             // Skipping UI stuff since we probably don't need it server-side
         }
@@ -160,7 +166,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
             return KeywordPrototype.TestKeywordBit(_categoryKeywordsMask, affixCategoryProto);
         }
 
-        public AffixCategoryPrototype GetFirstCategoryMatch(IEnumerable<AffixCategoryPrototype> affixCategoryProtos)
+        public AffixCategoryPrototype GetFirstCategoryMatch(AffixCategoryPrototype[] affixCategoryProtos)
         {
             foreach (AffixCategoryPrototype affixCategoryProto in affixCategoryProtos)
             {
@@ -171,9 +177,9 @@ namespace MHServerEmu.Games.GameData.Prototypes
             return null;
         }
 
-        public bool HasAnyCategory(IEnumerable<AffixCategoryPrototype> affixCategoryProtos)
+        public bool HasAnyCategory(AffixCategoryPrototype[] affixCategoryProtos)
         {
-            if (affixCategoryProtos == null || affixCategoryProtos.Any() == false)
+            if (affixCategoryProtos.IsNullOrEmpty())
                 return true;
 
             return GetFirstCategoryMatch(affixCategoryProtos) != null;
@@ -193,9 +199,9 @@ namespace MHServerEmu.Games.GameData.Prototypes
             return true;
         }
 
-        public bool HasKeywords(IEnumerable<AssetId> keywordsToCheck, bool hasAll = false)
+        public bool HasKeywords(AssetId[] keywordsToCheck, bool hasAll = false)
         {
-            if (keywordsToCheck == null || keywordsToCheck.Any() == false)
+            if (keywordsToCheck.IsNullOrEmpty())
                 return true;
 
             if (Keywords.IsNullOrEmpty())
@@ -282,9 +288,14 @@ namespace MHServerEmu.Games.GameData.Prototypes
             if (RequiredRegion != PrototypeId.Invalid && region.PrototypeDataRef == RequiredRegion)
                 return true;
 
-            if (RequiredRegionKeywords.HasValue())
+            if (RequiredRegionKeywords.HasValue() && region.HasKeywords())
             {
-                Logger.Warn("MatchesRegion(): Keyword region matching is not yet implemented");
+                // Seems to be deprecated in 1.52, but may be useful for older versions
+                foreach (PrototypeId keywordProtoRef in RequiredRegionKeywords)
+                {
+                    if (region.HasKeyword(keywordProtoRef.As<KeywordPrototype>()))
+                        return true;
+                }
             }
 
             return false;
@@ -360,6 +371,22 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
         private static readonly Logger Logger = LogManager.CreateLogger();
 
+        public int GetRanksMax()
+        {
+            Curve curve = RankCostCurve.AsCurve();
+
+            if (RanksMax > 0 && curve != null)
+                return Math.Min(curve.MaxPosition, RanksMax);
+
+            if (RanksMax > 0)
+                return RanksMax;
+
+            if (curve != null)
+                return curve.MaxPosition;
+
+            return 0;
+        }
+
         public void RunEvalOnCreate(Entity entity, PropertyCollection indexProperties, PropertyCollection modProperties)
         {
             if (EvalOnCreate.HasValue())
@@ -392,7 +419,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
                     evalContext.SetReadOnlyVar_PropertyCollectionPtr(EvalContext.Var1, indexProperties);
 
                     PropertyInfo propertyInfo = GameDatabase.PropertyInfoTable.LookupPropertyInfo(propEntryProto.Prop.Enum);
-                    
+
                     switch (propertyInfo.DataType)
                     {
                         case PropertyDataType.Boolean:
@@ -499,13 +526,18 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public PrototypeId[] Keywords { get; protected set; }
         public int BonusItemFindPoints { get; protected set; }
 
-        //--
+        //---
 
         [DoNotCopy]
         public bool IsRankBoss { get => Rank == Rank.Boss || Rank == Rank.GroupBoss; }
 
         [DoNotCopy]
+        public bool IsRankChampionOrEliteOrMiniBoss { get => Rank == Rank.Champion || Rank == Rank.Elite || Rank == Rank.MiniBoss; }
+
+        [DoNotCopy]
         public bool IsRankBossOrMiniBoss { get => IsRankBoss || Rank == Rank.MiniBoss; }
+
+        private KeywordsMask _keywordsMask;
 
         public static PrototypeId DoOverride(PrototypeId rankRef, PrototypeId rankOverride)
         {
@@ -514,12 +546,23 @@ namespace MHServerEmu.Games.GameData.Prototypes
             return DoOverride(rankProto, rankOverrideProto).DataRef;
         }
 
-        private static RankPrototype DoOverride(RankPrototype rankProto, RankPrototype rankOverrideProto)
+        public static RankPrototype DoOverride(RankPrototype rankProto, RankPrototype rankOverrideProto)
         {
             if (rankProto == null) return rankOverrideProto;
             if (rankOverrideProto == null) return rankProto;
             if (rankProto.Rank < rankOverrideProto.Rank) return rankOverrideProto;
             return rankProto;
+        }
+
+        public override void PostProcess()
+        {
+            base.PostProcess();
+            _keywordsMask = KeywordPrototype.GetBitMaskForKeywordList(Keywords);
+        }
+
+        public bool HasKeyword(KeywordPrototype keywordProto)
+        {
+            return keywordProto != null && KeywordPrototype.TestKeywordBit(_keywordsMask, keywordProto);
         }
     }
 
@@ -548,9 +591,31 @@ namespace MHServerEmu.Games.GameData.Prototypes
         [DoNotCopy]
         public EnemyBoostSetPrototype AffixTablePrototype { get => AffixTable.As<EnemyBoostSetPrototype>(); }
 
-        internal PrototypeId RollAffix(GRandom random, HashSet<PrototypeId> affixes, HashSet<PrototypeId> exclude)
+        public PrototypeId RollAffix(GRandom random, HashSet<PrototypeId> affixes, HashSet<PrototypeId> exclude)
         {
-            throw new NotImplementedException();
+            var affixTableProto = AffixTablePrototype;
+            if (affixTableProto != null && random.NextPct(ChancePct))
+            {
+                Picker<PrototypeId> picker = new(random);
+
+                if (affixes.Count > 0)
+                    foreach (var affixRef in affixes)
+                        if (affixTableProto.Contains(affixRef))
+                            picker.Add(affixRef);
+
+                if (picker.Pick(out PrototypeId pickRef))
+                    return pickRef;
+
+                if (affixTableProto.Modifiers.HasValue())
+                    foreach (var affix in affixTableProto.Modifiers)
+                        if (exclude.Contains(affix) == false)
+                            picker.Add(affix);
+
+                if (picker.Pick(out pickRef))
+                    return pickRef;
+            }
+
+            return PrototypeId.Invalid;
         }
     }
 
@@ -562,14 +627,14 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
         public AffixTableEntryPrototype GetAffixSlot(int slot)
         {
-            if (Affixes.HasValue() && slot >=0 && slot < Affixes.Length)
+            if (Affixes.HasValue() && slot >= 0 && slot < Affixes.Length)
                 return Affixes[slot];
-            return null; // empty prototype
+            return null;
         }
 
         public int GetMaxAffixes()
         {
-            return (Affixes.HasValue() ? Affixes.Length : 0);
+            return Affixes.HasValue() ? Affixes.Length : 0;
         }
     }
 

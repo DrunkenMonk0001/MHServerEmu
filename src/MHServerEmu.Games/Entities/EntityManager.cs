@@ -6,6 +6,7 @@ using MHServerEmu.Games.Common;
 using MHServerEmu.Games.Entities.Inventories;
 using MHServerEmu.Games.Entities.Physics;
 using MHServerEmu.Games.Entities.PowerCollections;
+using MHServerEmu.Games.Events;
 using MHServerEmu.Games.GameData;
 using MHServerEmu.Games.GameData.Prototypes;
 using MHServerEmu.Games.Regions;
@@ -33,6 +34,11 @@ namespace MHServerEmu.Games.Entities
         public override InvasiveListNode<Entity> GetInvasiveListNode(Entity element, int listId) => element.GetInvasiveListNode(listId);
     }
 
+    public readonly struct DestroyEntityEvent(Entity entity) : IGameEventData
+    {
+        public readonly Entity Entity = entity;
+    }
+
     public class EntityManager
     {
         private static readonly Logger Logger = LogManager.CreateLogger();
@@ -44,22 +50,33 @@ namespace MHServerEmu.Games.Entities
 
         private readonly Dictionary<ulong, Entity> _entityDict = new();
         private readonly Dictionary<ulong, Entity> _entityDbGuidDict = new();
-        private readonly HashSet<Player> _players = new();
         private readonly HashSet<ulong> _entitiesPendingCondemnedPowerDeletion = new();
-        private readonly LinkedList<ulong> _entitiesPendingDestruction = new();     // NOTE: Change this to a regular List<ulong> if this causes GC issues
+
+        private readonly LinkedList<ulong> _entitiesPendingDestruction = new();
+        private readonly Stack<LinkedListNode<ulong>> _entityDestroyListNodeStack = new();
+        private int _numDestroyListNodeChunks = 0;
+
+        public Event<DestroyEntityEvent> DestroyEntityEvent = new();
 
         private ulong _nextEntityId = 1;
         private ulong GetNextEntityId() { return _nextEntityId++; }
         public ulong PeekNextEntityId() { return _nextEntityId; }
 
+        public int EntityCount { get => _entityDict.Count; }
+        public int PlayerCount { get => Players.Count; }
+
         public bool IsDestroyingAllEntities { get; private set; } = false;
 
-        public IEnumerable<Player> Players { get => _players; }
+        // NOTE: We break encapsulation here to allow the PlayerIterator to access this HashSet's struct enumerator and avoid boxing.
+        // As an alternative, we could also move PlayerIterator to EntityManager as a nested struct.
+        public HashSet<Player> Players { get; } = new();
 
         public PhysicsManager PhysicsManager { get; set; }
         public EntityInvasiveCollection AllEntities { get; private set; }
         public EntityInvasiveCollection SimulatedEntities { get; private set; }
         public EntityInvasiveCollection LocomotionEntities { get; private set; }
+
+        public bool IsAIEnabled { get; private set; } = true;
 
         public EntityManager(Game game)
         {            
@@ -164,7 +181,6 @@ namespace MHServerEmu.Games.Entities
                 }
             }
 
-            // TODO: Apply replication state
             entity.ApplyInitialReplicationState(ref settings);
 
             // Finish deserialization
@@ -252,7 +268,6 @@ namespace MHServerEmu.Games.Entities
             if (entity is WorldEntity worldEntity)
             {
                 worldEntity.RegisterActions(settings.Actions);
-                worldEntity.AppendStartAction_OLD(settings.ActionsTarget); // TODO move to missionAction
 
                 if (settings.RegionId != 0)
                 {
@@ -283,6 +298,9 @@ namespace MHServerEmu.Games.Entities
 
             entity.SetStatus(EntityStatus.PendingDestroy, true);
 
+            // invoke destroyed event
+            DestroyEntityEvent.Invoke(new(entity));
+
             // Destroy entities belonging to this entity
             entity.DestroyContained();
 
@@ -293,7 +311,9 @@ namespace MHServerEmu.Games.Entities
             // Finish destruction
             entity.SetStatus(EntityStatus.PendingDestroy, false);
             entity.SetStatus(EntityStatus.Destroyed, true);
-            _entitiesPendingDestruction.AddLast(entity.Id);    // Enqueue entity for deletion at the end of the next frame
+
+            // Enqueue entity for deletion at the end of the frame
+            _entitiesPendingDestruction.AddLast(GetDestroyListNode(entity.Id));    
 
             // Remove entity from the game
             entity.ExitGame();
@@ -305,10 +325,46 @@ namespace MHServerEmu.Games.Entities
             return true;
         }
 
+        public void DestroyAllEntities()
+        {
+            IsDestroyingAllEntities = true;
+
+            bool removed;
+            int loopGuard = 100;
+
+            do
+            {
+                removed = false;
+                foreach (Entity entity in _entityDict.Values)
+                {
+                    if (entity.TestStatus(EntityStatus.Destroyed))
+                        continue;
+
+                    if (entity.IsRootOwner == false)
+                        continue;
+
+                    entity.Destroy();
+                    removed = true;
+                }
+            } while (removed && (loopGuard-- > 0));
+
+            if (loopGuard == 0)
+            {
+                Logger.Warn("DestroyAllEntities(): loopGuard == 0");
+                foreach (Entity entity in _entityDict.Values)
+                {
+                    if (entity.TestStatus(EntityStatus.Destroyed) == false)
+                        Logger.Warn($"DestroyAllEntities(): Entity is not 'Destroyed' after DestroyAllEntities() {entity}");
+                }
+            }
+
+            IsDestroyingAllEntities = false;
+        }
+
         public bool AddPlayer(Player player)
         {
             if (player == null) return Logger.WarnReturn(false, "AddPlayer(): player == null");
-            bool playerAdded = _players.Add(player);
+            bool playerAdded = Players.Add(player);
             if (playerAdded == false) Logger.Warn($"AddPlayer(): Failed to add player {player}");
             return playerAdded;
         }
@@ -316,7 +372,7 @@ namespace MHServerEmu.Games.Entities
         public bool RemovePlayer(Player player)
         {
             if (player == null) return Logger.WarnReturn(false, "RemovePlayer(): player == null");
-            bool playerRemoved = _players.Remove(player);
+            bool playerRemoved = Players.Remove(player);
             if (playerRemoved == false) Logger.Warn($"RemovePlayer(): Failed to remove player {player}");
             return playerRemoved;
         }
@@ -457,24 +513,47 @@ namespace MHServerEmu.Games.Entities
             _entitiesPendingCondemnedPowerDeletion.Clear();
         }
 
+        private LinkedListNode<ulong> GetDestroyListNode(ulong entityId)
+        {
+            const int NodeChunkSize = 256;
+
+            if (_entityDestroyListNodeStack.Count == 0)
+            {
+                Logger.Trace($"GetDestroyListNode(): Allocating chunk {++_numDestroyListNodeChunks} for {_game}");
+                for (int i = 0; i < NodeChunkSize; i++)
+                    _entityDestroyListNodeStack.Push(new(0));
+            }
+
+            LinkedListNode<ulong> destroyNode = _entityDestroyListNodeStack.Pop();
+            destroyNode.Value = entityId;
+            return destroyNode;
+        }
+
+        private void ReturnDestroyListNode(LinkedListNode<ulong> destroyNode)
+        {
+            if (destroyNode.List != null)
+                throw new Exception("Attempted to return a destroy list node that is currently in a list.");
+
+            _entityDestroyListNodeStack.Push(destroyNode);
+        }
+
         private bool ProcessDestroyed()
         {
             if (_game == null) return Logger.WarnReturn(false, "ProcessDestroyed(): _game == null");
 
             // Delete all destroyed entities
-            while (_entitiesPendingDestruction.Any())
+            while (_entitiesPendingDestruction.Count > 0)
             {
-                ulong entityId = _entitiesPendingDestruction.First.Value;
+                LinkedListNode<ulong> deleteNode = _entitiesPendingDestruction.First;
+                ulong entityId = deleteNode.Value;
 
-                if (_entityDict.TryGetValue(entityId, out Entity entity) == false)
-                    Logger.Warn($"ProcessDestroyed(): Failed to get entity for enqueued id {entityId}");
-                else
-                {
-                    //Logger.Trace($"Deleting entity {entity}");
+                if (_entityDict.TryGetValue(entityId, out Entity entity))
                     DeleteEntity(entity);
-                }
+                else
+                    Logger.Warn($"ProcessDestroyed(): Failed to get entity for enqueued id {entityId}");
 
                 _entitiesPendingDestruction.RemoveFirst();
+                ReturnDestroyListNode(deleteNode);
             }
 
             return true;
@@ -484,12 +563,15 @@ namespace MHServerEmu.Games.Entities
         {
             if (destroyedEntity == null) return Logger.WarnReturn(false, "ProcessPendingDestroyImmediate(): destroyedEntity == null");
 
-            // Remove destroyed entity from pending
-            if (_entitiesPendingDestruction.Remove(destroyedEntity.Id) == false)
-                Logger.WarnReturn(false, $"ProcessPendingDestroyImmediate(): Entity {destroyedEntity} is not found in the pending destruction list");
+            LinkedListNode<ulong> destroyNode = _entitiesPendingDestruction.Find(destroyedEntity.Id);
+            if (destroyNode == null)
+                return Logger.WarnReturn(false, $"ProcessPendingDestroyImmediate(): Entity {destroyedEntity} is not found in the pending destruction list");
 
-            // Delete it manually
+            // Delete the entity manually and remove it from the list
             DeleteEntity(destroyedEntity);
+            _entitiesPendingDestruction.Remove(destroyNode);
+            ReturnDestroyListNode(destroyNode);
+
             return true;
         }
 
@@ -499,6 +581,20 @@ namespace MHServerEmu.Games.Entities
             _entityDict.Remove(entity.Id);
             entity.OnDeallocate();
             return true;
+        }
+
+        public void EnableAI(bool enable)
+        {
+            if (IsAIEnabled == enable) return;
+            IsAIEnabled = enable;
+
+            if (enable)
+                foreach (var entity in SimulatedEntities.Iterate())
+                    if (entity is Agent agent) agent.AIController?.SetIsEnabled(true);
+
+            foreach (var entity in _entityDict.Values)
+                if (entity is WorldEntity worldEntity && entity is not Missile && worldEntity.IsInWorld)
+                    worldEntity.Locomotor?.Stop();
         }
     }
 }

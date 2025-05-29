@@ -22,6 +22,13 @@ namespace MHServerEmu.Games.GameData.Prototypes
             PowerOwnerId = 0;
             PartyId = 0;
         }
+
+        public EntityFilterContext(ulong powerOwnerId, ulong partyId)
+        {
+            MissionRef = PrototypeId.Invalid;
+            PowerOwnerId = powerOwnerId;
+            PartyId = partyId;
+        }
     }
 
     public class EntityFilterPrototype : Prototype
@@ -75,7 +82,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public override bool Evaluate(WorldEntity entity, EntityFilterContext context)
         {
             if (entity == null) return false;
-            if (Filters == null) return true;
+            if (Filters.IsNullOrEmpty()) return true;
             foreach (var prototype in Filters)
                 if (prototype == null || prototype.Evaluate(entity, context) == false)
                     return false;
@@ -86,9 +93,10 @@ namespace MHServerEmu.Games.GameData.Prototypes
     public class EntityFilterHasAlliancePrototype : EntityFilterPrototype
     {
         public PrototypeId Alliance { get; protected set; }
+
         public override bool Evaluate(WorldEntity entity, EntityFilterContext context)
         {
-            if (entity == null) return false;
+            if (entity == null || entity.Alliance == null) return false;
             return entity.Alliance.DataRef == Alliance;
         }
     }
@@ -96,6 +104,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
     public class EntityFilterScriptKeyPrototype : EntityFilterPrototype
     {
         public ScriptRoleKeyEnum ScriptKey { get; protected set; }
+
         public override bool Evaluate(WorldEntity entity, EntityFilterContext context)
         {
             if (entity == null) return false;
@@ -111,6 +120,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         {
             if (Keyword != PrototypeId.Invalid) refs.Add(Keyword);
         }
+
         public override bool Evaluate(WorldEntity entity, EntityFilterContext context)
         {
             if (entity == null) return false;
@@ -138,6 +148,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
             if (EntityPrototype != PrototypeId.Invalid && GameDatabase.DataDirectory.PrototypeIsADefaultPrototype(EntityPrototype) == false)
                 refs.Add(EntityPrototype);
         }
+
         public override bool Evaluate(WorldEntity entity, EntityFilterContext context)
         {
             if (entity == null) return false;
@@ -156,6 +167,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         {
             if (InArea != PrototypeId.Invalid) refs.Add(InArea);
         }
+
         public override bool Evaluate(WorldEntity entity, EntityFilterContext context)
         {
             if (entity == null) return false;
@@ -185,7 +197,6 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
             return areaRef == InArea;
         }
-
     }
 
     public class EntityFilterInCellPrototype : EntityFilterPrototype
@@ -268,6 +279,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
     {
         public PrototypeId Mission { get; protected set; }
         public MissionState State { get; protected set; }
+
         public override bool Evaluate(WorldEntity entity, EntityFilterContext context)
         {
             Player player = null;
@@ -310,6 +322,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
     public class EntityFilterIsMemberOfSuperteamPrototype : EntityFilterPrototype
     {
         public PrototypeId Superteam { get; protected set; }
+
         public override bool Evaluate(WorldEntity entity, EntityFilterContext context)
         {
             if (entity == null) return false;
@@ -389,6 +402,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
     public class EntityFilterNotPrototype : EntityFilterPrototype
     {
         public EntityFilterPrototype EntityFilter { get; protected set; }
+
         public override bool Evaluate(WorldEntity entity, EntityFilterContext context)
         {
             if (EntityFilter == null) return true;
@@ -410,6 +424,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
     public class EntityFilterSpawnedByEncounterPrototype : EntityFilterPrototype
     {
         public AssetId EncounterResource { get; protected set; }
+
         public override bool Evaluate(WorldEntity entity, EntityFilterContext context)
         {
             if (entity == null) return false;
@@ -422,12 +437,13 @@ namespace MHServerEmu.Games.GameData.Prototypes
     public class EntityFilterSpawnedByMissionPrototype : EntityFilterPrototype
     {
         public PrototypeId MissionPrototype { get; protected set; }
+
         public override bool Evaluate(WorldEntity entity, EntityFilterContext context)
         {
             if (entity == null) return false;
             var missionRef = entity.MissionPrototype;
 
-            if (missionRef != PrototypeId.Invalid)
+            if (MissionPrototype != PrototypeId.Invalid)
                 return missionRef == MissionPrototype;
             else if (context.MissionRef != PrototypeId.Invalid)
                 return missionRef == context.MissionRef;
@@ -439,6 +455,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
     public class EntityFilterSpawnedBySpawnerPrototype : EntityFilterPrototype
     {
         public PrototypeId SpawnerPrototype { get; protected set; }
+
         public override bool Evaluate(WorldEntity entity, EntityFilterContext context)
         {
             if (entity == null) return false;
@@ -460,6 +477,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public PrototypeId PrestigeLevel { get; protected set; }
 
         private int _prestigeLevelIndex;
+
         public override void PostProcess()
         {
             _prestigeLevelIndex = int.MaxValue;
@@ -484,6 +502,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
     public class EntityFilterHasRankPrototype : EntityFilterPrototype
     {
         public PrototypeId RankPrototype { get; protected set; }
+
         public override bool Evaluate(WorldEntity entity, EntityFilterContext context)
         {
             if (entity == null) return false;
@@ -496,6 +515,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
     public class EntityFilterItemRarityPrototype : EntityFilterPrototype
     {
         public PrototypeId Rarity { get; protected set; }
+
         public override bool Evaluate(WorldEntity entity, EntityFilterContext context)
         {
             if (entity == null || Rarity == PrototypeId.Invalid) return false;

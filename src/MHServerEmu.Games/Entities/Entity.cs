@@ -9,11 +9,14 @@ using MHServerEmu.Games.Entities.Inventories;
 using MHServerEmu.Games.Events;
 using MHServerEmu.Games.Events.Templates;
 using MHServerEmu.Games.GameData;
+using MHServerEmu.Games.GameData.PatchManager;
 using MHServerEmu.Games.GameData.Prototypes;
 using MHServerEmu.Games.Network;
 using MHServerEmu.Games.Powers;
+using MHServerEmu.Games.Powers.Conditions;
 using MHServerEmu.Games.Properties;
 using MHServerEmu.Games.Properties.Evals;
+using MHServerEmu.Games.Regions;
 using MHServerEmu.Games.Social;
 
 namespace MHServerEmu.Games.Entities
@@ -56,7 +59,7 @@ namespace MHServerEmu.Games.Entities
         HasMissionPrototype             = 1ul << 30,
         Flag31                          = 1ul << 31,
         IsPopulation                    = 1ul << 32,
-        Flag33                          = 1ul << 33,
+        SummonDecremented               = 1ul << 33,
         AttachedToEntityId              = 1ul << 34,
         IsHotspot                       = 1ul << 35,
         IsCollidableHotspot             = 1ul << 36,
@@ -112,6 +115,7 @@ namespace MHServerEmu.Games.Entities
         private EntityFlags _flags;
 
         private List<AttachedPropertiesEntry> _attachedProperties;
+        private PropertyTickerManager _propertyTickerManager;
 
         public ulong Id { get; private set; }
         public ulong DatabaseUniqueId { get; private set; }
@@ -133,6 +137,7 @@ namespace MHServerEmu.Games.Entities
 
         public virtual AOINetworkPolicyValues CompatibleReplicationChannels { get => Prototype.RepNetwork; }
         public InterestReferences InterestReferences { get; } = new();
+        public AOINetworkPolicyValues InterestedPoliciesUnion { get; private set; }
         public bool CanSendArchiveMessages { get => IsInGame; }
 
         public InventoryCollection InventoryCollection { get; } = new();
@@ -141,6 +146,8 @@ namespace MHServerEmu.Games.Entities
         public bool IsRootOwner { get => OwnerId == 0; }
         public virtual bool IsWakingUp { get => false; }
         public TimeSpan TotalLifespan { get; private set; }
+
+        public Event<EntityInventoryChangedEvent> EntityInventoryChangedEvent = new();
 
         #region Flag Properties
 
@@ -183,6 +190,7 @@ namespace MHServerEmu.Games.Entities
         public bool HasEncounterResourcePrototype { get => _flags.HasFlag(EntityFlags.EncounterResource); }
         public bool IgnoreNavi { get => _flags.HasFlag(EntityFlags.IgnoreNavi); }
         public bool IsInTutorialPowerLock { get => _flags.HasFlag(EntityFlags.TutorialPowerLock); }
+        public bool SummonDecremented { get => _flags.HasFlag(EntityFlags.SummonDecremented); }
 
         #endregion
 
@@ -248,6 +256,10 @@ namespace MHServerEmu.Games.Entities
             if (Prototype.Properties != null)
                 Properties.FlattenCopyFrom(Prototype.Properties, true);
 
+            // Add properties from patch
+            if (PrototypePatchManager.Instance.CheckProperties(PrototypeDataRef, out PropertyCollection prop))
+                Properties.FlattenCopyFrom(prop, false);
+
             if (settings.Properties != null)
                 Properties.FlattenCopyFrom(settings.Properties, false);
 
@@ -264,6 +276,13 @@ namespace MHServerEmu.Games.Entities
 
         public virtual void OnPostInit(EntitySettings settings)
         {
+            if (settings.ArchiveData == null)
+            {
+                // Initialize health for new entities
+                if (Properties.HasProperty(PropertyEnum.HealthBase) && Properties.HasProperty(PropertyEnum.Health) == false)
+                    Properties[PropertyEnum.Health] = Properties[PropertyEnum.HealthMax];
+            }
+
             if (Prototype.EvalOnCreate?.Length > 0)
             {
                 using EvalContextData evalContext = ObjectPoolManager.Instance.Get<EvalContextData>();
@@ -289,13 +308,6 @@ namespace MHServerEmu.Games.Entities
         }
 
         public virtual bool ApplyInitialReplicationState(ref EntitySettings settings) => true;
-
-        public void TEMP_ReplacePrototype(PrototypeId prototypeRef)
-        {
-            // Temp method for hacks that replace entity prototype after creation - use with caution and remove this later
-            Prototype = prototypeRef.As<EntityPrototype>();
-            PrototypeDataRef = prototypeRef;
-        }
 
         protected virtual void BindReplicatedFields()
         {
@@ -332,11 +344,13 @@ namespace MHServerEmu.Games.Entities
             UpdateInterestPolicies(true);
 
             // Put all inventory entities into the game as well
+            EntityManager entityManager = Game.EntityManager;
+
             foreach (Inventory inventory in new InventoryIterator(this))
             {
                 foreach (var entry in inventory)
                 {
-                    Entity containedEntity = Game.EntityManager.GetEntity<Entity>(entry.Id);
+                    Entity containedEntity = entityManager.GetEntity<Entity>(entry.Id);
                     if (containedEntity != null) containedEntity.EnterGame();
                 }
             }
@@ -348,11 +362,13 @@ namespace MHServerEmu.Games.Entities
             UpdateInterestPolicies(false);
 
             // Remove contained entities
+            EntityManager entityManager = Game.EntityManager;
+
             foreach (Inventory inventory in new InventoryIterator(this))
             {
                 foreach (var entry in inventory)
                 {
-                    Entity containedEntity = Game.EntityManager.GetEntity<Entity>(entry.Id);
+                    Entity containedEntity = entityManager.GetEntity<Entity>(entry.Id);
                     if (containedEntity != null) containedEntity.ExitGame();
                 }
             }
@@ -471,17 +487,19 @@ namespace MHServerEmu.Games.Entities
             {
                 // Update only players who are already interested in this entity.
                 // This is what should be used to remove entities if possible.
+                EntityManager entityManager = Game.EntityManager;
+
                 foreach (ulong playerId in InterestReferences)
                 {
-                    Player player = Game.EntityManager.GetEntity<Player>(playerId);
+                    Player player = entityManager.GetEntity<Player>(playerId);
                     player?.AOI.ConsiderEntity(this, settings);
                 }
             }
         }
 
-        public IEnumerable<PlayerConnection> GetInterestedClients(AOINetworkPolicyValues interestPolicies)
+        public bool GetInterestedClients(List<PlayerConnection> interestedClientList, AOINetworkPolicyValues interestPolicies)
         {
-            return Game.NetworkManager.GetInterestedClients(this, interestPolicies);
+            return Game.NetworkManager.GetInterestedClients(interestedClientList, this, interestPolicies);
         }
 
         #endregion
@@ -512,6 +530,7 @@ namespace MHServerEmu.Games.Entities
         {
             Game.GameEventScheduler.CancelAllEvents(_pendingEvents);
             UnbindReplicatedFields();
+            Properties.RemoveAllWatchers();
         }
 
         public virtual void OnChangePlayerAOI(Player player, InterestTrackOperation operation,
@@ -523,6 +542,9 @@ namespace MHServerEmu.Games.Entities
             AOINetworkPolicyValues gainedPolicies = newInterestPolicies & ~previousInterestPolicies;
             AOINetworkPolicyValues lostPolicies = previousInterestPolicies & ~newInterestPolicies;
             InterestReferences.Track(this, player.Id, operation, gainedPolicies, lostPolicies);
+
+            // Cache current policies for map location updates
+            InterestedPoliciesUnion = InterestReferences.GetInterestedPoliciesUnion();
         }
 
         public virtual void OnPostAOIAddOrRemove(Player player, InterestTrackOperation operation,
@@ -585,6 +607,14 @@ namespace MHServerEmu.Games.Entities
 
                 case PropertyEnum.EncounterResource:
                     SetFlag(EntityFlags.EncounterResource, newValue != PrototypeId.Invalid);
+                    break;
+
+                case PropertyEnum.Health:
+                    OnHealthPropertyChange(newValue, Properties[PropertyEnum.HealthMax]);
+                    break;
+
+                case PropertyEnum.HealthMax:
+                    OnHealthPropertyChange(Properties[PropertyEnum.Health], newValue);
                     break;
 
                 case PropertyEnum.IgnoreMissionOwnerForTargeting:
@@ -712,6 +742,15 @@ namespace MHServerEmu.Games.Entities
             }
         }
 
+        private void OnHealthPropertyChange(long health, long healthMax)
+        {
+            // Update death flag whenever health changes
+            bool isDead = healthMax > 0 && health <= 0;
+            bool isFlaggedDead = _flags.HasFlag(EntityFlags.IsDead);
+            if (isDead != isFlaggedDead)
+                Properties[PropertyEnum.IsDead] = isDead;
+        }
+
         #endregion
 
         #region Attached Properties
@@ -745,7 +784,7 @@ namespace MHServerEmu.Games.Entities
                 entry.ModRef = modRef;
                 entry.Index = index;
                 entry.Properties = newCollection;
-                entry.Field4 = 0;
+                entry.PropertyTickerId = 0;
 
                 if (IsSimulated == false)
                 {
@@ -789,7 +828,7 @@ namespace MHServerEmu.Games.Entities
 
         public void DetachProperties(PrototypeId modTypeRef, PrototypeId modRef, ulong index)
         {
-            Logger.Debug($"DetachProperties(): modTypeRef={modTypeRef.GetName()}, modRef={modRef.GetName()}");
+            //Logger.Debug($"DetachProperties(): modTypeRef={modTypeRef.GetName()}, modRef={modRef.GetName()}");
 
             if (_attachedProperties == null) { Logger.Warn("DetachProperties(): _attachedProperties == null"); return; }
 
@@ -862,34 +901,22 @@ namespace MHServerEmu.Games.Entities
 
             Power.CopyPowerIndexProperties(indexProperties, modProperties);
 
-            // NOTE: While we can get away with adding properties to a collection while iterating in the current implementation,
-            // it's more of a side-effect than expected behavior, so it's safer to do it in two separate loops.
-            List<PrototypeId> procPowerRefList = new();
+            List<PrototypeId> procPowerRefList = ListPool<PrototypeId>.Instance.Get();
             foreach (var kvp in modProperties.IteratePropertyRange(Property.ProcPropertyTypesAll))
             {
                 Property.FromParam(kvp.Key, 1, out PrototypeId procPowerRef);
                 procPowerRefList.Add(procPowerRef);
-
-                Logger.Debug($"CreateAndCloneAttachedModCollection(): {procPowerRef.GetName()}");
             }
 
             foreach (PrototypeId procPowerRef in procPowerRefList)
                 modProperties[PropertyEnum.ProcPowerRank, procPowerRef] = rank;
 
+            ListPool<PrototypeId>.Instance.Return(procPowerRefList);
+
             OnAttachedPropertiesPreAdd(modProperties);
             Properties.AddChildCollection(modProperties);
 
             return modProperties;
-        }
-
-        private void StartPropertyTickingMod(AttachedPropertiesEntry entry)
-        {
-
-        }
-
-        private void StopPropertyTickingMod(AttachedPropertiesEntry entry)
-        {
-
         }
 
         private class AttachedPropertiesEntry
@@ -899,9 +926,70 @@ namespace MHServerEmu.Games.Entities
             public PrototypeId ModRef { get; set; }
             public ulong Index { get; set; }
             public PropertyCollection Properties { get; set; }
-            public ulong Field4 { get; set; }
+            public ulong PropertyTickerId { get; set; }
         }
-        
+
+        #endregion
+
+        #region Tickers
+
+        public ulong StartPropertyTicker(PropertyCollection properties, ulong creatorId, ulong ultimateCreatorId, TimeSpan updateInterval)
+        {
+            if (IsSimulated == false || IsDestroyed)
+                return PropertyTicker.InvalidId;
+
+            // Create ticker manager on demand
+            _propertyTickerManager ??= new(this);
+
+            return _propertyTickerManager.StartTicker(properties, creatorId, ultimateCreatorId, updateInterval);
+        }
+
+        public ulong StartPropertyTickingCondition(Condition condition)
+        {
+            // NOTE: Although this is used only for world entities, we keep it here with the rest of the ticker functionality
+
+            if (IsSimulated == false || IsDestroyed)
+                return PropertyTicker.InvalidId;
+
+            // Create ticker manager on demand
+            _propertyTickerManager ??= new(this);
+
+            return _propertyTickerManager.StartTicker(condition);
+        }
+
+        public void StopPropertyTicker(ulong tickerId)
+        {
+            if (tickerId != PropertyTicker.InvalidId)
+                _propertyTickerManager?.StopTicker(tickerId);
+        }
+
+        public void StopAllPropertyTickers()
+        {
+            _propertyTickerManager?.StopAllTickers();
+        }
+
+        public void UpdatePropertyTicker(ulong tickerId, TimeSpan duration, bool isPaused)
+        {
+            _propertyTickerManager?.UpdateTicker(tickerId, duration, isPaused);
+        }
+
+        private void StartPropertyTickingMod(AttachedPropertiesEntry entry)
+        {
+            if (IsSimulated == false || IsDestroyed)
+                return;
+
+            entry.PropertyTickerId = StartPropertyTicker(entry.Properties, Id, Id, TimeSpan.FromMilliseconds(1000));
+        }
+
+        private void StopPropertyTickingMod(AttachedPropertiesEntry entry)
+        {
+            if (entry.PropertyTickerId == PropertyTicker.InvalidId)
+                return;
+
+            _propertyTickerManager?.StopTicker(entry.PropertyTickerId);
+            entry.PropertyTickerId = PropertyTicker.InvalidId;
+        }
+
         #endregion
 
         #region Inventory Management
@@ -1046,16 +1134,18 @@ namespace MHServerEmu.Games.Entities
 
         public InventoryResult CanChangeInventoryLocation(Inventory destInventory)
         {
-            PropertyEnum propertyEnum = PropertyEnum.Invalid;
-            return CanChangeInventoryLocation(destInventory, ref propertyEnum);
+            return CanChangeInventoryLocation(destInventory, out _);
         }
 
-        public InventoryResult CanChangeInventoryLocation(Inventory destInventory, ref PropertyEnum propertyRestriction)
+        public InventoryResult CanChangeInventoryLocation(Inventory destInventory, out PropertyEnum propertyRestriction)
         {
-            InventoryResult result = destInventory.PassesContainmentFilter(PrototypeDataRef);
-            if (result != InventoryResult.Success) return result;
+            propertyRestriction = PropertyEnum.Invalid;
 
-            return destInventory.PassesEquipmentRestrictions(this, ref propertyRestriction);
+            InventoryResult result = destInventory.PassesContainmentFilter(PrototypeDataRef);
+            if (result != InventoryResult.Success)
+                return result;
+
+            return destInventory.PassesEquipmentRestrictions(this, out propertyRestriction);
         }
 
         public InventoryResult ChangeInventoryLocation(Inventory destination, uint destSlot = Inventory.InvalidSlot)
@@ -1370,6 +1460,11 @@ namespace MHServerEmu.Games.Entities
         protected virtual void SetCombatLevel(int combatLevel)
         {
             Properties[PropertyEnum.CombatLevel] = combatLevel;
+        }
+
+        public void SetVisible(bool visible)
+        {
+            Properties[PropertyEnum.Visible] = visible;
         }
     }
 }

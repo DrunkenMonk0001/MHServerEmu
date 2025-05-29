@@ -1,4 +1,6 @@
-﻿using MHServerEmu.Core.Extensions;
+﻿using MHServerEmu.Core.Collections;
+using MHServerEmu.Core.Extensions;
+using MHServerEmu.Core.Helpers;
 using MHServerEmu.Core.Logging;
 using MHServerEmu.Core.Memory;
 using MHServerEmu.Core.VectorMath;
@@ -15,12 +17,6 @@ namespace MHServerEmu.Games.GameData.Prototypes
 {
     public class PowerPrototype : Prototype
     {
-        private static readonly Logger Logger = LogManager.CreateLogger();
-
-        // Local instance refs to speed up access
-        private TargetingReachPrototype _targetingReachPtr;
-        private TargetingStylePrototype _targetingStylePtr;
-
         public PrototypePropertyCollection Properties { get; protected set; }
         public PowerEventActionPrototype[] ActionsTriggeredOnPowerEvent { get; protected set; }
         public PowerActivationType Activation { get; protected set; }
@@ -165,6 +161,18 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public PrototypeId GamepadSettings { get; protected set; }
         public EvalPrototype BreaksStealthOverrideEval { get; protected set; }
 
+        //---
+
+        private static readonly Logger Logger = LogManager.CreateLogger();
+
+        // See GetRecurringCostInterval() for why we use 500 ms here.
+        private static readonly TimeSpan RecurringCostIntervalDefault = TimeSpan.FromMilliseconds(500);
+
+        private readonly GBitArray _powerEventMask = new();
+
+        // Local instance refs to speed up access
+        private TargetingReachPrototype _targetingReachPtr;
+        private TargetingStylePrototype _targetingStylePtr;
 
         [DoNotCopy]
         public float DamageTuningScore { get; private set; }
@@ -207,9 +215,42 @@ namespace MHServerEmu.Games.GameData.Prototypes
             if (powerProto is T)
                 return powerRef;
 
-            // for loop here
+            if (powerProto.ActionsTriggeredOnPowerEvent.HasValue())
+                foreach (var triggeredPowerEvent in powerProto.ActionsTriggeredOnPowerEvent)
+                    if (triggeredPowerEvent?.EventAction == PowerEventActionType.UsePower)
+                    {
+                        if (triggeredPowerEvent.Power == PrototypeId.Invalid) return PrototypeId.Invalid;
+                        if (triggeredPowerEvent.Power == powerRef) 
+                            return Logger.WarnReturn(PrototypeId.Invalid, 
+                                $"RecursiveGetPowerRefOfPowerTypeInCombo(): Infinite power loop detected in {powerRef.GetNameFormatted()}!");
+
+                        return RecursiveGetPowerRefOfPowerTypeInCombo<T>(triggeredPowerEvent.Power);
+                    }
 
             return PrototypeId.Invalid;
+        }
+
+        public static T RecursiveGetPowerPrototypeInCombo<T>(PrototypeId powerRef) where T : PowerPrototype
+        {
+            PowerPrototype powerProto = GameDatabase.GetPrototype<PowerPrototype>(powerRef);
+            if (powerProto == null) return Logger.WarnReturn((T)default, "RecursiveGetPowerPrototypeInCombo(): power == null");
+
+            if (powerProto is T power)
+                return power;
+
+            if (powerProto.ActionsTriggeredOnPowerEvent.HasValue())
+                foreach (var triggeredPowerEvent in powerProto.ActionsTriggeredOnPowerEvent)
+                    if (triggeredPowerEvent?.EventAction == PowerEventActionType.UsePower)
+                    {
+                        if (triggeredPowerEvent.Power == PrototypeId.Invalid) return default;
+                        if (triggeredPowerEvent.Power == powerRef)
+                            return Logger.WarnReturn((T)default,
+                                $"RecursiveGetPowerPrototypeInCombo(): Infinite power loop detected in {powerRef.GetNameFormatted()}!");
+
+                        return RecursiveGetPowerPrototypeInCombo<T>(triggeredPowerEvent.Power);
+                    }
+
+            return default;
         }
 
         public override bool ApprovedForUse()
@@ -233,7 +274,8 @@ namespace MHServerEmu.Games.GameData.Prototypes
             {
                 foreach (PowerEventActionPrototype triggeredAction in ActionsTriggeredOnPowerEvent)
                 {
-                    // TODO: Populate lookup for power event actions
+                    // Populate lookup for power event actions
+                    _powerEventMask.Set((int)triggeredAction.PowerEvent);
                     
                     if (triggeredAction.EventAction == PowerEventActionType.RescheduleActivationInSeconds && triggeredAction.Power == PrototypeId.Invalid)
                         HasRescheduleActivationEventWithInvalidPowerRef = true;
@@ -329,6 +371,11 @@ namespace MHServerEmu.Games.GameData.Prototypes
             return (keywordProto != null && KeywordPrototype.TestKeywordBit(KeywordsMask, keywordProto));
         }
 
+        public bool HasPowerEvent(PowerEventType eventType)
+        {
+            return _powerEventMask[(int)eventType];
+        }
+
         public TargetingReachPrototype GetTargetingReach()
         {
             return _targetingReachPtr;
@@ -337,6 +384,38 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public TargetingStylePrototype GetTargetingStyle()
         {
             return _targetingStylePtr;
+        }
+
+        public AssetId GetUnrealClass(AssetId originalWorldAssetRef, AssetId entityWorldAssetRef)
+        {
+            AssetId powerAssetRef = PowerUnrealClass;
+
+            if (PowerUnrealOverrides.IsNullOrEmpty())
+                return powerAssetRef;
+
+            foreach (PowerUnrealOverridePrototype overrideProto in PowerUnrealOverrides)
+            {
+                if (overrideProto.EntityArt != originalWorldAssetRef)
+                    continue;
+
+                powerAssetRef = overrideProto.PowerArt;
+
+                if (overrideProto.ArtOnlyReplacements.IsNullOrEmpty())
+                    break;
+
+                foreach (PowerUnrealReplacementPrototype replacementProto in overrideProto.ArtOnlyReplacements)
+                {
+                    if (replacementProto.EntityArt != entityWorldAssetRef)
+                        continue;
+
+                    powerAssetRef = replacementProto.PowerArt;
+                    break;
+                }
+
+                break;
+            }
+
+            return powerAssetRef;
         }
 
         public float GetRange(PropertyCollection powerProperties, PropertyCollection ownerProperties)
@@ -499,6 +578,25 @@ namespace MHServerEmu.Games.GameData.Prototypes
             return TimeSpan.FromMilliseconds(cooldownTimeMS);
         }
 
+        public bool TriggersComboPowerOnEvent(PowerEventType eventType, PropertyCollection powerProperties, WorldEntity owner)
+        {
+            if (ActionsTriggeredOnPowerEvent.IsNullOrEmpty())
+                return false;
+
+            foreach (PowerEventActionPrototype triggeredPowerEvent in ActionsTriggeredOnPowerEvent)
+            {
+                if (triggeredPowerEvent.PowerEvent != eventType)
+                    continue;
+
+                if (triggeredPowerEvent.GetEventTriggerChance(powerProperties, owner, owner) < 0f)
+                    continue;
+
+                return true;
+            }
+
+            return false;
+        }
+
         public virtual void OnEndPower(Power power, WorldEntity owner)
         {
             // Overriden in MovementPowerPrototype
@@ -515,6 +613,17 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
             score *= DamageBaseTuningEnduranceCost * DamageBaseTuningEnduranceRatio + (DamageBaseTuningAnimTimeMS / 1000f);
             return score;
+        }
+
+        public TimeSpan GetRecurringCostInterval()
+        {
+            // Most powers use either 250 or 500 ms intervals, with 2/3 of them using 500 ms.
+            // A single power (Powers/Player/DrDoom/ChanneledBeam.prototype) uses a 200 ms interval.
+            if (RecurringCostIntervalMS > 0)
+                return TimeSpan.FromMilliseconds(RecurringCostIntervalMS);
+
+            // Default to 500 ms since it seems to be the most common value.
+            return RecurringCostIntervalDefault;
         }
     }
 
@@ -591,6 +700,18 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public PrototypeId RestrictionKeyword { get; protected set; }
         public int RestrictionKeywordCount { get; protected set; }
         public PrototypeId RestrictionBannerMessage { get; protected set; }
+
+        //---
+
+        [DoNotCopy]
+        public KeywordPrototype RestrictionKeywordPrototype { get; private set; }
+
+        public override void PostProcess()
+        {
+            base.PostProcess();
+
+            RestrictionKeywordPrototype = RestrictionKeyword.As<KeywordPrototype>();
+        }
     }
 
     public class PowerEventContextTransformModePrototype : PowerEventContextPrototype
@@ -647,14 +768,10 @@ namespace MHServerEmu.Games.GameData.Prototypes
     {
         public PrototypeId Ability { get; protected set; }
 
-        [DoNotCopy]
-        public int StartingRank { get; private set; }
+        //---
 
-        public override void PostProcess()
-        {
-            base.PostProcess();
-            StartingRank = 1;
-        }
+        [DoNotCopy]
+        public int Rank { get => 1; }  // NOTE: This was a real prototype field in 1.48
     }
 
     public class AbilityAutoAssignmentSlotPrototype : Prototype
@@ -669,6 +786,15 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public bool SetContextOnOwnerSummonEntities { get; protected set; }
         public bool SummonedEntitiesUsePowerTarget { get; protected set; }
         public bool SetContextOnTargetEntity { get; protected set; }
+
+        //---
+
+        private static readonly Logger Logger = LogManager.CreateLogger();
+
+        public virtual bool HandlePowerEvent(WorldEntity user, WorldEntity target, Vector3 targetPosition)
+        {
+            return Logger.WarnReturn(false, "HandlePowerEvent(): PowerEventContextPrototype should not be called directly");
+        }
     }
 
     public class MapPowerPrototype : Prototype
@@ -708,8 +834,19 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public EvalPrototype EvalEventParam { get; protected set; }
         public bool ResetFXRandomSeed { get; protected set; }
 
+        //---
+
         [DoNotCopy]
         public bool HasEvalEventTriggerChance { get => EvalEventTriggerChance != null; }
+
+        [DoNotCopy]
+        public KeywordsMask KeywordsMask { get; protected set; }
+
+        public override void PostProcess()
+        {
+            base.PostProcess();
+            KeywordsMask = KeywordPrototype.GetBitMaskForKeywordList(Keywords);
+        }
 
         public float GetEventTriggerChance(PropertyCollection powerProperties, WorldEntity owner, WorldEntity target)
         {
@@ -745,6 +882,8 @@ namespace MHServerEmu.Games.GameData.Prototypes
         }
     }
 
+    #region SituationalTriggerPrototype
+
     public class SituationalTriggerPrototype : Prototype
     {
         public PrototypeId TriggerCollider { get; protected set; }
@@ -752,6 +891,11 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public EntityFilterPrototype EntityFilter { get; protected set; }
         public bool AllowDead { get; protected set; }
         public bool ActivateOnTriggerSuccess { get; protected set; }
+
+        public virtual SituationalTrigger AllocateTrigger(SituationalPowerComponent powerComponent)
+        {
+            return new SituationalTrigger(this, powerComponent);
+        }
     }
 
     public class SituationalTriggerOnKilledPrototype : SituationalTriggerPrototype
@@ -761,12 +905,16 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public bool KilledByOther { get; protected set; }
         public bool KilledBySelf { get; protected set; }
         public bool WasLastInRange { get; protected set; }
+
+        // Not used
     }
 
     public class SituationalTriggerOnHealthThresholdPrototype : SituationalTriggerPrototype
     {
         public bool HealthBelow { get; protected set; }
         public float HealthPercent { get; protected set; }
+
+        // Not used
     }
 
     public class SituationalTriggerOnStatusEffectPrototype : SituationalTriggerPrototype
@@ -774,12 +922,24 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public PrototypeId[] TriggeringProperties { get; protected set; }
         public bool TriggersOnStatusApplied { get; protected set; }
         public PrototypeId[] TriggeringConditionKeywords { get; protected set; }
+
+        public override SituationalTrigger AllocateTrigger(SituationalPowerComponent powerComponent)
+        {
+            return new SituationalTriggerOnStatusEffect(this, powerComponent);
+        }       
     }
 
     public class SituationalTriggerInvAndWorldPrototype : SituationalTriggerPrototype
     {
         public PrototypeId InventoryRef { get; protected set; }
+
+        public override SituationalTrigger AllocateTrigger(SituationalPowerComponent powerComponent)
+        {
+            return new SituationalTriggerInvAndWorld(this, powerComponent);
+        }       
     }
+
+    #endregion
 
     public class SituationalPowerComponentPrototype : Prototype
     {
@@ -821,10 +981,50 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public PrototypeId PropertyInfoRef { get; protected set; }
         public int Value { get; protected set; }
         public bool UseTargetEntityId { get; protected set; }
+
+        //---
+
+        private static readonly Logger Logger = LogManager.CreateLogger();
+
+        public override bool HandlePowerEvent(WorldEntity user, WorldEntity target, Vector3 targetPosition)
+        {
+            if (user is Agent agent)
+            {
+                var controller = agent.AIController;
+                if (controller == null) return false;
+
+                ulong targetId = Entity.InvalidId;
+
+                if (UseTargetEntityId && target != null)
+                    targetId = target.Id;
+
+                controller.Blackboard.ChangeBlackboardFact(PropertyInfoRef, Value, Operation, targetId);
+                return true;
+            }
+
+            return false;
+        }
     }
 
     public class PowerEventContextCallbackAISetAssistedEntityFromCreatorPrototype : PowerEventContextCallbackPrototype
     {
+        //---
+
+        private static readonly Logger Logger = LogManager.CreateLogger();
+
+        public override bool HandlePowerEvent(WorldEntity user, WorldEntity target, Vector3 targetPosition)
+        {
+            if (target is Agent targetAgent && user != null)
+            {
+                var controller = targetAgent.AIController;
+                if (controller == null) return Logger.WarnReturn(false, $"HandlePowerEvent: AIController == null");
+
+                controller.Blackboard.PropertyCollection[PropertyEnum.AIAssistedEntityID] = user.Id;
+                return true;
+            }
+
+            return false;
+        }
     }
 
     public class PowerEventContextCallbackAISummonsTryActivatePowerPrototype : PowerEventContextCallbackPrototype
@@ -832,6 +1032,43 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public PrototypeId PowerToActivate { get; protected set; }
         public bool SummonsUsePowerTargetLocation { get; protected set; }
         public PrototypeId SummonsKeywordFilter { get; protected set; }
+
+        //---
+
+        private static readonly Logger Logger = LogManager.CreateLogger();
+
+        public override bool HandlePowerEvent(WorldEntity user, WorldEntity target, Vector3 targetPosition)
+        {
+            if (PowerToActivate == PrototypeId.Invalid)
+                return Logger.WarnReturn(false, $"HandlePowerEvent: PowerToActivate == Invalid");
+
+            if (user is Agent summoned)
+            {
+                var game = summoned.Game;
+                if (game == null) return Logger.WarnReturn(false, $"HandlePowerEvent: game == null");
+
+                if (SummonsKeywordFilter == PrototypeId.Invalid || summoned.HasKeyword(SummonsKeywordFilter))
+                {
+                    var controller = summoned.AIController;
+                    if (controller == null) return false;
+
+                    ulong targetId = Entity.InvalidId;
+                    if (SummonedEntitiesUsePowerTarget && target != null)
+                        targetId = target.Id;
+
+                    var blackboard = controller.Blackboard;
+                    var position = SummonsUsePowerTargetLocation ? targetPosition : Vector3.Zero;
+                    
+                    blackboard.AddCustomPower(PowerToActivate, position, targetId);
+                    blackboard.PropertyCollection[PropertyEnum.AICustomThinkRateMS] = (long)game.FixedTimeBetweenUpdates.TotalMilliseconds;
+                    controller.ScheduleAIThinkEvent(TimeSpan.Zero, false, true);
+
+                    return true;
+                }
+            }
+
+            return false;
+        }
     }
 
     public class TransformModeUnrealOverridePrototype : Prototype
@@ -851,6 +1088,26 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public EvalPrototype DurationMSEval { get; protected set; }
         public TransformModeUnrealOverridePrototype[] UnrealClassOverrides { get; protected set; }
         public PrototypeId UseRankOfPower { get; protected set; }
+
+        //---
+
+        private static readonly Logger Logger = LogManager.CreateLogger();
+
+        public TimeSpan GetDuration(Entity owner)
+        {
+            if (DurationMSEval == null)
+                return TimeSpan.Zero;
+
+            Game game = owner.Game;
+            if (game == null) return Logger.WarnReturn(TimeSpan.Zero, "GetDuration(): game == null");
+
+            using EvalContextData evalContext = ObjectPoolManager.Instance.Get<EvalContextData>();
+            evalContext.Game = game;
+            evalContext.SetReadOnlyVar_PropertyCollectionPtr(EvalContext.Default, owner?.Properties);
+
+            int durationMS = Eval.RunInt(DurationMSEval, evalContext);
+            return TimeSpan.FromMilliseconds(durationMS);
+        }
     }
 
     public class TransformModeEntryPrototype : Prototype
@@ -977,7 +1234,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
             Curve curve = CurveDirectory.Instance.GetCurve(NumActivatesBeforeCooldown);
             if (curve == null) return Logger.WarnReturn(0, "GetNumActivatesBeforeCooldown(): curve == null");
 
-            return (int)MathF.Floor(curve.GetAt(powerRank));
+            return MathHelper.RoundDownToInt(curve.GetAt(powerRank));
         }
 
         public int GetTimeoutLengthMS(int powerRank)
@@ -990,12 +1247,23 @@ namespace MHServerEmu.Games.GameData.Prototypes
             Curve curve = CurveDirectory.Instance.GetCurve(TimeoutLengthMS);
             if (curve == null) return Logger.WarnReturn(0, "GetTimeoutLengthMS(): curve == null");
 
-            return (int)MathF.Floor(curve.GetAt(powerRank));
+            return MathHelper.RoundDownToInt(curve.GetAt(powerRank));
         }
     }
 
     public class ExtraActivateCycleToPowerPrototype : ExtraActivatePrototype
     {
         public PrototypeId[] CyclePowerList { get; protected set; }
+    }
+
+    public class StackingBehaviorPrototype : Prototype
+    {
+        public StackingApplicationStyleType ApplicationStyle { get; protected set; }
+        public int MaxNumStacks { get; protected set; }
+        public bool RemoveStackOnMaxNumStacksReached { get; protected set; }
+        public bool StacksFromDifferentCreators { get; protected set; }
+        public int NumStacksToApply { get; protected set; }
+        public PrototypeId[] StacksByKeyword { get; protected set; }
+        public PrototypeId StacksWithOtherPower { get; protected set; }
     }
 }

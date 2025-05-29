@@ -2,6 +2,7 @@
 using MHServerEmu.Core.Extensions;
 using MHServerEmu.Core.Helpers;
 using MHServerEmu.Core.Logging;
+using MHServerEmu.Core.Memory;
 using MHServerEmu.Core.System.Random;
 using MHServerEmu.Core.VectorMath;
 using MHServerEmu.Games.Entities.Locomotion;
@@ -21,6 +22,8 @@ namespace MHServerEmu.Games.Entities
         private static readonly Logger Logger = LogManager.CreateLogger();
         public MissilePrototype MissilePrototype { get => Prototype as MissilePrototype; }
 
+        private bool _returnWeapon = true;
+
         private Bounds _entityCollideBounds;
         public override Bounds EntityCollideBounds { get => _entityCollideBounds; set => _entityCollideBounds = value; }
         public override bool CanRepulseOthers => false;
@@ -34,8 +37,9 @@ namespace MHServerEmu.Games.Entities
         public bool IsMovedIndependentlyOnClient { get => _contextPrototype != null && _contextPrototype.IndependentClientMovement; }
         public bool IsKilledOnOverlappingCollision { get => _contextPrototype != null && _contextPrototype.KilledOnOverlappingCollision; }
         public GRandom Random { get; private set; }
-        public Action ReturnTargetMissingEvent { get; private set; }
-        public Action SeekTargetMissingEvent { get; private set; }
+        public Action ReturnTargetMissingAction { get; private set; }
+        public Action SeekTargetMissingAction { get; private set; }
+
         private TimeSpan _lastSizeUpdateTime;
 
         private EventPointer<PendingKillCallback> _pendingKillEvent = new();
@@ -49,8 +53,8 @@ namespace MHServerEmu.Games.Entities
         {
             SetFlag(EntityFlags.IsNeverAffectedByPowers, true);
             _contextPrototype = null;
-            ReturnTargetMissingEvent = OnReturnTargetMissing;
-            SeekTargetMissingEvent = OnSeekTargetMissing;
+            ReturnTargetMissingAction = OnReturnTargetMissing;
+            SeekTargetMissingAction = OnSeekTargetMissing;
             Random = new();
             _entityCollideBounds = new();
             _lastSizeUpdateTime = TimeSpan.Zero;
@@ -145,16 +149,17 @@ namespace MHServerEmu.Games.Entities
 
         private void OnOutOfWorld()
         {
-            List<Power> powerList = new();
+            List<Power> powerList = ListPool<Power>.Instance.Get();
             GetMissilePowersWithActivationEvent(powerList, null, MissilePowerActivationEventType.OnOutOfWorld);
             ActivateMissilePowers(powerList, null, RegionLocation.Position);
+            ListPool<Power>.Instance.Return(powerList);
             Kill();
         }
 
         public override void OnKilled(WorldEntity killer, KillFlags killFlags, WorldEntity directKiller)
         {
             NotifyCreatorPowerEnd();
-            // TODO PropertyEnum.CreatorPowerPrototype HandleTriggerPowerEvent PowerEventType.OnMissileKilled
+            NotifyCreatorPowerEvent(PowerEventType.OnMissileKilled, killer);
             base.OnKilled(killer, killFlags, directKiller);
         }
 
@@ -163,9 +168,10 @@ namespace MHServerEmu.Games.Entities
             if (Game == null) return;
             if (IsInWorld)
             {
-                List<Power> powerList = new();
+                List<Power> powerList = ListPool<Power>.Instance.Get();
                 GetMissilePowersWithActivationEvent(powerList, null, MissilePowerActivationEventType.OnLifespanExpired);
                 ActivateMissilePowers(powerList, null, RegionLocation.Position);
+                ListPool<Power>.Instance.Return(powerList);
             }
             if (IsReturningMissile && IsSimulated)
                 ReturnMissile();
@@ -185,7 +191,42 @@ namespace MHServerEmu.Games.Entities
                 StartMovement();
             }
 
-            // TODO set PropertyEnum.WeaponMissing to owner if PropertyEnum.PowerUsesReturningWeapon
+            StartPropertyTicker(Properties, Id, OwnerId, TimeSpan.FromMilliseconds(50));
+            SetOwnerWeaponMissing(true);
+        }
+
+        public override SimulateResult SetSimulated(bool simulated)
+        {
+            SimulateResult result = base.SetSimulated(simulated);
+            if (result == SimulateResult.Clear)
+                SetOwnerWeaponMissing(false);
+
+            return result;
+        }
+
+        public override bool EnterCombat()
+        {
+            ulong missileCreatorId = Properties[PropertyEnum.MissileCreatorId];
+            if (missileCreatorId == InvalidId)
+                return false;
+
+            WorldEntity missileCreator = Game.EntityManager.GetEntity<WorldEntity>(missileCreatorId);
+            if (missileCreator == null || missileCreator.IsInWorld == false)
+                return false;
+
+            return missileCreator.EnterCombat();
+        }
+
+        // Never activate OnHit / OnKill procs on the missile itself
+
+        public override void TryActivateOnHitProcs(ProcTriggerType triggerType, PowerResults powerResults)
+        {
+            TryForwardOnHitProcsToOwner(triggerType, powerResults);
+        }
+
+        public override void TryActivateOnKillProcs(ProcTriggerType triggerType, PowerResults powerResults)
+        {
+            TryForwardOnKillProcsToOwner(triggerType, powerResults);
         }
 
         private void StartMovement()
@@ -258,7 +299,7 @@ namespace MHServerEmu.Games.Entities
 
         public override void OnDeallocate()
         {
-            // TODO set PropertyEnum.WeaponMissing to owner
+            SetOwnerWeaponMissing(false);
             NotifyCreatorPowerEnd();
             base.OnDeallocate();
         }
@@ -273,6 +314,8 @@ namespace MHServerEmu.Games.Entities
 
         public override void OnOverlapBegin(WorldEntity whom, Vector3 whoPos, Vector3 whomPos)
         {
+            base.OnOverlapBegin(whom, whoPos, whomPos);
+
             if (whom != null) OnCollide(whom, whoPos);
         }
 
@@ -295,14 +338,20 @@ namespace MHServerEmu.Games.Entities
             }
 
             bool collideWithWhom = false;
-            List<Power> collisionPowers = GetCollisionPowers(collidedWith);
+            List<Power> collisionPowers = ListPool<Power>.Instance.Get();
+            GetCollisionPowers(collisionPowers, collidedWith);
 
             if (collisionPowers.Count > 0 || missileAlwaysCollides)
             {
                 collideWithWhom = true;
                 if (collidedWith != null)
                 {
-                    if (CheckAndApplyMissileReflection(collidedWith, position)) return;
+                    if (CheckAndApplyMissileReflection(collidedWith, position))
+                    {
+                        ListPool<Power>.Instance.Return(collisionPowers);
+                        return;
+                    }
+
                     OnValidTargetHit(collidedWith);
                 }
             }
@@ -343,6 +392,8 @@ namespace MHServerEmu.Games.Entities
             }
 
             if (kill) Kill(collidedWith);
+
+            ListPool<Power>.Instance.Return(collisionPowers);
         }
 
         private bool OnCollideWithWorldGeometry()
@@ -382,7 +433,7 @@ namespace MHServerEmu.Games.Entities
                     locomotionOptions.Flags |= LocomotionFlags.LocomotionNoEntityCollide;
 
                 locomotor.FollowEntity(ownerId, 0f, locomotionOptions);
-                locomotor.FollowEntityMissingEvent.AddActionBack(ReturnTargetMissingEvent);
+                locomotor.FollowEntityMissingEvent.AddActionBack(ReturnTargetMissingAction);
             }
             else Kill();
         }
@@ -403,7 +454,7 @@ namespace MHServerEmu.Games.Entities
                 if (Game == null) return false;
                 if (Random.NextFloat() < absorbChancePct)
                 {
-                    // TODO checkAbsorb for collidedWith
+                    collidedWith.TryActivateOnMissileAbsorbedProcs();
                     return true; 
                 }
             }
@@ -453,9 +504,8 @@ namespace MHServerEmu.Games.Entities
             return Random.NextFloat() <= Properties[PropertyEnum.MissilePierceChance];
         }
 
-        private List<Power> GetCollisionPowers(WorldEntity collidedWith)
+        private void GetCollisionPowers(List<Power> powerList, WorldEntity collidedWith)
         {
-            List<Power> powerList = new();
             bool isOwner = collidedWith != null && collidedWith.Id == Properties[PropertyEnum.PowerUserOverrideID];
 
             if (IsReturningMissile && Properties[PropertyEnum.MissileReturning])
@@ -476,13 +526,14 @@ namespace MHServerEmu.Games.Entities
                 else
                     GetMissilePowersWithActivationEvent(powerList, collidedWith, MissilePowerActivationEventType.OnCollide);
             }
-
-            return powerList;
         }
 
         private void OnValidTargetHit(WorldEntity collidedWith)
         {
-            // TODO PropertyEnum.CreatorPowerPrototype HandleTriggerPowerEvent PowerEventType.OnMissileHit
+            NotifyCreatorPowerEvent(PowerEventType.OnMissileHit, collidedWith);
+
+            if (_contextPrototype?.ReturnWeaponOnlyOnMiss == true)
+                _returnWeapon = false;
         }
 
         private bool CheckAndApplyMissileReflection(WorldEntity collidedWith, Vector3 position)
@@ -543,7 +594,7 @@ namespace MHServerEmu.Games.Entities
                     StartMovement();
                 }
 
-                collidedWith.OnSkillshotReflected(this); // TODO check all virtual for this
+                collidedWith.OnSkillshotReflected(this);
                 return true;
             }
 
@@ -655,14 +706,46 @@ namespace MHServerEmu.Games.Entities
             }
         }
 
+        private void NotifyCreatorPowerEvent(PowerEventType eventType, WorldEntity other)
+        {
+            WorldEntity powerUser = Game.EntityManager.GetEntity<WorldEntity>(Properties[PropertyEnum.PowerUserOverrideID]);
+            if (powerUser == null)
+                return;
+
+            PrototypeId creatorPowerProtoRef = Properties[PropertyEnum.CreatorPowerPrototype];
+            if (creatorPowerProtoRef == PrototypeId.Invalid)
+                return;
+
+            Power power = powerUser.GetPower(creatorPowerProtoRef);
+            if (power == null)
+                return;
+
+            switch (eventType)
+            {
+                case PowerEventType.OnMissileHit:
+                    powerUser.TryActivateOnMissileHitProcs(power, other);
+                    power.HandleTriggerPowerEventOnMissileHit(other);
+                    break;
+
+                case PowerEventType.OnMissileKilled:
+                    power.HandleTriggerPowerEventOnMissileKilled(other, RegionLocation.Position);
+                    break;
+
+                default:
+                    Logger.Warn($"NotifyCreatorPowerEvent(): Unhandled event type {eventType}");
+                    break;
+            }
+        }
+
         public bool OnBounce(Vector3 position)
         {
             var gravitatedContext = GravitatedContext;
             if (gravitatedContext == null) return false;
 
-            List<Power> powerList = new();
+            List<Power> powerList = ListPool<Power>.Instance.Get();
             GetMissilePowersWithActivationEvent(powerList, null, MissilePowerActivationEventType.OnBounce);
             ActivateMissilePowers(powerList, null, position);
+            ListPool<Power>.Instance.Return(powerList);
 
             int numBounces = Properties[PropertyEnum.NumMissileBounces];
             if (++numBounces >= gravitatedContext.NumBounces)
@@ -695,7 +778,7 @@ namespace MHServerEmu.Games.Entities
                     var powerSettings = new PowerActivationSettings(targetId, targetPos, position)
                     {
                         VariableActivationTime = Properties[PropertyEnum.VariableActivationTimeMS],
-                        FXRandomSeed = (uint)Properties[PropertyEnum.VariationSeed]
+                        FXRandomSeed = Properties[PropertyEnum.VariationSeed]
                     };
 
                     // EntityHelper.CrateOrb(EntityHelper.TestOrb.Blue, RegionLocation.Position, Region);
@@ -750,6 +833,25 @@ namespace MHServerEmu.Games.Entities
                 return;
             }
             ScheduleEntityEvent(_pendingKillEvent, TimeSpan.Zero);
+        }
+
+        private void SetOwnerWeaponMissing(bool value)
+        {
+            if (_returnWeapon == false)
+                return;
+
+            if (Properties[PropertyEnum.PowerUsesReturningWeapon] == false)
+                return;
+
+            ulong missileCreatorId = Properties[PropertyEnum.MissileCreatorId];
+            if (missileCreatorId == InvalidId)
+                return;
+
+            WorldEntity missileCreator = Game.EntityManager.GetEntity<WorldEntity>(missileCreatorId);
+            if (missileCreator == null)
+                return;
+
+            missileCreator.Properties[PropertyEnum.WeaponMissing] = value;
         }
 
         private class PendingKillCallback : CallMethodEvent<Entity>

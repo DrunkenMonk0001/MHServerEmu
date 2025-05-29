@@ -3,6 +3,7 @@ using MHServerEmu.Core.Collisions;
 using MHServerEmu.Core.Extensions;
 using MHServerEmu.Core.Helpers;
 using MHServerEmu.Core.Logging;
+using MHServerEmu.Core.Memory;
 using MHServerEmu.Core.System.Random;
 using MHServerEmu.Core.VectorMath;
 using MHServerEmu.Games.Entities;
@@ -32,12 +33,13 @@ namespace MHServerEmu.Games.Populations
     public enum SpawnFlags
     {
         None            = 0,
-        flag1           = 1 << 0,
-        flag2           = 1 << 1,
-        flag4           = 1 << 2,
+        IgnoreSimulated = 1 << 0,
+        RetryIgnoringBlackout           = 1 << 1,
+        RetryForce           = 1 << 2,
         flag8           = 1 << 3,
         IgnoreBlackout  = 1 << 4,
-        Spawned         = 1 << 5,
+        IgnoreSpawned   = 1 << 5,
+        Cleanup         = 1 << 6,
     }
     #endregion
 
@@ -73,7 +75,7 @@ namespace MHServerEmu.Games.Populations
 
         public Vector3 GetParentRelativePosition() => Position;
 
-        public void SetParentRelativePosition(Vector3 position)
+        public void SetParentRelativePosition(in Vector3 position)
         {
             Position = position;
             Transform = Transform3.BuildTransform(Position, Orientation);
@@ -81,7 +83,7 @@ namespace MHServerEmu.Games.Populations
             SetLocationDirty();
         }
 
-        public void SetParentRelativeOrientation(Orientation orientation)
+        public void SetParentRelativeOrientation(in Orientation orientation)
         {
             Orientation = orientation;
             Transform = Transform3.BuildTransform(Position, Orientation);
@@ -107,8 +109,8 @@ namespace MHServerEmu.Games.Populations
         public virtual void SetLocationDirty() { }
         public virtual bool IsFormationObject() => false;
         public virtual bool Initialize() => false;
-        public virtual ulong Spawn(SpawnGroup group, WorldEntity spawner, List<WorldEntity> entities) { return 0; }
-        public virtual void UpgradeToRank(RankPrototype upgradeRank, int num) { }
+        public virtual ulong Spawn(SpawnGroup group, WorldEntity spawner, SpawnHeat spawnHeat, List<WorldEntity> entities) { return SpawnGroup.InvalidId; }
+        public virtual void UpgradeToRank(RankPrototype upgradeRank, ref int numUpgrade) { }
         public virtual void AssignAffixes(RankPrototype rankProto, List<PrototypeId> affixes) { }
         public virtual bool TestLayout() => false;
     }
@@ -121,7 +123,8 @@ namespace MHServerEmu.Games.Populations
         public SpawnFlags SpawnFlags { get; set; }
         public List<ClusterObject> Objects { get; private set; }
         public PrototypeId MissionRef { get; private set; }
-        public KeyValuePair<PrototypeId, Vector3> BlackOutZone { get; internal set; }
+        public KeyValuePair<PrototypeId, Vector3> BlackOutZone { get; set; }
+        public SpawnReservation Reservation { get; set; }
 
         public ClusterGroup(Region region, GRandom random, PopulationObjectPrototype populationObject,
             ClusterGroup parent, PropertyCollection properties, SpawnFlags flags)
@@ -135,6 +138,7 @@ namespace MHServerEmu.Games.Populations
                 Properties.FlattenCopyFrom(properties, false);
                 MissionRef = properties[PropertyEnum.MissionPrototype];
             }
+            Region.EvalRegionProperties(populationObject.EvalSpawnProperties, Properties);
 
             Objects = new();
             SubObjectRadiusMax = 0.0f;
@@ -165,8 +169,10 @@ namespace MHServerEmu.Games.Populations
                 PathFlags &= obj.PathFlags;
             }
 
-            if (SpawnFlags.HasFlag(SpawnFlags.IgnoreBlackout) == false && Flags.HasFlag(ClusterObjectFlag.Hostile))
-                SpawnFlags |= ObjectProto.IgnoreBlackout ? SpawnFlags.IgnoreBlackout : 0;
+            if (SpawnFlags.HasFlag(SpawnFlags.IgnoreBlackout) == false 
+                && Flags.HasFlag(ClusterObjectFlag.Hostile) 
+                && ObjectProto.IgnoreBlackout)
+                SpawnFlags |= SpawnFlags.IgnoreBlackout;
 
             InitializeRankAndMods();
 
@@ -208,7 +214,8 @@ namespace MHServerEmu.Games.Populations
         {
             if (fixedProto == null || fixedProto.Slots.IsNullOrEmpty()) return;
 
-            if (GetFormationObjects(out List<ClusterObject> formationObjects))
+            List<ClusterObject> formationObjects = ListPool<ClusterObject>.Instance.Get();
+            if (GetFormationObjects(formationObjects))
             {
                 int num = formationObjects.Count;
                 int slots = fixedProto.Slots.Length;
@@ -216,6 +223,7 @@ namespace MHServerEmu.Games.Populations
                 if (slots < num)
                 {
                     Logger.Warn($"[DESIGN] PopulationObject using FixedFormation with fewer slots than mobs in population. OBJECT={ObjectProto}");
+                    ListPool<ClusterObject>.Instance.Return(formationObjects);
                     return;
                 }
 
@@ -242,13 +250,15 @@ namespace MHServerEmu.Games.Populations
                     obj.SetParentRelativeOrientation(orientation);
                 }
             }
+            ListPool<ClusterObject>.Instance.Return(formationObjects);
         }
 
         private void DoArc(ArcFormationTypePrototype arcProto)
         {
             if (arcProto == null || arcProto.ArcRadians <= 0) return;
 
-            if (GetFormationObjects(out List<ClusterObject> formationObjects))
+            List<ClusterObject> formationObjects = ListPool<ClusterObject>.Instance.Get();
+            if (GetFormationObjects(formationObjects))
             {
                 int num = formationObjects.Count;
 
@@ -268,9 +278,10 @@ namespace MHServerEmu.Games.Populations
 
                 if (num > 2)
                 {
-                    List<ClusterObject> oldObjects = new(formationObjects);
+                    List<ClusterObject> oldObjects = ListPool<ClusterObject>.Instance.Get(formationObjects);
                     for (int i = 0; i < oldObjects.Count; i++)
                         formationObjects[GetAlternatingIndex(i, oldObjects.Count)] = oldObjects[i];
+                    ListPool<ClusterObject>.Instance.Return(oldObjects);
                 }
 
                 Vector3 pos = Vector3.Forward;
@@ -292,12 +303,14 @@ namespace MHServerEmu.Games.Populations
                     pos = Vector3.AxisAngleRotate(pos, Vector3.ZAxis, angle);
                 }
             }
+            ListPool<ClusterObject>.Instance.Return(formationObjects);
         }
 
         private void DoLine(LineFormationTypePrototype lineProto)
         {
             if (lineProto == null) return;
-            if (GetFormationObjects(out List<ClusterObject> formationObjects))
+            List<ClusterObject> formationObjects = ListPool<ClusterObject>.Instance.Get();
+            if (GetFormationObjects(formationObjects))
             {
                 int numRows = lineProto.Rows.HasValue() ? lineProto.Rows.Length : 1;
                 float center = 0f;
@@ -356,6 +369,7 @@ namespace MHServerEmu.Games.Populations
                     }
                 }
             }
+            ListPool<ClusterObject>.Instance.Return(formationObjects);
         }
 
         private static int GetAlternatingIndex(int index, int length)
@@ -377,7 +391,8 @@ namespace MHServerEmu.Games.Populations
             const int MaxObjects = 4;
             float width = SubObjectRadiusMax * 2.0f;
 
-            if (GetFormationObjects(out List<ClusterObject> formationObjects))
+            List<ClusterObject> formationObjects = ListPool<ClusterObject>.Instance.Get();
+            if (GetFormationObjects(formationObjects))
             {
                 int box = 0;
                 int formationIndex = 0;
@@ -389,7 +404,11 @@ namespace MHServerEmu.Games.Populations
                     {
                         obj.SetParentRelativePosition(Vector3.Zero);
                         obj.SetParentRelativeOrientation(Orientation.Zero);
-                        if (++formationIndex == formationObjects.Count) return;
+                        if (++formationIndex == formationObjects.Count)
+                        {
+                            ListPool<ClusterObject>.Instance.Return(formationObjects);
+                            return;
+                        }
                     }
                     else
                     {
@@ -414,7 +433,11 @@ namespace MHServerEmu.Games.Populations
                                 pos.Y = point.Y * width;
                                 obj.SetParentRelativePosition(pos);
                                 obj.SetParentRelativeOrientation(DoFacing(boxProto.Facing, pos));
-                                if (++formationIndex == formationObjects.Count) return;
+                                if (++formationIndex == formationObjects.Count)
+                                {
+                                    ListPool<ClusterObject>.Instance.Return(formationObjects);
+                                    return;
+                                }
                                 obj = formationObjects[formationIndex];
                             }
                         }
@@ -422,22 +445,33 @@ namespace MHServerEmu.Games.Populations
                     box++;
                 }
             }
+            ListPool<ClusterObject>.Instance.Return(formationObjects);
         }
 
-        private static Orientation DoFacing(FormationFacing facing, Vector3 pos)
+        private static Orientation DoFacing(FormationFacing facing, in Vector3 delta)
         {
             return facing switch
             {
                 FormationFacing.FaceParentInverse => Orientation.FromDeltaVector2D(Vector3.Back),
-                FormationFacing.FaceOrigin => Orientation.FromDeltaVector2D(-pos),
-                FormationFacing.FaceOriginInverse => Orientation.FromDeltaVector2D(pos),
+                FormationFacing.FaceOrigin => Orientation.FromDeltaVector2D(-delta),
+                FormationFacing.FaceOriginInverse => Orientation.FromDeltaVector2D(delta),
                 _ => Orientation.Zero
             };
         }
 
-        private bool GetFormationObjects(out List<ClusterObject> formationObjects)
+        private static Orientation DoTestFacing(FormationFacing facing, in Vector3 delta, in Orientation orientation)
         {
-            formationObjects = new();
+            return facing switch
+            {
+                FormationFacing.FaceParentInverse => new(orientation.Yaw + MathHelper.Pi, orientation.Pitch, orientation.Roll),
+                FormationFacing.FaceOrigin => Orientation.FromDeltaVector2D(delta),
+                FormationFacing.FaceOriginInverse => Orientation.FromDeltaVector2D(-delta),
+                _ => orientation
+            };
+        }
+
+        private bool GetFormationObjects(List<ClusterObject> formationObjects)
+        {
             foreach (ClusterObject obj in Objects)
                 if (obj?.IsFormationObject() == true)
                     formationObjects.Add(obj);
@@ -446,217 +480,239 @@ namespace MHServerEmu.Games.Populations
         }
 
         private void InitializeRankAndMods()
-        {
-            // TODO affixes system
-            /*      
-                PopulationGlobalsPrototype popGlobals = GameDatabase.GetPopulationGlobalsPrototype();
-                if (popGlobals == null) return;
+        {                  
+            var popGlobals = GameDatabase.PopulationGlobalsPrototype;
+            if (popGlobals == null) return;
 
-                TuningTable difficulty = Region.Difficulty;
-                if (difficulty == null) return;
+            var difficulty = Region.TuningTable;
+            if (difficulty == null) return;
 
-                TuningPrototype tuningProto = difficulty.GetPrototype();
-                if (tuningProto == null) return;
+            var tuningProto = difficulty.Prototype;
+            if (tuningProto == null) return;
 
-                GRandom random = Region.Game.Random; // GetCurrent
+            var random = Region.Game.Random;
 
-                HashSet<PrototypeId> overrides = GetMobAffixesFromProperties();
-                RankPrototype popcornRank = popGlobals.GetRankByEnum(Rank.Popcorn);
-                Region.ApplyRegionAffixesEnemyBoosts(popcornRank.DataRef, overrides);
+            HashSet<PrototypeId> overrides = HashSetPool<PrototypeId>.Instance.Get();
+            GetMobAffixesFromProperties(overrides);
 
-                if (overrides.Count == 0 && HasModifiableEntities() == false) return;
+            var popcornRank = popGlobals.GetRankByEnum(Rank.Popcorn);
+            Region.ApplyRegionAffixesEnemyBoosts(popcornRank.DataRef, overrides);
 
-                HashSet<PrototypeId> exemptOverrides = new();
+            if (overrides.Count == 0 && HasModifiableEntities() == false)
+            {
+                HashSetPool<PrototypeId>.Instance.Return(overrides);
+                return;
+            }
+
+            HashSet<PrototypeId> exemptOverrides = HashSetPool<PrototypeId>.Instance.Get();
+            ShiftExemptFromOverrides(overrides, exemptOverrides);
+
+            List<RankPrototype> ranks = ListPool<RankPrototype>.Instance.Get();
+            GetRanks(ranks);
+
+            var rollRank = difficulty.RollRank(ranks, overrides.Count == 0);
+
+            int numUpgrade = -1;
+            if (rollRank.Rank == Rank.MiniBoss) numUpgrade = 1;
+
+            UpgradeToRank(rollRank, ref numUpgrade);
+
+            ranks.Clear();
+            GetRanks(ranks);
+
+            HashSet<PrototypeId> affixesSet = HashSetPool<PrototypeId>.Instance.Get();
+            List<PrototypeId> slots = ListPool<PrototypeId>.Instance.Get();
+            HashSet<PrototypeId> currentAffixes = HashSetPool<PrototypeId>.Instance.Get();
+            HashSet<PrototypeId> excludeAffixes = HashSetPool<PrototypeId>.Instance.Get();
+
+            foreach (var rankProto in ranks)
+            {
+                var rankEntryProto = tuningProto.GetDifficultyRankEntry(Region.DifficultyTierRef, rankProto);
+
+                GetMobAffixesFromProperties(overrides);
+                Region.ApplyRegionAffixesEnemyBoosts(rankProto.DataRef, overrides);
                 ShiftExemptFromOverrides(overrides, exemptOverrides);
+                affixesSet.Insert(overrides);
 
-                List<RankPrototype> ranks = new();
-                GetRanks(ranks);
+                int maxAffixes = (rankEntryProto != null) ? rankEntryProto.GetMaxAffixes() : 0;
+                slots.Clear();
+                for (int slot = 0; slot < maxAffixes; slot++) slots.Add(PrototypeId.Invalid); 
 
-                RankPrototype rollRank = difficulty.RollRank(ranks, overrides);
-
-                int numUpgrade = -1;
-                if (rollRank.Rank == Rank.MiniBoss) numUpgrade = 1;
-
-                UpgradeToRank(rollRank, numUpgrade);
-
-                ranks.Clear();
-                GetRanks(ranks);
-
-                HashSet<PrototypeId> affixesSet = new();
-                foreach (RankPrototype rankProto in ranks)
-                {
-                    RankAffixEntryPrototype rankEntryProto = tuningProto.GetDifficultyRankEntry(Region.GetDifficultyTierRef(), rankProto);
-
-                    overrides = GetMobAffixesFromProperties();
-                    Region.ApplyRegionAffixesEnemyBoosts(rankProto.DataRef, overrides);
-                    ShiftExemptFromOverrides(overrides, exemptOverrides);
-                    affixesSet.UnionWith(overrides);
-
-                    int maxAffixes = (rankEntryProto != null) ? rankEntryProto.GetMaxAffixes() : 0;
-                    List<PrototypeId> slots = new (maxAffixes);
-
-                    if (overrides.Count > 0 && rankEntryProto != null)
+                if (overrides.Count > 0 && rankEntryProto != null)
+                    for (int slot = maxAffixes - 1; slot >= 0; slot--)
                     {
-                        for (int slot = maxAffixes - 1; slot >= 0; slot--)
-                        {
-                            AffixTableEntryPrototype affixProto = rankEntryProto.GetAffixSlot(slot);
-                            if (affixProto == null) continue;
+                        var affixProto = rankEntryProto.GetAffixSlot(slot);
+                        if (affixProto == null) continue;
 
-                            if (slots[slot] == PrototypeId.Invalid)
-                            {
-                                foreach (PrototypeId overrideRef in overrides)
+                        if (slots[slot] == PrototypeId.Invalid)
+                            foreach (var overrideRef in overrides)
+                                if (affixProto.AffixTable == PrototypeId.Invalid || affixProto.AffixTablePrototype.Contains(overrideRef))
                                 {
-                                    if (affixProto.AffixTable == PrototypeId.Invalid || affixProto.GetAffixTablePrototype().Contains(overrideRef))
-                                    {
-                                        slots[slot] = overrideRef;
-                                        overrides.Remove(overrideRef);
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    if (overrides.Count > 0)
-                    {
-                        for (int slot = maxAffixes - 1; slot >= 0; slot--)
-                        {
-                            if (slots[slot] == PrototypeId.Invalid)
-                            {
-                                if (overrides.Count > 0)
-                                {
-                                    PrototypeId overrideRef = overrides.First();
                                     slots[slot] = overrideRef;
                                     overrides.Remove(overrideRef);
+                                    break;
                                 }
-                            }
-                        }
                     }
 
-                    if (overrides.Count > 0)
-                    {
-                        slots.AddRange(overrides);
-                        overrides.Clear();
-                    }
-
-                    if (rankEntryProto != null)
-                    {
-                        HashSet<PrototypeId> currentAffixes = new ();
-                        HashSet<PrototypeId> excludeAffixes = new ();
-                        currentAffixes.UnionWith(affixesSet);
-
-                        for (int slot = 0; slot < slots.Count; ++slot)
+                if (overrides.Count > 0)
+                    for (int slot = maxAffixes - 1; slot >= 0; slot--)
+                        if (slots[slot] == PrototypeId.Invalid)
                         {
-                            if (slots[slot] != PrototypeId.Invalid)
-                            {
-                                currentAffixes.Remove(slots[slot]);
-                                excludeAffixes.Add(slots[slot]);
-                            }
+                            var overrideRef = overrides.First();
+                            slots[slot] = overrideRef;
+                            overrides.Remove(overrideRef);
+                            if (overrides.Count == 0) break;
                         }
 
-                        for (int slot = 0; slot < slots.Count; ++slot)
-                        {
-                            if (slots[slot] == PrototypeId.Invalid)
-                            {
-                                AffixTableEntryPrototype affixProto = rankEntryProto.GetAffixSlot(slot);
-                                if (affixProto == null) continue;
-
-                                PrototypeId affixRef = affixProto.RollAffix(random, currentAffixes, excludeAffixes);
-                                if (affixRef != PrototypeId.Invalid)
-                                {
-                                    slots[slot] = affixRef;
-                                    affixesSet.Add(affixRef);
-                                    currentAffixes.Remove(affixRef);
-                                    excludeAffixes.Add(affixRef);
-                                }
-                            }
-                        }
-                    }
-
-                    if (exemptOverrides.Count > 0)
-                    {
-                        for (int slot = 0; slot < slots.Count; ++slot)
-                        {
-                            if (slots[slot] == PrototypeId.Invalid)
-                            {
-                                if (exemptOverrides.Count > 0)
-                                {
-                                    PrototypeId overrideR = exemptOverrides.First();
-                                    slots[slot] = overrideR;
-                                    exemptOverrides.Remove(overrideR);
-                                }
-                            }
-                        }
-                    }
-
-                    if (exemptOverrides.Count > 0)
-                        slots.AddRange(exemptOverrides);
-
-                    exemptOverrides.Clear();
-
-                    AssignAffixes(rankProto, slots);
+                if (overrides.Count > 0)
+                {
+                    slots.AddRange(overrides);
+                    overrides.Clear();
                 }
 
-                foreach (var obj in Objects)
-                {   
-                    if (obj is ClusterEntity entity)
-                    {
-                        bool twinBoost = false;
-                        foreach (var modRef in entity.Modifiers)
+                if (rankEntryProto != null)
+                {
+                    currentAffixes.Set(affixesSet);
+                    excludeAffixes.Clear();
+
+                    foreach (var slot in slots)
+                        if (slot != PrototypeId.Invalid)
                         {
-                            if (modRef == popGlobals.TwinEnemyBoost)
-                            {
-                                twinBoost = true;
-                                break;
-                            }
+                            currentAffixes.Remove(slot);
+                            excludeAffixes.Add(slot);
                         }
 
-                        if (twinBoost)
+                    for (int slot = 0; slot < slots.Count; slot++)
+                        if (slots[slot] == PrototypeId.Invalid)
                         {
-                            if (entity.EntityProto.Rank != PrototypeId.Invalid && entity.EntityProto.GetRankPrototype().IsRankBoss())
+                            var affixProto = rankEntryProto.GetAffixSlot(slot);
+                            if (affixProto == null) continue;
+
+                            var affixRef = affixProto.RollAffix(random, currentAffixes, excludeAffixes);
+                            if (affixRef != PrototypeId.Invalid)
                             {
-                                ClusterEntity newEntity = CreateClusterEntity(entity.EntityRef);
-                                if (newEntity != null)
-                                {
-                                    newEntity.RankProto = popGlobals.TwinEnemyRank; // Prototype <T> operator = (PrototypeId)
-                                    newEntity.Modifiers = entity.Modifiers;
-                                }
-                                break;
+                                slots[slot] = affixRef;
+                                affixesSet.Add(affixRef);
+                                currentAffixes.Remove(affixRef);
+                                excludeAffixes.Add(affixRef);
                             }
                         }
-                    }
                 }
-            */
+
+                if (exemptOverrides.Count > 0)
+                    for (int slot = 0; slot < slots.Count; slot++)
+                        if (slots[slot] == PrototypeId.Invalid)
+                        {
+                            var overrideRef = exemptOverrides.First();
+                            slots[slot] = overrideRef;
+                            exemptOverrides.Remove(overrideRef);
+                            if (exemptOverrides.Count == 0) break;
+                        }
+
+                if (exemptOverrides.Count > 0)
+                    slots.AddRange(exemptOverrides);
+
+                exemptOverrides.Clear();
+
+                AssignAffixes(rankProto, slots);
+            }
+
+            foreach (var obj in Objects)
+                if (obj is ClusterEntity entity)
+                {
+                    bool twinBoss = false;
+                    foreach (var modRef in entity.Modifiers)
+                        if (modRef == popGlobals.TwinEnemyBoost)
+                        {
+                            twinBoss = true;
+                            break;
+                        }
+
+                    if (twinBoss)
+                        if (entity.EntityProto.Rank != PrototypeId.Invalid && entity.EntityProto.RankPrototype.IsRankBoss)
+                        {
+                            var newEntity = CreateClusterEntity(entity.EntityRef);
+                            if (newEntity != null)
+                            {
+                                newEntity.RankProto = popGlobals.TwinEnemyRank.As<RankPrototype>();
+                                newEntity.Modifiers.Set(entity.Modifiers);
+                            }
+                            break;
+                        }
+                }
+
+            HashSetPool<PrototypeId>.Instance.Return(overrides);
+            HashSetPool<PrototypeId>.Instance.Return(exemptOverrides);
+            ListPool<RankPrototype>.Instance.Return(ranks);
+            HashSetPool<PrototypeId>.Instance.Return(affixesSet);
+            ListPool<PrototypeId>.Instance.Return(slots);
+            HashSetPool<PrototypeId>.Instance.Return(currentAffixes);
+            HashSetPool<PrototypeId>.Instance.Return(excludeAffixes);
         }
 
-        public override void UpgradeToRank(RankPrototype upgradeRank, int num)
+        public override void UpgradeToRank(RankPrototype upgradeRank, ref int numUpgrade)
         {
-            throw new NotImplementedException();
+            foreach (var clusterObject in Objects)
+                clusterObject?.UpgradeToRank(upgradeRank, ref numUpgrade);
         }
 
         public override void AssignAffixes(RankPrototype rankProto, List<PrototypeId> affixes)
         {
-            throw new NotImplementedException();
+            foreach (var clusterObject in Objects)
+                clusterObject?.AssignAffixes(rankProto, affixes);
+        }
+
+        private static void ShiftExemptFromOverrides(HashSet<PrototypeId> overrides, HashSet<PrototypeId> exemptOverrides)
+        {
+            List<PrototypeId> toRemove = ListPool<PrototypeId>.Instance.Get();
+
+            foreach (var overrideRef in overrides)
+            {
+                var overrideProto = overrideRef.As<EnemyBoostPrototype>();
+                if (overrideProto == null || overrideProto.CountsAsAffixSlot == false)
+                {
+                    exemptOverrides.Add(overrideRef);
+                    toRemove.Add(overrideRef);
+                }
+            }
+
+            foreach (var overrideRef in toRemove)
+                overrides.Remove(overrideRef);
+
+            ListPool<PrototypeId>.Instance.Return(toRemove);
         }
 
         private void GetRanks(List<RankPrototype> ranks)
         {
-            throw new NotImplementedException();
-        }
-
-        private void ShiftExemptFromOverrides(HashSet<PrototypeId> overrides, HashSet<PrototypeId> exemptOverrides)
-        {
-            throw new NotImplementedException();
+            foreach (var obj in Objects)
+            {
+                if (obj is ClusterGroup group)
+                    group.GetRanks(ranks);
+                else if (obj is ClusterEntity entity && entity.RankProto != null)
+                    if (ranks.Contains(entity.RankProto) == false)
+                        ranks.Add(entity.RankProto);                    
+            }
         }
 
         private bool HasModifiableEntities()
         {
-            throw new NotImplementedException();
+            foreach (var obj in Objects)
+            {
+                if (obj is ClusterGroup group && group.HasModifiableEntities()) return true;
+                else if (obj is ClusterEntity entity && entity.Flags.HasFlag(ClusterObjectFlag.HasModifiers)) return true;
+            }
+            return false;
         }
 
-        private HashSet<PrototypeId> GetMobAffixesFromProperties()
+        private bool GetMobAffixesFromProperties(HashSet<PrototypeId> mobAffixes)
         {
-            throw new NotImplementedException();
+            mobAffixes.Clear();
+            foreach (var kvp in Properties.IteratePropertyRange(PropertyEnum.EnemyBoost))
+            {
+                Property.FromParam(kvp.Key, 0, out PrototypeId affix);
+                mobAffixes.Add(affix);
+            }
+            return mobAffixes.Count > 0;
         }
 
         public ClusterEntity CreateClusterEntity(PrototypeId entityRef)
@@ -693,7 +749,7 @@ namespace MHServerEmu.Games.Populations
             Parent?.UpdateBounds(this);
         }
 
-        public override ulong Spawn(SpawnGroup group, WorldEntity spawner, List<WorldEntity> entities)
+        public override ulong Spawn(SpawnGroup group, WorldEntity spawner, SpawnHeat spawnHeat, List<WorldEntity> entities)
         {
             var manager = Region.PopulationManager;
 
@@ -705,39 +761,46 @@ namespace MHServerEmu.Games.Populations
                     group.EncounterRef = populationEncounter.GetEncounterRef();
                 group.ObjectProto = ObjectProto;
                 group.MissionRef = MissionRef;
-                group.SpawnerId = spawner != null ? spawner.Id : 0;
+                group.Reservation = Reservation;
+                group.SpawnHeat = spawnHeat;
+                group.SpawnCleanup = SpawnFlags.HasFlag(SpawnFlags.Cleanup);
+                group.SpawnerId = spawner != null ? spawner.Id : Entity.InvalidId;
             }
-            if (group == null) return 0;
+            if (group == null) return SpawnGroup.InvalidId;
 
-            foreach (var obj in Objects) obj.Spawn(group, spawner, entities);
+            foreach (var obj in Objects)
+                if (obj.Spawn(group, spawner, spawnHeat, entities) == SpawnGroup.InvalidId)
+                {
+                    if (Parent == null) 
+                        manager.RemoveSpawnGroup(group.Id);
+                    return 0;
+                }
 
-            var position = GetAbsolutePosition();
+            if (ObjectProto is PopulationEncounterPrototype encounter && Reservation != null)
+            {
+                var cell = Region.GetCellAtPosition(GetAbsolutePosition());
+                if (cell != null && Reservation.Cell == cell && encounter.HasClientData())
+                {
+                    cell.AddEncounter(encounter.EncounterResource, Reservation.Id, encounter.UseMarkerOrientation);
+                    group.EncounterCell = cell;
+                }
+            }
+
             if (ObjectProto.Riders.HasValue())
                 foreach (var rider in ObjectProto.Riders)
                     if (rider is PopulationRiderBlackOutPrototype blackOutProto)
-                    {
-                        var blackout = GameDatabase.GetPrototype<BlackOutZonePrototype>(blackOutProto.BlackOutZone);
-                        manager.SpawnBlackOutZone(position, blackout.BlackOutRadius, MissionRef);
-                    }
+                        manager.SpawnBlackOutZoneForGroup(group, blackOutProto.BlackOutZone);
 
             if (BlackOutZone.Key != PrototypeId.Invalid)
-            {
-                var blackout = GameDatabase.GetPrototype<BlackOutZonePrototype>(BlackOutZone.Key);
-                manager.SpawnBlackOutZone(position, blackout.BlackOutRadius, MissionRef);
-            }
+                manager.SpawnBlackOutZoneForGroup(group, BlackOutZone.Key);
+
             return group.Id;
         }
 
-        public bool PickPositionInSector(Vector3 position, Orientation orientation, int minDistance, int maxDistance)
+        public bool PickPositionInSector(in Vector3 position, in Orientation orientation, int minDistance, int maxDistance, FormationFacing spawnFacing = FormationFacing.FaceParent)
         {
             if (minDistance < 0.0f || maxDistance <= 0.0f || minDistance > maxDistance || Radius == 0)
-            {
-                SetParentRelativePosition(position);
-                SetParentRelativeOrientation(orientation);
-                if (TestLayout()) return false;
-                minDistance = (int)Radius;
-                maxDistance = (int)Radius * 4;
-            }
+                return false;
 
             const int MaxSectors = 5; // DistanceMax 250 / 50 (Average Cluster) = 5 sectors
             float clusterSize = Radius * 2.0f;
@@ -752,37 +815,41 @@ namespace MHServerEmu.Games.Populations
             float distance = minClusterDistance;
             for (int sector = 0; sector < MaxSectors; sector++)
             {
-                int numClusters = (int)Math.Floor(clusterPI * distance);
+                int numClusters = MathHelper.RoundDownToInt(clusterPI * distance);
                 sectorPicker.Add(sector, numClusters);
 
                 distance += clusterSize;
                 maxClusterDistance += clusterSize;
                 if (maxClusterDistance > maxDistance) break;
             }
-            float shiftAngle = Random.NextFloat() * 2;
             while (sectorPicker.Empty() == false)
             {
                 if (sectorPicker.PickRemove(out int sector) == false) return false;
                 distance = minClusterDistance + sector * clusterSize;
-                int numClusters = (int)MathF.Floor(clusterPI * distance);
+                int numClusters = MathHelper.RoundDownToInt(clusterPI * distance);
                 int startCluster = Random.Next(numClusters);
                 float clusterAngle = MathHelper.TwoPi / numClusters;
 
                 for (int cluster = 0; cluster < numClusters; cluster++)
                 {
-                    int div = startCluster + cluster;
-                    float angle = clusterAngle * div + shiftAngle;
-                    (float rotSin, float rotCos) = MathF.SinCos(Orientation.WrapAngleRadians(angle));
+                    int angle = (startCluster + cluster) % numClusters;
+                    (float rotSin, float rotCos) = MathF.SinCos(Orientation.WrapAngleRadians(clusterAngle * angle));
                     Vector3 testPosition = new(position.X + distance * rotCos, position.Y + distance * rotSin, position.Z);
                     if (Region.GetCellAtPosition(testPosition) == null) continue;
-                    SetParentRelativePosition(testPosition);
-                    if (DebugLog) Logger.Debug($"testPostions = {testPosition}");
-                    SetParentRandomOrientation(orientation);
-                    // Logger.Debug($"AbsolutePostions = {GetAbsolutePosition().ToStringFloat()}");
-                    if (TestLayout()) return true;
+                    Orientation testOrientation = orientation;
+                    if (spawnFacing != FormationFacing.FaceParent)
+                        testOrientation = DoTestFacing(spawnFacing, position - testPosition, orientation);
+                    if (SetParentRelative(testPosition, testOrientation)) return true;
                 }
             }
             return false;
+        }
+
+        public bool SetParentRelative(in Vector3 position, in Orientation orientation)
+        {
+            SetParentRelativePosition(position);
+            SetParentRelativeOrientation(orientation);
+            return TestLayout();
         }
 
         public bool PickPositionInBounds(in Aabb bound)
@@ -792,8 +859,8 @@ namespace MHServerEmu.Games.Populations
             var min = bound.Min;
             var max = bound.Max;
             var center = bound.Center;
-            float clusterSize = Radius;
-            List<Point2> points = new();
+            float clusterSize = Math.Max(Radius, 32.0f);
+            List<Point2> points = ListPool<Point2>.Instance.Get();
 
             for (float x = min.X; x < max.X; x += clusterSize)
                 for (float y = min.Y; y < max.Y; y += clusterSize)
@@ -801,18 +868,22 @@ namespace MHServerEmu.Games.Populations
 
             Random.ShuffleList(points);
             int tries = Math.Min(points.Count, 256);
+            bool success = false;
 
             for (int i = 0; i < tries; i++)
             {
                 var point = points[i];
                 Vector3 testPosition = new(point.X, point.Y, center.Z);
-                SetParentRelativePosition(testPosition);
-                Orientation orientation = new(-MathHelper.PiOver2, 0.0f, 0.0f);
-                SetParentRandomOrientation(orientation);
-                if (TestLayout()) return true;
+                Orientation orientation = Orientation.Player;
+                if (SetParentRelative(testPosition, orientation))
+                {
+                    success = true;
+                    break;
+                }
             }
 
-            return false;
+            ListPool<Point2>.Instance.Return(points);
+            return success;
         }
 
         private void SetParentRandomOrientation(Orientation orientation)
@@ -841,6 +912,8 @@ namespace MHServerEmu.Games.Populations
         public RankPrototype RankProto { get; set; }
         public HashSet<PrototypeId> Modifiers { get; set; }
         public SpawnFlags SpawnFlags => Parent != null ? Parent.SpawnFlags : SpawnFlags.None;
+
+        public PrototypeId RankRef { get => RankProto != null ? RankProto.DataRef : PrototypeId.Invalid; }
 
         public ClusterEntity(Region region, GRandom random, PrototypeId selectorRef, ClusterGroup parent)
             : base(region, random, parent)
@@ -890,12 +963,12 @@ namespace MHServerEmu.Games.Populations
             PathFlags = Locomotor.GetPathFlags(EntityProto.NaviMethod);
 
             RankProto = EntityProto.RankPrototype;
-            /*
+            
             if (Parent != null)
             {
-                PrototypeId rankRef = Parent.Properties.GetProperty<PrototypeId>(PropertyEnum.Rank);
-                RankProto = RankPrototype.DoOverride(RankProto, rankRef);
-            }*/
+                PrototypeId rankRef = Parent.Properties[PropertyEnum.Rank];
+                RankProto = RankPrototype.DoOverride(RankProto, rankRef.As<RankPrototype>());
+            }
 
             if ((EntityProto.ModifierSetEnable
                 || EntityProto.ModifiersGuaranteed.HasValue())
@@ -927,7 +1000,7 @@ namespace MHServerEmu.Games.Populations
                 Center = regionPos + new Vector3(0.0f, 0.0f, Bounds.HalfHeight)
             };
 
-            if (SpawnFlags.HasFlag(SpawnFlags.Spawned) == false)
+            if (SpawnFlags.HasFlag(SpawnFlags.IgnoreSpawned) == false)
             {
                 Sphere sphere = new(bounds.Center, bounds.Radius);
                 foreach (var entity in Region.IterateEntitiesInVolume(sphere, new()))
@@ -956,11 +1029,10 @@ namespace MHServerEmu.Games.Populations
             return position;
         }
 
-
-        public override ulong Spawn(SpawnGroup group, WorldEntity spawner, List<WorldEntity> entities)
+        public override ulong Spawn(SpawnGroup group, WorldEntity spawner, SpawnHeat spawnHeat, List<WorldEntity> entities)
         {
             var manager = Region.PopulationManager;
-            if (group == null) return 0;
+            if (group == null) return SpawnGroup.InvalidId;
             // PropertyCollection, events
 
             var pos = GetAbsolutePosition();
@@ -984,18 +1056,27 @@ namespace MHServerEmu.Games.Populations
             spec.Properties = new();
             spec.Properties.FlattenCopyFrom(Parent.Properties, false);
 
+            spec.Properties[PropertyEnum.Rank] = RankRef;
+
+            foreach (var modRef in Modifiers)
+                spec.Properties[PropertyEnum.EnemyBoost, modRef] = true;
+
             if (EntityProto != null)
                 spec.AppendActions(EntityProto.EntitySelectorActions);
+
             if (EntitySelectorProto != null)
             {
+                Region.EvalRegionProperties(EntitySelectorProto.EvalSpawnProperties, spec.Properties);
                 spec.AppendActions(EntitySelectorProto.EntitySelectorActions);
                 if (EntitySelectorProto.IgnoreMissionOwnerForTargeting)
                     spec.Properties[PropertyEnum.IgnoreMissionOwnerForTargeting] = true;
             }
-            spec.MissionRef = Parent.MissionRef;
-            // TODO set Rank
 
+            spec.MissionRef = Parent.MissionRef;
+            spec.EncounterSpawnPhase = EncounterSpawnPhase;
+            
             spec.Spawn();
+
             if (spec.ActiveEntity != null)
                 entities.Add(spec.ActiveEntity);
 
@@ -1017,14 +1098,24 @@ namespace MHServerEmu.Games.Populations
             Flags &= ~ClusterObjectFlag.ProjectToFloor;
         }
 
-        public override void UpgradeToRank(RankPrototype upgradeRank, int num)
+        public override void UpgradeToRank(RankPrototype upgradeRank, ref int numUpgrade)
         {
-            throw new NotImplementedException();
+            bool upgrade = (numUpgrade < 0) || (numUpgrade > 0);
+            if (numUpgrade > 0) numUpgrade--;
+
+            if (upgrade && Flags.HasFlag(ClusterObjectFlag.HasModifiers))
+                RankProto = RankPrototype.DoOverride(RankProto, upgradeRank);
         }
 
         public override void AssignAffixes(RankPrototype rankProto, List<PrototypeId> affixes)
         {
-            throw new NotImplementedException();
+            if (RankProto == rankProto)
+                foreach (var affixRef in affixes)
+                    if (affixRef != PrototypeId.Invalid)
+                        Modifiers.Add(affixRef);
+
+            if (EntityProto.ModifiersGuaranteed.HasValue())
+                Modifiers.Insert(EntityProto.ModifiersGuaranteed);
         }
     }
 }

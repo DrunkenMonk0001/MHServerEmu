@@ -1,8 +1,9 @@
-﻿using MHServerEmu.Core.Extensions;
+﻿using MHServerEmu.Core.Collections;
+using MHServerEmu.Core.Extensions;
+using MHServerEmu.Games.Common;
 using MHServerEmu.Games.Entities;
 using MHServerEmu.Games.GameData;
 using MHServerEmu.Games.GameData.Prototypes;
-using MHServerEmu.Games.Common;
 using MHServerEmu.Games.Missions;
 
 namespace MHServerEmu.Games.Dialog
@@ -34,9 +35,9 @@ namespace MHServerEmu.Games.Dialog
         public MissionStateFlags MissionState { get; private set; }
         public sbyte ObjectiveIndex { get; private set; }
         public MissionObjectiveStateFlags ObjectiveState { get; private set; }
-        public SortedSet<PrototypeId> InterestRegions { get; private set; }
-        public SortedSet<PrototypeId> InterestAreas { get; private set; }
-        public SortedSet<PrototypeId> InterestCells { get; private set; }
+        public HashSet<PrototypeId> InterestRegions { get; private set; }
+        public HashSet<PrototypeId> InterestAreas { get; private set; }
+        public HashSet<PrototypeId> InterestCells { get; private set; }
         public bool HasObjective => ObjectiveIndex != -1;
 
         public BaseMissionOption()
@@ -69,10 +70,13 @@ namespace MHServerEmu.Games.Dialog
 
         public MissionObjective GetObjective(Mission mission)
         {
+            if (mission == null) return null;
+            if (MissionProto.DataRef == mission.PrototypeDataRef)
+                return mission.GetObjectiveByPrototypeIndex((byte)ObjectiveIndex);
             return null;
         }
 
-        internal bool IsActiveForMissionAndEntity(Mission mission, WorldEntity interactee)
+        public bool IsActiveForMissionAndEntity(Mission mission, WorldEntity interactee)
         {
             bool isActive = false;
 
@@ -107,12 +111,153 @@ namespace MHServerEmu.Games.Dialog
             return isActive;
         }
 
-        internal void SetInteractDataObjectiveFlags(Player interactingPlayer, ref InteractData outInteractData, Mission mission, BaseMissionOption completeOption)
+        public void SetInteractDataObjectiveFlags(Player player, ref InteractData outInteractData, Mission mission, BaseMissionOption option)
         {
+            if (MissionProto == null) return;
+
+            var flags = PlayerHUDEnum.HasObjectives;
+
+            MissionObjectivePrototype objectiveProto;
+            MissionObjective objective = null;
+            if (HasObjective) objective = GetObjective(mission);
+
+            if (option is MissionConditionMissionCompleteOption completeOption)
+            {
+                if (completeOption.ObjectiveFlagsAllowed() == false) return;
+
+                if (GetMissionAndObjective(player, out Mission completeMission, out MissionObjective completeObjective))
+                {
+                    var completeProto = completeOption.Proto as MissionConditionMissionCompletePrototype;
+                    switch (completeProto.ShowObjs)
+                    {
+                        case MissionShowObjsSettings.FromThisMission:
+                            objectiveProto = completeObjective?.Prototype;
+                            flags |= GetPlayerHUDFlags(completeMission.Prototype, objectiveProto);
+                            outInteractData.PlayerHUDFlags |= flags;
+                            outInteractData.PlayerHUDArrowDistanceOverride = Math.Max(outInteractData.PlayerHUDArrowDistanceOverride, GetPlayerHUDArrowDistanceOverride(objectiveProto));
+                            outInteractData.InsertMissionObjective(completeMission, completeObjective, option, flags);
+                            break;
+
+                        case MissionShowObjsSettings.FromTargetMission:
+                            objectiveProto = objective?.Prototype;
+                            if (this is not MissionHintOption && objectiveProto != null && objectiveProto.ObjectiveHints.HasValue()) return;
+                            flags |= GetPlayerHUDFlags(mission.Prototype, objectiveProto);
+                            outInteractData.PlayerHUDFlags |= flags;
+                            outInteractData.PlayerHUDArrowDistanceOverride = Math.Max(outInteractData.PlayerHUDArrowDistanceOverride, GetPlayerHUDArrowDistanceOverride(objectiveProto));
+                            outInteractData.InsertMissionObjective(completeMission, completeObjective, option, flags);
+                            break;
+
+                        case MissionShowObjsSettings.SuppressAllObjs:
+                            break;
+                    }
+                }
+                return;
+            }
+
+            if (ObjectiveFlagsAllowed() == false) return;
+
+            objectiveProto = objective?.Prototype;
+            if (this is not MissionHintOption && objectiveProto != null && objectiveProto.ObjectiveHints.HasValue()) return;
+            flags |= GetPlayerHUDFlags(mission.Prototype, objectiveProto);
+            outInteractData.PlayerHUDFlags |= flags;
+            outInteractData.PlayerHUDArrowDistanceOverride = Math.Max(outInteractData.PlayerHUDArrowDistanceOverride, GetPlayerHUDArrowDistanceOverride(objectiveProto));
+            outInteractData.InsertMissionObjective(mission, objective, this, flags);
         }
 
-        internal bool ObjectiveFlagsAllowed()
+        private static int GetPlayerHUDArrowDistanceOverride(MissionObjectivePrototype objectiveProto)
         {
+            if (objectiveProto != null) return objectiveProto.PlayerHUDObjectiveArrowDistOvrde;
+            return 0;
+        }
+
+        private PlayerHUDEnum GetPlayerHUDFlags(MissionPrototype missionProto, MissionObjectivePrototype objectiveProto)
+        {
+            PlayerHUDEnum flags = PlayerHUDEnum.None;
+            if (missionProto == null) return flags; 
+
+            if (this is MissionHintOption)
+            {
+                flags |= PlayerHUDEnum.Hint;
+                flags |= PlayerHUDEnum.ShowObjs;
+                flags |= PlayerHUDEnum.ShowObjsOnMap;
+                flags |= PlayerHUDEnum.ShowObjsOnScreenEdge;
+            }
+            else if (missionProto.PlayerHUDShowObjs)
+            {
+                flags |= PlayerHUDEnum.ShowObjs;
+
+                if (missionProto.PlayerHUDShowObjsOnMap)
+                    flags |= PlayerHUDEnum.ShowObjsOnMap;
+                if (missionProto.PlayerHUDShowObjsOnMapNoPing)
+                    flags |= PlayerHUDEnum.ShowObjsOnMapNoPing;
+                if (missionProto.PlayerHUDShowObjsOnScreenEdge)
+                    flags |= PlayerHUDEnum.ShowObjsOnScreenEdge;
+                if (missionProto.PlayerHUDShowObjsOnEntityFloor)
+                    flags |= PlayerHUDEnum.ShowObjsOnEntityFloor;
+                if (missionProto.PlayerHUDShowObjsOnEntityAbove)
+                    flags |= PlayerHUDEnum.ShowObjsEntityAbove;
+
+                if (objectiveProto != null)
+                {
+                    if (flags.HasFlag(PlayerHUDEnum.ShowObjsOnMap) && !objectiveProto.PlayerHUDShowObjsOnMap)
+                        flags &= ~PlayerHUDEnum.ShowObjsOnMap;
+                    if (flags.HasFlag(PlayerHUDEnum.ShowObjsOnMapNoPing) && !objectiveProto.PlayerHUDShowObjsOnMapNoPing)
+                        flags &= ~PlayerHUDEnum.ShowObjsOnMapNoPing;
+                    if (flags.HasFlag(PlayerHUDEnum.ShowObjsOnScreenEdge) && !objectiveProto.PlayerHUDShowObjsOnScreenEdge)
+                        flags &= ~PlayerHUDEnum.ShowObjsOnScreenEdge;
+                    if (flags.HasFlag(PlayerHUDEnum.ShowObjsOnEntityFloor) && !objectiveProto.PlayerHUDShowObjsOnEntityFloor)
+                        flags &= ~PlayerHUDEnum.ShowObjsOnEntityFloor;
+                    if (flags.HasFlag(PlayerHUDEnum.ShowObjsEntityAbove) && !objectiveProto.PlayerHUDShowObjsOnEntityAbove)
+                        flags &= ~PlayerHUDEnum.ShowObjsEntityAbove;
+                }
+            }
+
+            return flags;
+        }
+
+        public bool GetMissionAndObjective(Player player, out Mission mission, out MissionObjective objective)
+        {
+            mission = null;
+            objective = null;
+
+            var missionManager = MissionManager.FindMissionManagerForMission(player, player.GetRegion(), MissionProto);
+            if (missionManager == null) return false;
+
+            mission = missionManager.FindMissionByDataRef(MissionProto.DataRef);
+            if (mission == null) return false;
+
+            if (HasObjective)
+            {
+                objective = GetObjective(mission);
+                if (objective == null) return false;
+            }
+            else
+                objective = null;
+
+            return true;
+        }
+
+        public bool ObjectiveFlagsAllowed()
+        {
+            if (OptionType.HasFlag(MissionOptionTypeFlags.Skip)) return false;
+
+            if (MissionProto != null && OptionType.HasFlag(MissionOptionTypeFlags.ActivateCondition) 
+                && MissionProto.PlayerHUDShowObjsNoActivateCond)
+                return false;
+
+            return true;
+        }
+
+        public bool IsLocationInteresting(Player player, PrototypeId regionRef, PrototypeId areaRef, PrototypeId cellRef)
+        {
+            if (InterestCells.Count > 0 && InterestCells.Contains(cellRef)) return true;
+            if (InterestAreas.Count > 0 && InterestAreas.Contains(areaRef)) return true;
+            if (InterestRegions.Count > 0 && InterestRegions.Contains(regionRef))
+            {
+                var region = player.GetRegion();
+                if (region == null) return false;
+                return region.PrototypeDataRef != regionRef;
+            }
             return false;
         }
     }
@@ -164,8 +309,7 @@ namespace MHServerEmu.Games.Dialog
 
     public class MissionConditionMissionCompleteOption : BaseMissionConditionOption
     {
-        private readonly SortedSet<PrototypeId> _missionRefs = new();
-        public SortedSet<PrototypeId> CompleteMissionRefs { get => _missionRefs; }
+        public SortedVector<PrototypeId> CompleteMissionRefs { get; } = new();
 
         public override void InitializeForMission(MissionPrototype missionProto, MissionStateFlags state, sbyte objectiveIndex, MissionObjectiveStateFlags objectiveState, MissionOptionTypeFlags optionType)
         {
@@ -174,7 +318,7 @@ namespace MHServerEmu.Games.Dialog
 
             PrototypeId missionCompleteRef = missionComplete.MissionPrototype;
             if (missionCompleteRef != PrototypeId.Invalid)
-                _missionRefs.Add(missionCompleteRef);
+                CompleteMissionRefs.Add(missionCompleteRef);
 
             if (missionComplete.MissionKeyword != PrototypeId.Invalid)
             {
@@ -182,14 +326,9 @@ namespace MHServerEmu.Games.Dialog
                 {
                     MissionPrototype mission = missionRef.As<MissionPrototype>();
                     if (mission != null && mission.Keywords.HasValue() && mission.Keywords.Contains(missionComplete.MissionKeyword))
-                        _missionRefs.Add(missionRef);
+                        CompleteMissionRefs.Add(missionRef);
                 }
             }
-        }
-
-        public SortedSet<PrototypeId> GetCompleteMissionRefs()
-        {
-            return _missionRefs;
         }
 
         public override EntityTrackingFlag InterestedInEntity(EntityTrackingContextMap map, WorldEntity entity, HashSet<InteractionOption> checkList)
@@ -202,8 +341,7 @@ namespace MHServerEmu.Games.Dialog
                 checkList.Add(this);
 
             var manager = GameDatabase.InteractionManager;
-            var completeMissions = GetCompleteMissionRefs();
-            foreach (var completeMissionRef in completeMissions)
+            foreach (var completeMissionRef in CompleteMissionRefs)
             {
                 var missionData = manager.GetMissionData(completeMissionRef);
                 if (missionData != null)
@@ -227,10 +365,12 @@ namespace MHServerEmu.Games.Dialog
 
         public override EntityTrackingFlag InterestedInEntity(EntityTrackingContextMap map, WorldEntity entity, HashSet<InteractionOption> checkList)
         {
-            if (entity is Transition transition && InterestRegions.Any())
+            if (entity is Transition transition && InterestRegions.Count > 0)
             {
-                foreach (Destination destination in transition.Destinations)
+                for (int i = 0; i < transition.Destinations.Count; i++)
                 {
+                    TransitionDestination destination = transition.Destinations[i];
+
                     if (destination.RegionRef != PrototypeId.Invalid && InterestRegions.Contains(destination.RegionRef))
                     {
                         map.Insert(MissionProto.DataRef, EntityTrackingFlags);
@@ -307,8 +447,10 @@ namespace MHServerEmu.Games.Dialog
                 if (entity is Transition transition)
                 {
                     PrototypeId targetRef = Proto.ConnectionTarget;
-                    foreach (Destination destination in transition.Destinations)
+                    for (int i = 0; i < transition.Destinations.Count; i++)
                     {
+                        TransitionDestination destination = transition.Destinations[i];
+
                         if (destination.TargetRef == targetRef)
                         {
                             map.Insert(targetRef, EntityTrackingFlag.Appearance);

@@ -288,10 +288,15 @@ namespace MHServerEmu.Games.GameData.Prototypes
         private static readonly Logger Logger = LogManager.CreateLogger();
 
         private KeywordsMask _keywordsMask;
-        private bool _isVacuumable;
 
         private object _interactionDataLock;
         private bool _interactionDataCached;
+
+        [DoNotCopy]
+        public KeywordsMask KeywordsMask { get => _keywordsMask; }
+
+        [DoNotCopy]
+        public bool IsVacuumable { get; protected set; }
 
         [DoNotCopy]
         public bool IsCurrency { get => Properties != null && Properties.HasProperty(PropertyEnum.ItemCurrency); }
@@ -307,6 +312,8 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
         [DoNotCopy]
         public int WorldEntityPrototypeEnumValue { get; private set; }
+        [DoNotCopy]
+        public virtual int LiveTuneEternitySplinterCost { get => (int)LiveTuningManager.GetLiveWorldEntityTuningVar(this, WorldEntityTuningVar.eWETV_EternitySplinterPrice); }
 
         [DoNotCopy]
         public bool DiscoverInRegion { get => ObjectiveInfo?.EdgeEnabled == true || HACKDiscoverInRegion; }
@@ -321,7 +328,11 @@ namespace MHServerEmu.Games.GameData.Prototypes
             _keywordsMask = KeywordPrototype.GetBitMaskForKeywordList(Keywords);
 
             var keywordVacuumable = GameDatabase.KeywordGlobalsPrototype.VacuumableKeyword.As<KeywordPrototype>();
-            _isVacuumable = keywordVacuumable != null && HasKeyword(keywordVacuumable);
+            IsVacuumable = keywordVacuumable != null && HasKeyword(keywordVacuumable);
+
+            // hack for Mutants CivilianFemaleMutantV01 CivilianMaleMutantV01 CivilianMaleMutantV02
+            if (DataRef == (PrototypeId)428108881470233161 || DataRef == (PrototypeId)14971691258158061950 || DataRef == (PrototypeId)6207165219079199103)
+                GameDatabase.GetPrototype<KeywordPrototype>((PrototypeId)5036792181542097410).GetBitMask(ref _keywordsMask); // Mutant
 
             // NOTE: This is a hack straight from the client, do not change
             if (DataRef != (PrototypeId)DataDirectory.Instance.GetBlueprintDataRefByGuid((BlueprintGuid)13337309842336122384))  // Entity/PowerAgnostic.blueprint
@@ -345,6 +356,24 @@ namespace MHServerEmu.Games.GameData.Prototypes
                 return LiveTuningDefaultEnabled;
 
             return true;
+        }
+
+        public static bool IsLiveTuningEnabled(PrototypeId worldEntityProtoRef)
+        {
+            WorldEntityPrototype thisProto = worldEntityProtoRef.As<WorldEntityPrototype>();
+            if (thisProto == null)
+                return Logger.WarnReturn(false, $"IsLiveTuningEnabled(): Attempting to check LiveTuningDefaultEnabled on something that is not a WorldEntityPrototype!\n DataRef: {worldEntityProtoRef.GetName()}");
+
+            return thisProto.IsLiveTuningEnabled();
+        }
+
+        public bool IsLiveTuningVendorEnabled()
+        {
+            if (IsLiveTuningEnabled() == false)
+                return false;
+
+            int tuningVar = (int)Math.Floor(LiveTuningManager.GetLiveWorldEntityTuningVar(this, WorldEntityTuningVar.eWETV_VendorEnabled));
+            return tuningVar != 0;
         }
 
         public bool HasKeyword(KeywordPrototype keywordProto)
@@ -529,6 +558,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
                     EntitySelectorActionEventType.OnDetectedEnemy |
                     EntitySelectorActionEventType.OnDetectedFriend |
                     EntitySelectorActionEventType.OnEnemyProximity |
+                    EntitySelectorActionEventType.OnDetectedPlayer |
                     EntitySelectorActionEventType.OnPlayerProximity;
 
                 foreach (var eventType in EventTypes)
@@ -605,13 +635,23 @@ namespace MHServerEmu.Games.GameData.Prototypes
         {
             if (Entities.HasValue())
             {
-                // SelectUniqueEntities region ???
-
                 int index = random.Next(0, Entities.Length);
+                if (SelectUniqueEntities)
+                {
+                    if (region == null) return PrototypeId.Invalid;
+                    region.GetUnuqueSelectorIndex(ref index, Entities.Length, DataRef);
+                }
                 return Entities[index];
             }
 
             return PrototypeId.Invalid;
+        }
+
+        public void SetUniqueEntity(PrototypeId entityRef, Region region, bool set)
+        {
+            if (Entities.IsNullOrEmpty() || SelectUniqueEntities == false || region == null) return;
+            int index = Array.IndexOf(Entities, entityRef);
+            if (index != -1) region.SetUnuqueSelectorIndex(index, set, DataRef);
         }
     }
 
@@ -699,6 +739,16 @@ namespace MHServerEmu.Games.GameData.Prototypes
     {
         public PrototypeId Appearance { get; protected set; }
         public PrototypeId[] OnActivatePowers { get; protected set; }
+
+        [DoNotCopy]
+        public EntityAppearanceEnum AppearanceEnum { get; protected set; }
+
+        public override void PostProcess()
+        {
+            base.PostProcess();
+            var appreanceProto = Appearance.As<EntityAppearancePrototype>();
+            AppearanceEnum = (appreanceProto != null) ? appreanceProto.AppearanceEnum : EntityAppearanceEnum.None;
+        }
     }
 
     public class DoorEntityStatePrototype : EntityStatePrototype

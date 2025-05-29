@@ -1,6 +1,8 @@
 ﻿using MHServerEmu.Core.Extensions;
 using MHServerEmu.Core.Logging;
 using MHServerEmu.Core.Memory;
+using MHServerEmu.Core.System.Random;
+using MHServerEmu.Games.Entities;
 using MHServerEmu.Games.Entities.Inventories;
 using MHServerEmu.Games.Entities.Items;
 using MHServerEmu.Games.GameData.Calligraphy.Attributes;
@@ -98,6 +100,8 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
         // ---
 
+        private const int TargetNumPetTechAffixes = 5;
+
         private static readonly Logger Logger = LogManager.CreateLogger();
 
         [DoNotCopy]
@@ -151,9 +155,35 @@ namespace MHServerEmu.Games.GameData.Prototypes
             return PrototypeId.Invalid;
         }
 
-        public void OnApplyItemSpec(Item item, ItemSpec itemSpec)
+        public bool OnApplyItemSpec(Item item, ItemSpec itemSpec)
         {
-            // TODO
+            ItemPrototype itemProto = item.ItemPrototype;
+            if (itemProto == null) return Logger.WarnReturn(false, "OnApplyItemSpec(): itemProto == null");
+
+            if (itemProto.IsPetItem == false)
+                return true;
+
+            // Roll new pet tech affixes if there aren't enough of them
+            int numPetTechAffixes = 0;
+
+            IReadOnlyList<AffixSpec> affixSpecs = itemSpec.AffixSpecs;
+            for (int i = 0; i < affixSpecs.Count; i++)
+            {
+                AffixSpec affixSpec = affixSpecs[i];
+                if (affixSpec.AffixProto.IsPetTechAffix)
+                    numPetTechAffixes++;
+            }
+
+            if (numPetTechAffixes < TargetNumPetTechAffixes)
+                UpdatePetTechAffixes(item.Game.Random, item.GetBoundAgentProtoRef(), itemSpec);
+
+            return true;
+        }
+
+        public MutationResults UpdatePetTechAffixes(GRandom random, PrototypeId rollFor, ItemSpec itemSpec)
+        {
+            //Logger.Debug($"UpdatePetTechAffixes(): {itemSpec.ItemProtoRef.GetName()}");
+            return MutationResults.None;
         }
 
         public TimeSpan GetExpirationTime(PrototypeId rarityProtoRef)
@@ -270,60 +300,65 @@ namespace MHServerEmu.Games.GameData.Prototypes
             return args.Rank;
         }
 
-        public IEnumerable<BuiltInAffixDetails> GenerateBuiltInAffixDetails(ItemSpec itemSpec)
+        public bool GenerateBuiltInAffixDetails(ItemSpec itemSpec, List<BuiltInAffixDetails> detailsList)
         {
-            IEnumerable<AffixEntryPrototype> builtInAffixEntries = GetBuiltInAffixEntries(itemSpec.RarityProtoRef);
-            if (builtInAffixEntries.Any() == false) yield break;    // Early break so that we don't create a dictionary instance when we don't have any affix entries
-
-            Dictionary<ulong, int> affixSeedDict = new();
-
-            foreach (AffixEntryPrototype affixEntryProto in builtInAffixEntries)
+            List<AffixEntryPrototype> affixEntryList = ListPool<AffixEntryPrototype>.Instance.Get();
+            if (GetBuiltInAffixEntries(affixEntryList, itemSpec.RarityProtoRef))
             {
-                if (affixEntryProto == null || affixEntryProto.Affix == PrototypeId.Invalid)
+                Dictionary<ulong, int> affixSeedDict = DictionaryPool<ulong, int>.Instance.Get();
+
+                foreach (AffixEntryPrototype affixEntryProto in affixEntryList)
                 {
-                    Logger.Warn("affixEntryProto == null || affixEntryProto.Affix == PrototypeId.Invalid");
-                    continue;
+                    if (affixEntryProto == null || affixEntryProto.Affix == PrototypeId.Invalid)
+                    {
+                        Logger.Warn("affixEntryProto == null || affixEntryProto.Affix == PrototypeId.Invalid");
+                        continue;
+                    }
+
+                    BuiltInAffixDetails builtInAffixDetails = new(affixEntryProto);
+
+                    if (GeneratePowerModifierRefFromBuiltInAffix(affixEntryProto, itemSpec, ref builtInAffixDetails) == false)
+                        continue;
+
+                    builtInAffixDetails.Seed = GenAffixRandomSeed(affixSeedDict, itemSpec.Seed, itemSpec.ItemProtoRef, affixEntryProto.Affix, affixEntryProto.Power);
+
+                    detailsList.Add(builtInAffixDetails);
                 }
 
-                BuiltInAffixDetails builtInAffixDetails = new(affixEntryProto);
-
-                if (GeneratePowerModifierRefFromBuiltInAffix(affixEntryProto, itemSpec, ref builtInAffixDetails) == false)
-                    continue;
-
-                builtInAffixDetails.Seed = GenAffixRandomSeed(affixSeedDict, itemSpec.Seed, itemSpec.ItemProtoRef, affixEntryProto.Affix, affixEntryProto.Power);
-
-                yield return builtInAffixDetails;
+                DictionaryPool<ulong, int>.Instance.Return(affixSeedDict);
             }
+
+            ListPool<AffixEntryPrototype>.Instance.Return(affixEntryList);
+            return detailsList.Count > 0;
         }
 
-        public IEnumerable<AffixEntryPrototype> GetBuiltInAffixEntries(PrototypeId rarityProtoRef)
+        public bool GetBuiltInAffixEntries(List<AffixEntryPrototype> entryList, PrototypeId rarityProtoRef)
         {
-            // This static function is under Item in the client, but it makes more sense for it to be here
+            // This is an Item:: static function in the client, but it makes more sense for it to be here
 
-            if (rarityProtoRef == PrototypeId.Invalid)
-            {
-                Logger.Warn("GetBuiltInAffixEntries(): rarityProtoRef == PrototypeId.Invalid");
-                yield break;
-            }
+            if (rarityProtoRef == PrototypeId.Invalid) return Logger.WarnReturn(false, "GetBuiltInAffixEntries(): rarityProtoRef == PrototypeId.Invalid");
 
             RarityPrototype rarityProto = rarityProtoRef.As<RarityPrototype>();
-            if (rarityProto == null)
-            {
-                Logger.Warn("GetBuiltInAffixEntries(): rarityProto == null");
-                yield break;
-            }
+            if (rarityProto == null) return Logger.WarnReturn(false, "GetBuiltInAffixEntries(): rarityProto == null");
 
             if (AffixesBuiltIn.HasValue())
             {
                 foreach (AffixEntryPrototype affixEntryProto in AffixesBuiltIn)
-                    yield return affixEntryProto;
+                    entryList.Add(affixEntryProto);
             }
 
             if (rarityProto.AffixesBuiltIn.HasValue())
             {
                 foreach (AffixEntryPrototype affixEntryProto in rarityProto.AffixesBuiltIn)
-                    yield return affixEntryProto;
+                    entryList.Add(affixEntryProto);
             }
+
+            return entryList.Count > 0;
+        }
+
+        public PrototypeId GetOnUsePower()
+        {
+            return GetTriggeredPower(ActionsTriggeredOnItemEvent, ItemEventType.OnUse, ItemActionType.UsePower);
         }
 
         public static bool AvatarUsesEquipmentType(ItemPrototype itemProto, AgentPrototype agentProto)
@@ -404,6 +439,31 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
             return itemSeed ^ (int)affixSeed;
         }
+
+        private static PrototypeId GetTriggeredPower(ItemActionSetPrototype actionSetProto, ItemEventType eventType, ItemActionType actionType)
+        {
+            if (actionSetProto == null || actionSetProto.Choices.IsNullOrEmpty())
+                return PrototypeId.Invalid;
+
+            foreach (ItemActionBasePrototype actionBaseProto in actionSetProto.Choices)
+            {
+                if (actionBaseProto is not ItemActionPrototype actionProto)
+                {
+                    Logger.Warn("GetTriggeredPower(): actionBaseProto is not ItemActionPrototype actionProto");
+                    continue;
+                }
+
+                if (actionProto.TriggeringEvent != eventType)
+                    continue;
+
+                if (actionType == ItemActionType.AssignPower && actionProto is ItemActionAssignPowerPrototype assignPowerActionProto)
+                    return assignPowerActionProto.Power;
+                else if (actionType == ItemActionType.UsePower && actionProto is ItemActionUsePowerPrototype usePowerActionProto)
+                    return usePowerActionProto.Power;
+            }
+
+            return PrototypeId.Invalid;
+        }
     }
 
     public class ItemAbilitySettingsPrototype : Prototype
@@ -443,61 +503,107 @@ namespace MHServerEmu.Games.GameData.Prototypes
     public class ItemActionPrototype : ItemActionBasePrototype
     {
         public ItemEventType TriggeringEvent { get; protected set; }
+
+        //---
+
+        public virtual ItemActionType ActionType { get => ItemActionType.None; }
     }
 
     public class ItemActionAssignPowerPrototype : ItemActionPrototype
     {
         public PrototypeId Power { get; protected set; }
+
+        //---
+
+        public override ItemActionType ActionType { get => ItemActionType.AssignPower; }
     }
 
     public class ItemActionDestroySelfPrototype : ItemActionPrototype
     {
+        //---
+
+        public override ItemActionType ActionType { get => ItemActionType.DestroySelf; }
     }
 
     public class ItemActionGuildsUnlockPrototype : ItemActionPrototype
     {
+        //---
+
+        public override ItemActionType ActionType { get => ItemActionType.GuildUnlock; }
     }
 
     public class ItemActionReplaceSelfItemPrototype : ItemActionPrototype
     {
         public PrototypeId Item { get; protected set; }
+
+        //---
+
+        public override ItemActionType ActionType { get => ItemActionType.ReplaceSelfItem; }
     }
 
     public class ItemActionReplaceSelfLootTablePrototype : ItemActionPrototype
     {
         public LootTablePrototype LootTable { get; protected set; }
         public bool UseCurrentAvatarLevelForRoll { get; protected set; }
+
+        //---
+
+        public override ItemActionType ActionType { get => ItemActionType.ReplaceSelfLootTable; }
     }
 
     public class ItemActionSaveDangerRoomScenarioPrototype : ItemActionPrototype
     {
+        //---
+
+        public override ItemActionType ActionType { get => ItemActionType.SaveDangerRoomScenario; }
     }
 
     public class ItemActionRespecPrototype : ItemActionPrototype
     {
+        //---
+
+        public override ItemActionType ActionType { get => ItemActionType.Respec; }
     }
 
     public class ItemActionResetMissionsPrototype : ItemActionPrototype
     {
+        //---
+
+        public override ItemActionType ActionType { get => ItemActionType.ResetMissions; }
     }
 
     public class ItemActionPrestigeModePrototype : ItemActionPrototype
     {
+        //---
+
+        public override ItemActionType ActionType { get => ItemActionType.PrestigeMode; }
     }
 
     public class ItemActionUsePowerPrototype : ItemActionPrototype
     {
         public PrototypeId Power { get; protected set; }
+
+        //---
+
+        public override ItemActionType ActionType { get => ItemActionType.UsePower; }
     }
 
     public class ItemActionUnlockPermaBuffPrototype : ItemActionPrototype
     {
         public PrototypeId PermaBuff { get; protected set; }
+
+        //---
+
+        public override ItemActionType ActionType { get => ItemActionType.UnlockPermaBuff; }
     }
 
     public class ItemActionAwardTeamUpXPPrototype : ItemActionPrototype
     {
         public int XP { get; protected set; }
+
+        //---
+
+        public override ItemActionType ActionType { get => ItemActionType.AwardTeamUpXP; }
     }
 
     public class ItemActionSetPrototype : ItemActionBasePrototype
@@ -734,6 +840,49 @@ namespace MHServerEmu.Games.GameData.Prototypes
     {
         public PrototypeId Character { get; protected set; }
         public CharacterTokenType TokenType { get; protected set; }
+
+        //--
+
+        private static readonly Logger Logger = LogManager.CreateLogger();
+
+        [DoNotCopy]
+        public bool GrantsCharacterUnlock { get => TokenType == CharacterTokenType.UnlockCharacterOnly || TokenType == CharacterTokenType.UnlockCharOrUpgradeUlt; }
+        [DoNotCopy]
+        public bool GrantsUltimateUpgrade { get => TokenType == CharacterTokenType.UpgradeUltimateOnly || TokenType == CharacterTokenType.UnlockCharOrUpgradeUlt; }
+
+        [DoNotCopy]
+        public bool IsForAvatar { get => Character.As<AvatarPrototype>() != null; }
+        [DoNotCopy]
+        public bool IsForTeamUp { get => Character.As<AgentTeamUpPrototype>() != null; }
+
+        public override bool ApprovedForUse()
+        {
+            if (base.ApprovedForUse() == false)
+                return false;
+
+            AgentPrototype agentProto = Character.As<AgentPrototype>();
+            return agentProto?.ApprovedForUse() == true;
+        }
+
+        public override bool IsLiveTuningEnabled()
+        {
+            if (base.IsLiveTuningEnabled() == false)
+                return false;
+
+            return IsLiveTuningEnabled(Character);
+        }
+
+        public bool HasUnlockedCharacter(Player player)
+        {
+            Prototype characterProto = Character.As<Prototype>();
+            if (characterProto == null) return Logger.WarnReturn(false, "HasUnlockedCharacter(): characterProto == null");
+
+            if (characterProto is AvatarPrototype)
+                return player.HasAvatarFullyUnlocked(Character);
+
+            return player.IsTeamUpAgentUnlocked(Character);
+        }
+
     }
 
     public class InventoryStashTokenPrototype : ItemPrototype

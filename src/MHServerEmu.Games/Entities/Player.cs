@@ -1,7 +1,10 @@
 ﻿using System.Text;
 using Gazillion;
 using Google.ProtocolBuffers;
+using MHServerEmu.Core.Collections;
+using MHServerEmu.Core.Collisions;
 using MHServerEmu.Core.Extensions;
+using MHServerEmu.Core.Helpers;
 using MHServerEmu.Core.Logging;
 using MHServerEmu.Core.Memory;
 using MHServerEmu.Core.Serialization;
@@ -14,16 +17,23 @@ using MHServerEmu.Games.Entities.Avatars;
 using MHServerEmu.Games.Entities.Inventories;
 using MHServerEmu.Games.Entities.Items;
 using MHServerEmu.Games.Entities.Options;
+using MHServerEmu.Games.Entities.PowerCollections;
 using MHServerEmu.Games.Events;
 using MHServerEmu.Games.Events.Templates;
 using MHServerEmu.Games.GameData;
+using MHServerEmu.Games.GameData.Calligraphy;
 using MHServerEmu.Games.GameData.LiveTuning;
 using MHServerEmu.Games.GameData.Prototypes;
+using MHServerEmu.Games.Leaderboards;
+using MHServerEmu.Games.GameData.Tables;
+using MHServerEmu.Games.Loot;
 using MHServerEmu.Games.Missions;
 using MHServerEmu.Games.Navi;
 using MHServerEmu.Games.Network;
+using MHServerEmu.Games.Populations;
 using MHServerEmu.Games.Powers;
 using MHServerEmu.Games.Properties;
+using MHServerEmu.Games.Properties.Evals;
 using MHServerEmu.Games.Regions;
 using MHServerEmu.Games.Regions.Maps;
 using MHServerEmu.Games.Regions.MatchQueues;
@@ -38,6 +48,17 @@ namespace MHServerEmu.Games.Entities
         Primary,
         Secondary,
         Count
+    }
+
+    public enum CanSwitchAvatarResult
+    {
+        Success                     = 0,
+        NotAllowedInPrivateInstance = 1 << 0,
+        NotAllowedInRegion          = 1 << 1,
+        NotAllowedInQueue           = 1 << 2,
+        NotAllowedInTransformMode   = 1 << 3,
+        NotAllowedGeneric           = 1 << 4,
+        NotAllowedUnknown           = 1 << 5,
     }
 
     // NOTE: These badges and their descriptions are taken from an internal build dated June 2015 (most likely version 1.35).
@@ -56,20 +77,21 @@ namespace MHServerEmu.Games.Entities
         NumberOfBadges
     }
 
-    public class Player : Entity, IMissionManagerOwner
+    public partial class Player : Entity, IMissionManagerOwner
     {
         private static readonly Logger Logger = LogManager.CreateLogger();
 
         private readonly EventPointer<SwitchAvatarEvent> _switchAvatarEvent = new();
+        private readonly EventPointer<CheckHoursPlayedEvent> _checkHoursPlayedEvent = new();
         private readonly EventPointer<ScheduledHUDTutorialResetEvent> _hudTutorialResetEvent = new();
+        private readonly EventPointer<CommunityBroadcastEvent> _communityBroadcastEvent = new();
+        private readonly EventGroup _pendingEvents = new();
 
-        private MissionManager _missionManager = new();
         private ReplicatedPropertyCollection _avatarProperties = new();
-        private ulong _shardId;
+        private ulong _shardId;     // This was probably used for database sharding, we don't need this
         private RepString _playerName = new();
         private ulong[] _consoleAccountIds = new ulong[(int)PlayerAvatarIndex.Count];
         private RepString _secondaryPlayerName = new();
-        private MatchQueueStatus _matchQueueStatus = new();
 
         // NOTE: EmailVerified and AccountCreationTimestamp are set in NetMessageGiftingRestrictionsUpdate that
         // should be sent in the packet right after logging in. NetMessageGetCurrencyBalanceResponse should be
@@ -85,38 +107,43 @@ namespace MHServerEmu.Games.Entities
 
         private Community _community;
         private List<PrototypeId> _unlockedInventoryList = new();
-        private SortedSet<AvailableBadges> _badges = new();
+        private SortedVector<AvailableBadges> _badges = new();
         private HashSet<ulong> _tagEntities = new();
         private Queue<PrototypeId> _kismetSeqQueue = new();
-        private GameplayOptions _gameplayOptions = new();
-        private AchievementState _achievementState = new();
         private Dictionary<PrototypeId, StashTabOptions> _stashTabOptionsDict = new();
 
         // TODO: Serialize on migration
         private Dictionary<ulong, MapDiscoveryData> _mapDiscoveryDict = new();
 
-        private TeleportData _teleportData;
+        private uint _loginCount;
+        private TimeSpan _loginRewardCooldownTimeStart;
 
-        // Accessors
-        public MissionManager MissionManager { get => _missionManager; }
-        public ulong ShardId { get => _shardId; }
-        public MatchQueueStatus MatchQueueStatus { get => _matchQueueStatus; }
-        public bool EmailVerified { get => _emailVerified; set => _emailVerified = value; }
-        public TimeSpan AccountCreationTimestamp { get => _accountCreationTimestamp; set => _accountCreationTimestamp = value; }
+        private TeleportData _teleportData;
+        private SpawnGimbal _spawnGimbal;
+        private bool _newPlayerUISystemsUnlocked;
+
+        public ArchiveVersion LastSerializedArchiveVersion { get; private set; } = ArchiveVersion.Current;    // Updated on serialization
+
+        public MissionManager MissionManager { get; private set; }
+        public MatchQueueStatus MatchQueueStatus { get; private set; } = new();
         public override ulong PartyId { get => _partyId.Get(); }
         public Community Community { get => _community; }
-        public GameplayOptions GameplayOptions { get => _gameplayOptions; }
-        public AchievementState AchievementState { get => _achievementState; }
+        public GameplayOptions GameplayOptions { get; private set; } = new();
+        public AchievementState AchievementState { get; private set; } = new();
+        public AchievementManager AchievementManager { get; private set; }
+        public LeaderboardManager LeaderboardManager { get; private set; }
+        public ScoringEventContext ScoringEventContext { get; set; }
 
         public bool IsFullscreenMoviePlaying { get => Properties[PropertyEnum.FullScreenMoviePlaying]; }
         public bool IsOnLoadingScreen { get; private set; }
         public bool IsFullscreenObscured { get => IsFullscreenMoviePlaying || IsOnLoadingScreen; }
+        public uint FullscreenMovieSyncRequestId { get; set; }
 
-        // Network
+        public bool IsSwitchingAvatar { get; private set; }
+
         public PlayerConnection PlayerConnection { get; private set; }
         public AreaOfInterest AOI { get => PlayerConnection.AOI; }
 
-        // Avatars
         public Avatar CurrentAvatar { get; private set; }
         public HUDTutorialPrototype CurrentHUDTutorial { get; private set; }
 
@@ -124,6 +151,7 @@ namespace MHServerEmu.Games.Entities
         public bool IsConsolePlayer { get => false; }
         public bool IsConsoleUI { get => false; }
         public bool IsUsingUnifiedStash { get => IsConsolePlayer || IsConsoleUI; }
+
         public bool IsInParty { get; internal set; }
         public static bool IsPlayerTradeEnabled { get; internal set; }
         public Avatar PrimaryAvatar { get => CurrentAvatar; } // Fix for PC
@@ -134,11 +162,25 @@ namespace MHServerEmu.Games.Entities
         public PrototypeId Faction { get => Properties[PropertyEnum.Faction]; }
         public ulong DialogTargetId { get; private set; }
         public ulong DialogInteractorId { get; private set; }
+        public PrototypeId CurrentOpenStashPagePrototypeRef { get; set; }
+        public long InfinityXP { get => Properties[PropertyEnum.InfinityXP]; }
+        public long OmegaXP { get => Properties[PropertyEnum.OmegaXP]; }
+        public long GazillioniteBalance { get => PlayerConnection.GazillioniteBalance; set => PlayerConnection.GazillioniteBalance = value; }
+        public int PowerSpecIndexUnlocked { get => Properties[PropertyEnum.PowerSpecIndexUnlocked]; }
+        public ulong TeamUpSynergyConditionId { get; set; }
 
         public Player(Game game) : base(game)
         {
-            _missionManager.Owner = this;
-            _gameplayOptions.SetOwner(this);
+            MissionManager = new(Game, this);
+            AchievementManager = new(this);
+            LeaderboardManager = new(this);
+            ScoringEventContext = new();
+            GameplayOptions.SetOwner(this);
+        }
+
+        public override string ToString()
+        {
+            return $"{GetName()} (entityId={Id}, dbGuid=0x{DatabaseUniqueId:X})";
         }
 
         public override bool Initialize(EntitySettings settings)
@@ -148,16 +190,20 @@ namespace MHServerEmu.Games.Entities
             PlayerConnection = settings.PlayerConnection;
             _playerName.Set(settings.PlayerName);
 
-            _shardId = 3;   // value from packet dumps
-
             Game.EntityManager.AddPlayer(this);
-            _matchQueueStatus.SetOwner(this);
+            MatchQueueStatus.SetOwner(this);
 
             _community = new(this);
             _community.Initialize();
 
+            LeaderboardManager.Initialize();
+
             // Default loading screen before we start loading into a region
             QueueLoadingScreen(PrototypeId.Invalid);
+
+            var popProto = GameDatabase.GlobalsPrototype.PopulationGlobalsPrototype;
+            if (popProto == null) return false;
+            _spawnGimbal = new (popProto.SpawnMapGimbalRadius, popProto.SpawnMapHorizon);
 
             return true;
         }
@@ -166,108 +212,63 @@ namespace MHServerEmu.Games.Entities
         {
             base.OnPostInit(settings);
 
-            // TODO: Clean this up
-            //---
+            SetGiftingRestrictions();
+        }
 
-            foreach (PrototypeId avatarRef in GameDatabase.DataDirectory.IteratePrototypesInHierarchy<AvatarPrototype>(PrototypeIterateFlags.NoAbstractApprovedOnly))
+        public override void OnPropertyChange(PropertyId id, PropertyValue newValue, PropertyValue oldValue, SetPropertyFlags flags)
+        {
+            base.OnPropertyChange(id, newValue, oldValue, flags);
+
+            if (flags.HasFlag(SetPropertyFlags.Refresh)) return;
+
+            switch (id.Enum)
             {
-                if (avatarRef == (PrototypeId)6044485448390219466) continue;   //zzzBrevikOLD.prototype
-                Properties[PropertyEnum.AvatarUnlock, avatarRef] = (int)AvatarUnlockType.Type2;
-            }
+                case PropertyEnum.TeamUpsAtMaxLevelPersistent:
+                    var avatar = CurrentAvatar;
+                    if (avatar != null && avatar.IsInWorld)
+                    {
+                        var teamUpAgent = avatar.CurrentTeamUpAgent;
+                        if (teamUpAgent != null)
+                        {
+                            teamUpAgent.SetTeamUpsAtMaxLevel(this);
+                            if (teamUpAgent.IsInWorld) 
+                                teamUpAgent.UpdateTeamUpSynergyCondition();
+                        }
+                    }
+                    break;
 
-            foreach (PrototypeId waypointRef in GameDatabase.DataDirectory.IteratePrototypesInHierarchy<WaypointPrototype>(PrototypeIterateFlags.NoAbstract))
-                Properties[PropertyEnum.Waypoint, waypointRef] = true;
+                case PropertyEnum.PowerCooldownDuration:
+                    {
+                        Property.FromParam(id, 0, out PrototypeId powerProtoRef);
+                        PowerPrototype powerProto = powerProtoRef.As<PowerPrototype>();
+                        if (powerProto == null)
+                        {
+                            Logger.Warn("OnPropertyChange(): powerProto == null");
+                            break;
+                        }
 
-            foreach (PrototypeId vendorRef in GameDatabase.DataDirectory.IteratePrototypesInHierarchy<VendorTypePrototype>(PrototypeIterateFlags.NoAbstract))
-                Properties[PropertyEnum.VendorLevel, vendorRef] = 1;
+                        if (Power.IsCooldownPersistent(powerProto))
+                            Properties[PropertyEnum.PowerCooldownDurationPersistent, powerProtoRef] = newValue;
 
-            foreach (PrototypeId uiSystemLockRef in GameDatabase.DataDirectory.IteratePrototypesInHierarchy<UISystemLockPrototype>(PrototypeIterateFlags.NoAbstract))
-                Properties[PropertyEnum.UISystemLock, uiSystemLockRef] = true;
+                        break;
+                    }
 
-            // TODO: Set this after creating all avatar entities via a NetMessageSetProperty in the same packet
-            //Properties[PropertyEnum.PlayerMaxAvatarLevel] = 60;
-
-            // Complete all missions
-            foreach (PrototypeId missionRef in GameDatabase.DataDirectory.IteratePrototypesInHierarchy<MissionPrototype>(PrototypeIterateFlags.NoAbstractApprovedOnly))
-            {
-                var missionPrototype = GameDatabase.GetPrototype<MissionPrototype>(missionRef);
-                if (_missionManager.ShouldCreateMission(missionPrototype))
+                case PropertyEnum.PowerCooldownStartTime:
                 {
-                    Mission mission = _missionManager.CreateMission(missionRef);
-                    mission.SetState(MissionState.Completed);
-                    mission.AddParticipant(this);
-                    _missionManager.InsertMission(mission);
+                    Property.FromParam(id, 0, out PrototypeId powerProtoRef);
+                    PowerPrototype powerProto = powerProtoRef.As<PowerPrototype>();
+                    if (powerProto == null)
+                    {
+                        Logger.Warn("OnPropertyChange(): powerProto == null");
+                        break;
+                    }
+
+                    if (Power.IsCooldownPersistent(powerProto))
+                        Properties[PropertyEnum.PowerCooldownStartTimePersistent, powerProtoRef] = newValue;
+
+                    break;
                 }
             }
-
-            // Todo: send this separately in NetMessageGiftingRestrictionsUpdate on login
-            Properties[PropertyEnum.LoginCount] = 1075;
-            _emailVerified = true;
-            _accountCreationTimestamp = Clock.DateTimeToUnixTime(new(2023, 07, 16, 1, 48, 0));   // First GitHub commit date
-
-            #region Hardcoded social tab easter eggs
-            _community.AddMember(1, "DavidBrevik", CircleId.__Friends);
-            _community.ReceiveMemberBroadcast(CommunityMemberBroadcast.CreateBuilder().SetMemberPlayerDbId(1).SetIsOnline(1)
-                .SetCurrentRegionRefId(12735255224807267622).SetCurrentDifficultyRefId((ulong)DifficultyTierPrototypeId.Normal)
-                .AddSlots(CommunityMemberAvatarSlot.CreateBuilder().SetAvatarRefId(15769648016960461069).SetCostumeRefId(4881398219179434365).SetLevel(60).SetPrestigeLevel(6))
-                .Build());
-
-            _community.AddMember(2, "TonyStark", CircleId.__Friends);
-            _community.ReceiveMemberBroadcast(CommunityMemberBroadcast.CreateBuilder().SetMemberPlayerDbId(2).SetIsOnline(1)
-                .SetCurrentRegionRefId((ulong)RegionPrototypeId.NPEAvengersTowerHUBRegion).SetCurrentDifficultyRefId((ulong)DifficultyTierPrototypeId.Normal)
-                .AddSlots(CommunityMemberAvatarSlot.CreateBuilder().SetAvatarRefId(421791326977791218).SetCostumeRefId(7150542631074405762).SetLevel(60).SetPrestigeLevel(5))
-                .Build());
-
-            _community.AddMember(3, "Doomsaw", CircleId.__Friends);
-            _community.ReceiveMemberBroadcast(CommunityMemberBroadcast.CreateBuilder().SetMemberPlayerDbId(3).SetIsOnline(1)
-                .AddSlots(CommunityMemberAvatarSlot.CreateBuilder().SetAvatarRefId(17750839636937086083).SetCostumeRefId(14098108758769669917).SetLevel(60).SetPrestigeLevel(6))
-                .Build());
-
-            _community.AddMember(4, "PizzaTime", CircleId.__Friends);
-            _community.ReceiveMemberBroadcast(CommunityMemberBroadcast.CreateBuilder().SetMemberPlayerDbId(4).SetIsOnline(1)
-                .AddSlots(CommunityMemberAvatarSlot.CreateBuilder().SetAvatarRefId(9378552423541970369).SetCostumeRefId(6454902525769881598).SetLevel(60).SetPrestigeLevel(5))
-                .Build());
-
-            _community.AddMember(5, "RogueServerEnjoyer", CircleId.__Friends);
-            _community.ReceiveMemberBroadcast(CommunityMemberBroadcast.CreateBuilder().SetMemberPlayerDbId(5).SetIsOnline(1)
-                .AddSlots(CommunityMemberAvatarSlot.CreateBuilder().SetAvatarRefId(1660250039076459846).SetCostumeRefId(9447440487974639491).SetLevel(60).SetPrestigeLevel(3))
-                .Build());
-
-            _community.AddMember(6, "WhiteQueenXOXO", CircleId.__Friends);
-            _community.ReceiveMemberBroadcast(CommunityMemberBroadcast.CreateBuilder().SetMemberPlayerDbId(6).SetIsOnline(1)
-                .AddSlots(CommunityMemberAvatarSlot.CreateBuilder().SetAvatarRefId(412966192105395660).SetCostumeRefId(12724924652099869123).SetLevel(60).SetPrestigeLevel(4))
-                .Build());
-
-            _community.AddMember(7, "AlexBond", CircleId.__Friends);
-            _community.ReceiveMemberBroadcast(CommunityMemberBroadcast.CreateBuilder().SetMemberPlayerDbId(7).SetIsOnline(1)
-                .AddSlots(CommunityMemberAvatarSlot.CreateBuilder().SetAvatarRefId(9255468350667101753).SetCostumeRefId(16813567318560086134).SetLevel(60).SetPrestigeLevel(2))
-                .Build());
-
-            _community.AddMember(8, "Crypto137", CircleId.__Friends);
-            _community.ReceiveMemberBroadcast(CommunityMemberBroadcast.CreateBuilder().SetMemberPlayerDbId(8).SetIsOnline(1)
-                .AddSlots(CommunityMemberAvatarSlot.CreateBuilder().SetAvatarRefId(421791326977791218).SetCostumeRefId(1195778722002966150).SetLevel(60).SetPrestigeLevel(2))
-                .Build());
-
-            _community.AddMember(9, "yn01", CircleId.__Friends);
-            _community.ReceiveMemberBroadcast(CommunityMemberBroadcast.CreateBuilder().SetMemberPlayerDbId(9).SetIsOnline(1)
-                .AddSlots(CommunityMemberAvatarSlot.CreateBuilder().SetAvatarRefId(12534955053251630387).SetCostumeRefId(14506515434462517197).SetLevel(60).SetPrestigeLevel(2))
-                .Build());
-
-            _community.AddMember(10, "Gazillion", CircleId.__Friends);
-            _community.ReceiveMemberBroadcast(CommunityMemberBroadcast.CreateBuilder().SetMemberPlayerDbId(10).SetIsOnline(0).Build());
-
-            _community.AddMember(11, "FriendlyLawyer", CircleId.__Nearby);
-            _community.ReceiveMemberBroadcast(CommunityMemberBroadcast.CreateBuilder().SetMemberPlayerDbId(11).SetIsOnline(1)
-                .AddSlots(CommunityMemberAvatarSlot.CreateBuilder().SetAvatarRefId(12394659164528645362).SetCostumeRefId(2844257346122946366).SetLevel(99).SetPrestigeLevel(1))
-                .Build());
-            #endregion
-
-            // Initialize
-            OnEnterGameInitStashTabOptions();
-
-            // TODO: Clean up gameplay options init for new players
-            if (settings.ArchiveData.IsNullOrEmpty())
-                _gameplayOptions.ResetToDefaults();
         }
 
         public override void OnUnpackComplete(Archive archive)
@@ -289,6 +290,51 @@ namespace MHServerEmu.Games.Entities
                 Inventory inventory = GetInventoryByRef(invProtoRef);
                 if (inventory == null && AddInventory(invProtoRef) == false)
                     Logger.Warn($"OnUnpackComplete(): Failed to add inventory, invProtoRef={invProtoRef.GetName()}");
+            }
+
+            // Restore persistent cooldowns
+            if (archive.IsPersistent)
+            {
+                Dictionary<PropertyId, PropertyValue> setDict = DictionaryPool<PropertyId, PropertyValue>.Instance.Get();
+
+                foreach (var kvp in Properties.IteratePropertyRange(PropertyEnum.PowerCooldownDurationPersistent))
+                {
+                    Property.FromParam(kvp.Key, 0, out PrototypeId powerProtoRef);
+                    PowerPrototype powerProto = powerProtoRef.As<PowerPrototype>();
+                    if (powerProto == null)
+                    {
+                        Logger.Warn("OnUnpackComplete(): powerProto == null");
+                        continue;
+                    }
+
+                    // Discard if no longer flagged as persistent or stored on player
+                    if (Power.IsCooldownPersistent(powerProto) == false || Power.IsCooldownOnPlayer(powerProto) == false)
+                        continue;
+
+                    setDict[new(PropertyEnum.PowerCooldownDuration, powerProtoRef)] = kvp.Value;
+                }
+
+                foreach (var kvp in Properties.IteratePropertyRange(PropertyEnum.PowerCooldownStartTimePersistent))
+                {
+                    Property.FromParam(kvp.Key, 0, out PrototypeId powerProtoRef);
+                    PowerPrototype powerProto = powerProtoRef.As<PowerPrototype>();
+                    if (powerProto == null)
+                    {
+                        Logger.Warn("OnUnpackComplete(): powerProto == null");
+                        continue;
+                    }
+
+                    // Discard if no longer flagged as persistent or stored on player
+                    if (Power.IsCooldownPersistent(powerProto) == false || Power.IsCooldownOnPlayer(powerProto) == false)
+                        continue;
+
+                    setDict[new(PropertyEnum.PowerCooldownStartTime, powerProtoRef)] = kvp.Value;
+                }
+
+                foreach (var kvp in setDict)
+                    Properties[kvp.Key] = kvp.Value;
+
+                DictionaryPool<PropertyId, PropertyValue>.Instance.Return(setDict);
             }
         }
 
@@ -312,10 +358,14 @@ namespace MHServerEmu.Games.Entities
 
         public override bool Serialize(Archive archive)
         {
+            LastSerializedArchiveVersion = archive.Version;
+
             bool success = base.Serialize(archive);
 
-            if (archive.IsTransient)    // REMOVEME/TODO: Persistent missions
-                success &= Serializer.Transfer(archive, ref _missionManager);
+            if (archive.IsReplication == false) PlayerConnection.MigrationData.TransferMap(_mapDiscoveryDict, archive.IsPacking);
+
+            if (archive.Version >= ArchiveVersion.AddedMissions)
+                success &= Serializer.Transfer(archive, MissionManager);
 
             success &= Serializer.Transfer(archive, ref _avatarProperties);
 
@@ -326,7 +376,7 @@ namespace MHServerEmu.Games.Entities
                 success &= Serializer.Transfer(archive, ref _consoleAccountIds[0]);
                 success &= Serializer.Transfer(archive, ref _consoleAccountIds[1]);
                 success &= Serializer.Transfer(archive, ref _secondaryPlayerName);
-                success &= Serializer.Transfer(archive, ref _matchQueueStatus);
+                success &= Serializer.Transfer(archive, MatchQueueStatus);
                 success &= Serializer.Transfer(archive, ref _emailVerified);
                 success &= Serializer.Transfer(archive, ref _accountCreationTimestamp);
 
@@ -335,10 +385,9 @@ namespace MHServerEmu.Games.Entities
                     success &= Serializer.Transfer(archive, ref _partyId);
                     success &= GuildMember.SerializeReplicationRuntimeInfo(archive, ref _guildId, ref _guildName, ref _guildMembership);
 
-                    // There is a string here that is always empty and is immediately discarded after reading, purpose unknown
+                    // Unused string, always empty
                     string emptyString = string.Empty;
                     success &= Serializer.Transfer(archive, ref emptyString);
-                    if (emptyString != string.Empty) Logger.Warn($"Serialize(): emptyString is not empty!");
                 }
             }
 
@@ -348,35 +397,60 @@ namespace MHServerEmu.Games.Entities
             if (hasCommunityData)
                 success &= Serializer.Transfer(archive, ref _community);
 
-            // Unknown bool, always false
+            // Unused bool, always false
             bool unkBool = false;
             success &= Serializer.Transfer(archive, ref unkBool);
-            if (unkBool) Logger.Warn($"Serialize(): unkBool is true!");
 
             success &= Serializer.Transfer(archive, ref _unlockedInventoryList);
 
             if (archive.IsMigration || (archive.IsReplication && archive.HasReplicationPolicy(AOINetworkPolicyValues.AOIChannelOwner)))
                 success &= Serializer.Transfer(archive, ref _badges);
 
-            success &= Serializer.Transfer(archive, ref _gameplayOptions);
+            success &= Serializer.Transfer(archive, GameplayOptions);
 
-            // REMOVEME/TODO?: It seems achievement state is not supposed to be saved within player archives?
+            // Achievement state (NOTE: This is not saved in persistent archives in the client)
             if (archive.IsPersistent || archive.IsMigration || (archive.IsReplication && archive.HasReplicationPolicy(AOINetworkPolicyValues.AOIChannelOwner)))
-                success &= Serializer.Transfer(archive, ref _achievementState);
+                success &= Serializer.Transfer(archive, AchievementState);
 
             success &= Serializer.Transfer(archive, ref _stashTabOptionsDict);
 
-            return success;
-        }
-
-        public void InitializeMissionTrackerFilters()
-        {
-            foreach (PrototypeId filterRef in GameDatabase.DataDirectory.IteratePrototypesInHierarchy<MissionTrackerFilterPrototype>(PrototypeIterateFlags.NoAbstractApprovedOnly))
+            if (archive.InvolvesClient == false)
             {
-                var filterProto = GameDatabase.GetPrototype<MissionTrackerFilterPrototype>(filterRef);
-                if (filterProto.DisplayByDefault)
-                    Properties[PropertyEnum.MissionTrackerFilter, filterRef] = true;
+                // TODO: Serialize map discovery data
+
+                if (archive.Version >= ArchiveVersion.AddedVendorPurchaseData)
+                {
+                    uint numVendorPurchaseData = (uint)_vendorPurchaseDataDict.Count;
+                    success &= Serializer.Transfer(archive, ref numVendorPurchaseData);
+
+                    if (archive.IsPacking)
+                    {
+                        foreach (VendorPurchaseData purchaseData in _vendorPurchaseDataDict.Values)
+                            success &= Serializer.Transfer(archive, purchaseData);
+                    }
+                    else
+                    {
+                        _vendorPurchaseDataDict.Clear();
+
+                        for (uint i = 0; i < numVendorPurchaseData; i++)
+                        {
+                            VendorPurchaseData purchaseData = new(PrototypeId.Invalid);
+                            success &= Serializer.Transfer(archive, ref purchaseData);
+
+                            if (_vendorPurchaseDataDict.TryAdd(purchaseData.InventoryProtoRef, purchaseData) == false)
+                                Logger.Warn($"Serialize(): Failed to add deserialized vendor purchase data {purchaseData}");
+                        }
+                    }
+                }
+
+                if (archive.Version >= ArchiveVersion.ImplementedLoginRewards)
+                {
+                    success &= Serializer.Transfer(archive, ref _loginCount);
+                    success &= Serializer.Transfer(archive, ref _loginRewardCooldownTimeStart);
+                }
             }
+
+            return success;
         }
 
         public override void EnterGame(EntitySettings settings = null)
@@ -399,20 +473,43 @@ namespace MHServerEmu.Games.Entities
 
             // Enter game to become added to the AOI
             base.EnterGame(settings);
+
+            OnEnterGameInitStashTabOptions();
+
+            InitializeVendors();
+            ScheduleCheckHoursPlayedEvent();
+            UpdateUISystemLocks();
         }
 
         public override void ExitGame()
         {
+            CancelPlayerTrade();
+
             SendMessage(NetMessageBeginExitGame.DefaultInstance);
             AOI.SetRegion(0, true);
 
             base.ExitGame();
         }
 
-        public Region GetRegion()
+        public override void Destroy()
         {
-            // This shouldn't need any null checks, at least for now
-            return AOI.Region;
+            var region = GetRegion();
+            if (region != null)
+                MissionManager.Shutdown(region);
+
+            LeaderboardManager.Destroy();
+
+            base.Destroy();
+        }
+
+        public override void OnDeallocate()
+        {
+            Game?.GameEventScheduler?.CancelAllEvents(_pendingEvents);
+
+            MissionManager.Deallocate();
+            AchievementManager.Deallocate();
+            Game.EntityManager.RemovePlayer(this);
+            base.OnDeallocate();
         }
 
         /// <summary>
@@ -439,6 +536,68 @@ namespace MHServerEmu.Games.Entities
 
             return _consoleAccountIds[(int)avatarIndex];
         }
+
+        public void SetGameplayOptions(NetMessageSetPlayerGameplayOptions clientOptions)
+        {
+            GameplayOptions newOptions = new(clientOptions.OptionsData);
+            GameplayOptions = newOptions;
+
+            // TODO: Update chat channels
+            CurrentAvatar?.UpdateAvatarSynergyExperienceBonus();
+        }
+
+        #region Public Event Team
+
+        public PrototypeId GetPublicEventTeam(PublicEventPrototype eventProto)
+        {
+            int eventInstance = eventProto.GetEventInstance();
+            var teamProp = new PropertyId(PropertyEnum.PublicEventTeamAssignment, eventProto.DataRef, eventInstance);
+            return Properties[teamProp];
+        }
+
+        public PublicEventTeamPrototype GetPublicEventTeamPrototype()
+        {
+            // TODO PropertyEnum.PublicEventTeamAssignment
+            // GetPublicEventTeam(ActivePublicEvent).As<PublicEventTeamPrototype>()
+            //return ((PrototypeId)12697619663363773645).As<PublicEventTeamPrototype>();  // Events/PublicEvents/Teams/CivilWarAntiReg.prototype
+            return null;
+        }
+
+        #endregion
+
+        #region Region
+
+        public Region GetRegion()
+        {
+            // This shouldn't need any null checks, at least for now
+            return AOI.Region;
+        }
+
+        public void UpdateSpawnMap(Vector3 position)
+        {
+            var region = GetRegion();
+            if (region == null || _spawnGimbal == null) return;
+            if (_spawnGimbal.ProjectGimbalPosition(region.Aabb, position, out Point2 coord) == false) return;
+            if (_spawnGimbal.Coord == coord) return;
+
+            bool inGimbal = _spawnGimbal.InGimbal(coord);
+            _spawnGimbal.UpdateGimbal(coord);
+            if (inGimbal) return;
+
+            Aabb volume = _spawnGimbal.HorizonVolume(position);
+            foreach (var area in region.IterateAreas(volume))
+                if (area.SpawnMap != null)
+                    area.PopulationArea?.UpdateSpawnMap(position);
+        }
+
+        public bool ViewedRegion(ulong regionId)
+        {
+            return PlayerConnection.WorldView.ContainsRegionInstanceId(regionId);
+        }
+
+        #endregion
+
+        #region Inventories
 
         /// <summary>
         /// Returns <see langword="true"/> if the inventory with the specified <see cref="PrototypeId"/> is unlocked for this <see cref="Player"/>.
@@ -483,21 +642,26 @@ namespace MHServerEmu.Games.Entities
         /// <summary>
         /// Returns <see cref="PrototypeId"/> values of all locked and/or unlocked stash tabs for this <see cref="Player"/>.
         /// </summary>
-        public IEnumerable<PrototypeId> GetStashInventoryProtoRefs(bool getLocked, bool getUnlocked)
+        public bool GetStashInventoryProtoRefs(List<PrototypeId> stashInvRefs, bool getLocked, bool getUnlocked)
         {
-            var playerProto = Prototype as PlayerPrototype;
-            if (playerProto == null) yield break;
-            if (playerProto.StashInventories == null) yield break;
+            if (Prototype is not PlayerPrototype playerProto) return Logger.WarnReturn(false, "GetStashInventoryProtoRefs(): Prototype is not PlayerPrototype playerProto");
+            if (playerProto.StashInventories.IsNullOrEmpty()) return Logger.WarnReturn(false, "GetStashInventoryProtoRefs(): playerProto.StashInventories.IsNullOrEmpty()");
 
             foreach (EntityInventoryAssignmentPrototype invAssignmentProto in playerProto.StashInventories)
             {
-                if (invAssignmentProto.Inventory == PrototypeId.Invalid) continue;
+                if (invAssignmentProto.Inventory == PrototypeId.Invalid)
+                {
+                    Logger.Warn("GetStashInventoryProtoRefs(): invAssignmentProto.Inventory == PrototypeId.Invalid");
+                    continue;
+                }
 
                 bool isLocked = GetInventoryByRef(invAssignmentProto.Inventory) == null;
 
                 if (isLocked && getLocked || isLocked == false && getUnlocked)
-                    yield return invAssignmentProto.Inventory;
+                    stashInvRefs.Add(invAssignmentProto.Inventory);
             }
+
+            return true;
         }
 
         /// <summary>
@@ -637,18 +801,47 @@ namespace MHServerEmu.Games.Entities
             return true;
         }
 
-        public bool RevealInventory(PrototypeId inventoryProtoRef)
+        public bool OnStashInventoryViewed(PrototypeId stashInventoryProtoRef)
+        {
+            if (stashInventoryProtoRef == PrototypeId.Invalid) return Logger.WarnReturn(false, "OnStashInventoryViewed(): stashInventoryProtoRef == PrototypeId.Invalid");
+
+            int newItemCount = Properties[PropertyEnum.StashNewItemCount, stashInventoryProtoRef];
+            if (newItemCount == 0)
+                return true;
+
+            Properties.RemoveProperty(new(PropertyEnum.StashNewItemCount, stashInventoryProtoRef));
+
+            Inventory inventory = GetInventoryByRef(stashInventoryProtoRef);
+            if (inventory == null) return Logger.WarnReturn(false, "OnStashInventoryViewed(): inventory == null");
+
+            EntityManager entityManager = Game.EntityManager;
+
+            foreach (var entry in inventory)
+            {
+                Item item = entityManager.GetEntity<Item>(entry.Id);
+                if (item == null)
+                {
+                    Logger.Warn("OnStashInventoryViewed(): item == null");
+                    continue;
+                }
+
+                item.Properties[PropertyEnum.ItemRecentlyAddedGlint] = false;
+            }
+
+            return true;
+        }
+
+        public bool RevealInventory(InventoryPrototype inventoryProto)
         {
             // Validate inventory prototype
-            var inventoryPrototype = GameDatabase.GetPrototype<InventoryPrototype>(inventoryProtoRef);
-            if (inventoryPrototype == null) return Logger.WarnReturn(false, "RevealInventory(): inventoryPrototype == null");
+            if (inventoryProto == null) return Logger.WarnReturn(false, "RevealInventory(): inventoryPrototype == null");
 
             // Skip reveal if this inventory does not require flagged visibility
-            if (inventoryPrototype.InventoryRequiresFlaggedVisibility() == false)
+            if (inventoryProto.InventoryRequiresFlaggedVisibility() == false)
                 return true;
 
             // Validate inventory
-            Inventory inventory = GetInventoryByRef(inventoryPrototype.DataRef);
+            Inventory inventory = GetInventoryByRef(inventoryProto.DataRef);
             if (inventory == null) return Logger.WarnReturn(false, "RevealInventory(): inventory == null");
 
             // Skip reveal if already visible
@@ -658,9 +851,11 @@ namespace MHServerEmu.Games.Entities
             inventory.VisibleToOwner = true;
 
             // Update interest for all contained entities
+            EntityManager entityManager = Game.EntityManager;
+
             foreach (var entry in inventory)
             {
-                var entity = Game.EntityManager.GetEntity<Entity>(entry.Id);
+                Entity entity = entityManager.GetEntity<Entity>(entry.Id);
                 if (entity == null)
                 {
                     Logger.Warn("RevealInventory(): entity == null");
@@ -684,16 +879,88 @@ namespace MHServerEmu.Games.Entities
                 if (invLoc.InventoryConvenienceLabel == InventoryConvenienceLabel.AvatarInPlay && invLoc.Slot == 0)
                     CurrentAvatar = avatar;
             }
+
+            if (IsInGame == false || entity is not Item item)
+                return;
+
+            InventoryCategory category = invLoc.InventoryCategory;
+            InventoryConvenienceLabel convenienceLabel = invLoc.InventoryConvenienceLabel;
+
+            if (convenienceLabel == InventoryConvenienceLabel.General ||
+                convenienceLabel == InventoryConvenienceLabel.TeamUpGeneral ||
+                convenienceLabel == InventoryConvenienceLabel.PvP)
+            {
+                // Assign the item's OnUse power to the current avatar
+                Avatar currentAvatar = CurrentAvatar;
+                if (currentAvatar?.IsInWorld == true)
+                {
+                    ItemPrototype itemProto = item.ItemPrototype;
+                    if (itemProto == null) return;
+
+                    PrototypeId powerProtoRef = item.OnUsePower;
+
+                    if (powerProtoRef != PrototypeId.Invalid &&
+                        currentAvatar.HasPowerInPowerCollection(powerProtoRef) == false &&
+                        (itemProto.AbilitySettings == null || itemProto.AbilitySettings.OnlySlottableWhileEquipped == false))
+                    {
+                        int characterLevel = currentAvatar.CharacterLevel;
+                        int combatLevel = currentAvatar.CombatLevel;
+                        int itemLevel = item.Properties[PropertyEnum.ItemLevel];
+                        float itemVariation = item.Properties[PropertyEnum.ItemVariation];
+                        PowerIndexProperties indexProps = new(0, characterLevel, combatLevel, itemLevel, itemVariation);
+
+                        if (currentAvatar.AssignPower(powerProtoRef, indexProps) == null)
+                        {
+                            Logger.Warn($"OnOtherEntityAddedToMyInventory(): Failed to assign item power {powerProtoRef.GetName()} to avatar {currentAvatar}");
+                            return;
+                        }
+                    }
+                }
+            }
+
+            // Highlight items that get put into stash tabs different from the current one
+            if (invLoc.InventoryRef != CurrentOpenStashPagePrototypeRef &&
+                (category == InventoryCategory.PlayerStashGeneral ||
+                category == InventoryCategory.PlayerStashAvatarSpecific ||
+                category == InventoryCategory.PlayerStashTeamUpGear))
+            {
+                item.Properties[PropertyEnum.ItemRecentlyAddedGlint] = true;
+                Properties.AdjustProperty(1, new(PropertyEnum.StashNewItemCount, invLoc.InventoryRef));
+            }
         }
 
-        public void OnChangeActiveAvatar(int avatarIndex, ulong lastCurrentAvatarId)
+        public override void OnOtherEntityRemovedFromMyInventory(Entity entity, InventoryLocation invLoc)
         {
-            // TODO: Apply and remove avatar properties stored in the player
+            base.OnOtherEntityRemovedFromMyInventory(entity, invLoc);
 
-            SendMessage(NetMessageCurrentAvatarChanged.CreateBuilder()
-                .SetAvatarIndex(avatarIndex)
-                .SetLastCurrentEntityId(lastCurrentAvatarId)
-                .Build());
+            if (IsInGame == false || entity is not Item item)
+                return;
+
+            InventoryCategory category = invLoc.InventoryCategory;
+            InventoryConvenienceLabel convenienceLabel = invLoc.InventoryConvenienceLabel;
+
+            if (convenienceLabel == InventoryConvenienceLabel.General ||
+                convenienceLabel == InventoryConvenienceLabel.TeamUpGeneral ||
+                convenienceLabel == InventoryConvenienceLabel.PvP)
+            {
+                // Unassign the item's OnUse power from the current avatar as long as there are no other item that grant it
+                Avatar currentAvatar = CurrentAvatar;
+                if (currentAvatar?.IsInWorld == true)
+                {
+                    ItemPrototype itemProto = item.ItemPrototype;
+                    if (itemProto == null) return;
+
+                    PrototypeId powerProtoRef = item.OnUsePower;
+
+                    if (powerProtoRef != PrototypeId.Invalid &&
+                        currentAvatar.HasPowerInPowerCollection(powerProtoRef) &&
+                        (itemProto.AbilitySettings == null || itemProto.AbilitySettings.OnlySlottableWhileEquipped == false))
+                    {
+                        if (currentAvatar.FindAbilityItem(itemProto, item.Id) == InvalidId)
+                            currentAvatar.UnassignPower(powerProtoRef);
+                    }
+                }
+            }
         }
 
         public bool TrashItem(Item item)
@@ -748,7 +1015,8 @@ namespace MHServerEmu.Games.Entities
             }
 
             // Reapply lifespan
-            TimeSpan expirationTime = item.GetExpirationTime();
+            float expirationTimeMult = Math.Max(Game.CustomGameOptions.TrashedItemExpirationTimeMultiplier, 0f);
+            TimeSpan expirationTime = item.GetExpirationTime() * expirationTimeMult;
             item.ResetLifespan(expirationTime);
 
             return true;
@@ -779,6 +1047,71 @@ namespace MHServerEmu.Games.Entities
             return true;
         }
 
+        public InventoryResult AcquireItem(Item item, PrototypeId inventoryProtoRef)
+        {
+            if (item == null) return Logger.WarnReturn(InventoryResult.InvalidSourceEntity, "AcquireItem(): item == null");
+
+            if (AcquireCurrencyItem(item))
+            {
+                item.Destroy();
+                return InventoryResult.Success;
+            }
+
+            Inventory inventory = inventoryProtoRef != PrototypeId.Invalid
+                ? GetInventoryByRef(inventoryProtoRef)
+                : GetInventory(InventoryConvenienceLabel.General);
+
+            if (inventory == null)
+                return InventoryResult.NoAvailableInventory;
+
+            ulong? stackEntityId = InvalidId;
+            InventoryResult result = item.ChangeInventoryLocation(inventory, Inventory.InvalidSlot, ref stackEntityId, true);
+
+            if (result == InventoryResult.Success)
+            {
+                // Update our item reference if it got stacked and mark it as recently added
+                if (stackEntityId != InvalidId)
+                    item = Game.EntityManager.GetEntity<Item>(stackEntityId.Value);
+
+                item?.SetRecentlyAdded(true);
+            }
+            else
+            {
+                // Handle overflow
+                Inventory deliveryBox = GetInventory(InventoryConvenienceLabel.DeliveryBox);
+                if (deliveryBox == null)
+                    return InventoryResult.NoAvailableInventory;
+
+                result = item.ChangeInventoryLocation(deliveryBox);
+
+                if (result != InventoryResult.Success)
+                {
+                    // Second level of overflow - this should not happen under normal circumstances
+                    Logger.Warn($"AcquireItem(): Failed to add item {item} to the delivery box for player {this} for reason {result}, moving this item to the error recovery inventory");
+
+                    Inventory errorRecovery = GetInventory(InventoryConvenienceLabel.ErrorRecovery);
+                    if (errorRecovery == null)
+                        return Logger.WarnReturn(InventoryResult.NoAvailableInventory, $"AcquireItem(): Error recovery inventory is not available for item {item}, player {this}");
+
+                    result = item.ChangeInventoryLocation(errorRecovery);
+                }
+            }
+
+            return result;
+        }
+
+        public bool AcquireCredits(int amount)
+        {
+            if (amount <= 0)
+                return false;
+
+            CurrencyPrototype creditsProto = GameDatabase.CurrencyGlobalsPrototype.CreditsPrototype;
+            Properties.AdjustProperty(amount, new(PropertyEnum.Currency, creditsProto.DataRef));
+            OnScoringEvent(new(ScoringEventType.CurrencyCollected, creditsProto, amount));
+
+            return true;
+        }
+
         public bool AcquireCurrencyItem(Entity entity)
         {
             if (entity.IsCurrencyItem() == false)
@@ -804,7 +1137,11 @@ namespace MHServerEmu.Games.Entities
                 if (currencyProto.MaxAmount > 0 && currentAmount + delta > currencyProto.MaxAmount)
                     continue;
 
-                Properties.AdjustProperty(delta, new(PropertyEnum.Currency, currencyProtoRef));
+                var propId = new PropertyId (PropertyEnum.Currency, currencyProtoRef);
+                Properties.AdjustProperty(delta, propId);
+                GetRegion()?.CurrencyCollectedEvent.Invoke(new(this, currencyProtoRef, Properties[propId]));
+                OnScoringEvent(new(ScoringEventType.CurrencyCollected, currencyProto, delta));
+
                 result = true;
             }
 
@@ -816,6 +1153,62 @@ namespace MHServerEmu.Games.Entities
             }
 
             return result;
+        }
+
+        public bool AcquireGazillionite(long amount)
+        {
+            if (amount <= 0) return Logger.WarnReturn(false, "AcquireGazillionite(): amount <= 0");
+
+            long balance = GazillioniteBalance;
+            balance += amount;
+            GazillioniteBalance = balance;
+
+            SendMessage(NetMessageGrantGToPlayerNotification.CreateBuilder()
+                .SetDidSucceed(true)
+                .SetCurrentCurrencyBalance(balance)
+                .Build());
+
+            return true;
+        }
+
+        public bool AwardBonusItemFindPoints(int amount, LootInputSettings settings)
+        {
+            if (amount <= 0)
+                return true;
+
+            Avatar avatar = CurrentAvatar;
+            if (avatar == null) return Logger.WarnReturn(false, "AwardBonusItemFindPoints(): avatar == null");
+
+            int bonusItemFindRating = avatar.Properties[PropertyEnum.BonusItemFindRating];
+            if (bonusItemFindRating <= 0)
+                return true;
+
+            LootGlobalsPrototype lootGlobalsProto = GameDatabase.LootGlobalsPrototype;
+            Curve bonusItemFindCurve = GameDatabase.LootGlobalsPrototype.BonusItemFindCurve.AsCurve();
+            if (bonusItemFindCurve == null) return Logger.WarnReturn(false, "AwardBonusItemFindPoints(): bonusItemFindCurve == null");
+
+            amount = (int)(amount * bonusItemFindCurve.GetAt(bonusItemFindRating));
+            if (amount <= 0)
+                return true;
+
+            int points = Properties[PropertyEnum.BonusItemFindPoints] + amount;
+            if (points >= lootGlobalsProto.BonusItemFindNumPointsForBonus)
+            {
+                Game.LootManager.GiveLootFromTable(lootGlobalsProto.BonusItemFindLootTable, settings);
+                points -= lootGlobalsProto.BonusItemFindNumPointsForBonus;
+            }
+
+            Properties[PropertyEnum.BonusItemFindPoints] = points;
+            return true;
+        }
+
+        public bool InitPowerFromCreationItem(Item item)
+        {
+            // Only the current avatar is in the world and can have powers, so it's pointless to use AvatarIterator here like the client does
+            if (item.GetOwnerOfType<Player>() != this) return Logger.WarnReturn(false, "InitPowerFromCreationItem(): item.GetOwnerOfType<Player>() != this");
+            
+            CurrentAvatar?.InitPowerFromCreationItem(item);
+            return true;
         }
 
         protected override bool InitInventories(bool populateInventories)
@@ -851,22 +1244,70 @@ namespace MHServerEmu.Games.Entities
         }
 
         /// <summary>
+        /// Initializes <see cref="StashTabOptions"/> for any stash tabs that are unlocked but don't have any options yet.
+        /// </summary>
+        private void OnEnterGameInitStashTabOptions()
+        {
+            List<PrototypeId> stashInvRefs = ListPool<PrototypeId>.Instance.Get();
+            if (GetStashInventoryProtoRefs(stashInvRefs, false, true))
+            {
+                foreach (PrototypeId stashRef in stashInvRefs)
+                {
+                    if (_stashTabOptionsDict.ContainsKey(stashRef) == false)
+                        StashTabInsert(stashRef, 0);
+                }
+            }
+            else
+            {
+                Logger.Warn("OnEnterGameInitStashTabOptions()(): GetStashInventoryProtoRefs(stashInvRefs, false, true) == false");
+            }
+
+            ListPool<PrototypeId>.Instance.Return(stashInvRefs);
+        }
+
+        #endregion
+
+        #region Badges
+
+        /// <summary>
         /// Add the specified badge to this <see cref="Player"/>. Returns <see langword="true"/> if successful.
         /// </summary>
-        public bool AddBadge(AvailableBadges badge) => _badges.Add(badge);
+        public bool AddBadge(AvailableBadges badge)
+        {
+            return _badges.SortedInsert(badge);
+        }
 
         /// <summary>
         /// Removes the specified badge from this <see cref="Player"/>. Returns <see langword="true"/> if successful.
         /// </summary>
-        public bool RemoveBadge(AvailableBadges badge) => _badges.Remove(badge);
+        public bool RemoveBadge(AvailableBadges badge)
+        {
+            return _badges.Remove(badge);
+        }
 
         /// <summary>
         /// Returns <see langword="true"/> if this <see cref="Player"/> has the specified badge.
         /// </summary>
-        public bool HasBadge(AvailableBadges badge) => _badges.Contains(badge);
+        public bool HasBadge(AvailableBadges badge)
+        {
+            return _badges.Contains(badge);
+        }
 
-        public void AddTag(WorldEntity entity) => _tagEntities.Add(entity.Id);
-        public void RemoveTag(WorldEntity entity) => _tagEntities.Remove(entity.Id);
+        #endregion
+
+        #region Tags
+
+        public void AddTag(WorldEntity entity)
+        {
+            _tagEntities.Add(entity.Id);
+        }
+
+        public void RemoveTag(WorldEntity entity)
+        {
+            _tagEntities.Remove(entity.Id);
+        }
+
+        #endregion
 
         #region Avatar and Team-Up Management
 
@@ -875,8 +1316,11 @@ namespace MHServerEmu.Games.Entities
             if (avatarProtoRef == PrototypeId.Invalid) return Logger.WarnReturn<Avatar>(null, "GetAvatar(): avatarProtoRef == PrototypeId.Invalid");
 
             AvatarIterator iterator = new(this, AvatarIteratorMode.IncludeArchived, avatarProtoRef);
+            AvatarIterator.Enumerator enumerator = iterator.GetEnumerator();
+            if (enumerator.MoveNext())
+                return enumerator.Current;
 
-            return iterator.FirstOrDefault();
+            return null;
         }
 
         public Avatar GetActiveAvatarById(ulong avatarEntityId)
@@ -889,6 +1333,31 @@ namespace MHServerEmu.Games.Entities
         {
             // TODO: Secondary avatar for consoles?
             return (index == 0) ? CurrentAvatar : null;
+        }
+
+        public Avatar CreateAvatar(PrototypeId avatarProtoRef)
+        {
+            AvatarPrototype avatarProto = avatarProtoRef.As<AvatarPrototype>();
+            if (avatarProto == null) return Logger.WarnReturn<Avatar>(null, "CreateAvatar(): avatarProto == null");
+
+            if (GetAvatar(avatarProtoRef) != null)
+                return Logger.WarnReturn<Avatar>(null, $"CreateAvatar(): Player [{this}] is trying to create avatar {avatarProto} that is already unlocked");
+
+            Inventory avatarLibrary = GetInventory(InventoryConvenienceLabel.AvatarLibrary);
+            if (avatarLibrary == null) return Logger.WarnReturn<Avatar>(null, "CreateAvatar(): avatarLibrary == null");
+
+            using EntitySettings avatarSettings = ObjectPoolManager.Instance.Get<EntitySettings>();
+            avatarSettings.EntityRef = avatarProtoRef;
+            avatarSettings.InventoryLocation = new(Id, avatarLibrary.PrototypeDataRef);
+
+            Avatar avatar = Game.EntityManager.CreateEntity(avatarSettings) as Avatar;
+            if (avatar == null) return Logger.ErrorReturn<Avatar>(null, "CreateAvatar(): avatar == null");
+
+            avatar.InitializeLevel(1);
+            avatar.ResetResources(false);
+            avatar.GiveStartingCostume();
+
+            return avatar;
         }
 
         public Agent GetTeamUpAgent(PrototypeId teamUpProtoRef)
@@ -906,46 +1375,85 @@ namespace MHServerEmu.Games.Entities
             return GetTeamUpAgent(teamUpRef) != null;
         }
 
-        public void UnlockTeamUpAgent(PrototypeId teamUpRef)
+        public bool UnlockTeamUpAgent(PrototypeId teamUpRef, bool sendToClient = true)
         {
-            if (IsTeamUpAgentUnlocked(teamUpRef)) return;
+            if (Game.GameOptions.TeamUpSystemEnabled == false)
+                return false;
 
-            var manager = Game?.EntityManager;
-            if (manager == null) return;
+            if (IsTeamUpAgentUnlocked(teamUpRef))
+                return Logger.WarnReturn(false, $"UnlockTeamUpAgent(): Player [{this}] is trying to unlock team-up {teamUpRef.GetName()} that is already unlocked");
 
-            var teamUpProto = GameDatabase.GetPrototype<AgentTeamUpPrototype>(teamUpRef);
-            if (teamUpProto == null) return;
+            AgentTeamUpPrototype teamUpProto = GameDatabase.GetPrototype<AgentTeamUpPrototype>(teamUpRef);
+            if (teamUpProto == null) return Logger.WarnReturn(false, "UnlockTeamUpAgent(): teamUpProto == null");
 
-            var inventory = GetInventory(InventoryConvenienceLabel.TeamUpLibrary);
-            if (inventory == null) return;
+            Inventory teamUpLibrary = GetInventory(InventoryConvenienceLabel.TeamUpLibrary);
+            if (teamUpLibrary == null) return Logger.WarnReturn(false, "UnlockTeamUpAgent(): teamUpLibrary == null");
 
             using EntitySettings settings = ObjectPoolManager.Instance.Get<EntitySettings>();
-            settings.InventoryLocation = new(Id, inventory.PrototypeDataRef);
+            settings.InventoryLocation = new(Id, teamUpLibrary.PrototypeDataRef);
             settings.EntityRef = teamUpRef;
 
-            var teamUp = manager.CreateEntity(settings) as Agent;
-            if (teamUp == null) return;
+            Agent teamUp = Game.EntityManager.CreateEntity(settings) as Agent;
+            if (teamUp == null)
+                return Logger.WarnReturn(false, $"UnlockTeamUpAgent(): Failed to create team-up agent entity {teamUpRef.GetName()} for player [{this}]");
 
+            teamUp.InitializeLevel(1);
             teamUp.CombatLevel = 1;
-            // TODO ExperiencePoints
 
             teamUp.Properties[PropertyEnum.PowerProgressionVersion] = teamUp.GetLatestPowerProgressionVersion();
 
-            SendNewTeamUpAcquired(teamUpRef);
+            if (sendToClient)
+                SendNewTeamUpAcquired(teamUpRef);
+
+            GetRegion()?.PlayerUnlockedTeamUpEvent.Invoke(new(this, teamUpRef));
+
+            return true;
         }
 
-        public bool BeginSwitchAvatar(PrototypeId avatarProtoRef)
+        public bool BeginAvatarSwitch(PrototypeId avatarProtoRef, bool ignoreGameplayRestrictions = false)
         {
+            Avatar currentAvatar = CurrentAvatar;
+            if (currentAvatar == null) return Logger.WarnReturn(false, "BeginAvatarSwitch(): currentAvatar == null");
+            if (currentAvatar.IsInWorld == false) return Logger.WarnReturn(false, "BeginAvatarSwitch(): currentAvatar.IsInWorld == false");
+
+            if (avatarProtoRef == PrototypeId.Invalid) return Logger.WarnReturn(false, "BeginAvatarSwitch(): avatarProtoRef == PrototypeId.Invalid");
+            if (avatarProtoRef == currentAvatar.PrototypeDataRef) return Logger.WarnReturn(false, "BeginAvatarSwitch(): avatarProtoRef == currentAvatar.PrototypeDataRef");
+
+            Avatar avatarToSwitchTo = GetAvatar(avatarProtoRef);
+
+            SwitchToAvatarFailedReason failReason = SwitchToAvatarFailedReason.eSAFR_Unknown;
+            CanSwitchAvatarResult canSwitch = CanSwitchToAvatar(currentAvatar, avatarToSwitchTo, ignoreGameplayRestrictions);
+            if (canSwitch != CanSwitchAvatarResult.Success)
+            {
+                if (canSwitch == CanSwitchAvatarResult.NotAllowedInRegion)
+                    failReason = SwitchToAvatarFailedReason.eSAFR_RegionRestrictionEval;
+
+                currentAvatar.SendSwitchToAvatarFailedMessage(failReason);
+                return false;
+            }
+
+            // TODO: Prefetch assets to ensure the swap-in animation always plays
+
+            // Activate the swap power
             Power avatarSwapChannel = CurrentAvatar.GetPower(GameDatabase.GlobalsPrototype.AvatarSwapChannelPower);
-            if (avatarSwapChannel == null) return Logger.WarnReturn(false, "BeginSwitchAvatar(): avatarSwapChannel == null");
+            if (avatarSwapChannel == null) return Logger.WarnReturn(false, "BeginAvatarSwitch(): avatarSwapChannel == null");
 
             PowerActivationSettings settings = new(CurrentAvatar.Id, CurrentAvatar.RegionLocation.Position, CurrentAvatar.RegionLocation.Position);
             settings.Flags = PowerActivationSettingsFlags.NotifyOwner;
-            CurrentAvatar.ActivatePower(avatarSwapChannel.PrototypeDataRef, ref settings);
+            PowerUseResult avatarSwapChannelResult = currentAvatar.ActivatePower(avatarSwapChannel.PrototypeDataRef, ref settings);
+
+            if (avatarSwapChannelResult != PowerUseResult.Success)
+            {
+                if (avatarSwapChannelResult == PowerUseResult.RegionRestricted)
+                    failReason = SwitchToAvatarFailedReason.eSAFR_RegionRestrictionKwd;
+
+                Logger.Warn($"BeginAvatarSwitch(): Failed to activate swap channel power for avatar [{currentAvatar}], result={avatarSwapChannelResult}");
+                currentAvatar.SendSwitchToAvatarFailedMessage(failReason);
+                return false;
+            }
 
             Properties.RemovePropertyRange(PropertyEnum.AvatarSwitchPending);
             Properties[PropertyEnum.AvatarSwitchPending, avatarProtoRef] = true;
-
             return true;
         }
 
@@ -967,7 +1475,6 @@ namespace MHServerEmu.Games.Entities
             }
 
             if (avatarProtoRef == PrototypeId.Invalid) return Logger.WarnReturn(false, "SwitchAvatar(): Failed to find pending avatar switch");
-            Properties.RemovePropertyRange(PropertyEnum.AvatarSwitchPending);
 
             // Get information about the previous avatar
             ulong lastCurrentAvatarId = CurrentAvatar != null ? CurrentAvatar.Id : InvalidId;
@@ -975,26 +1482,43 @@ namespace MHServerEmu.Games.Entities
             Vector3 prevPosition = CurrentAvatar.RegionLocation.Position;
             Orientation prevOrientation = CurrentAvatar.RegionLocation.Orientation;
 
-            // Do the switch
+            // Find the avatar to switch to
             Inventory avatarLibrary = GetInventory(InventoryConvenienceLabel.AvatarLibrary);
             Inventory avatarInPlay = GetInventory(InventoryConvenienceLabel.AvatarInPlay);
 
             if (avatarLibrary.GetMatchingEntity(avatarProtoRef) is not Avatar avatar)
                 return Logger.WarnReturn(false, $"SwitchAvatar(): Failed to find avatar entity for avatarProtoRef {GameDatabase.GetPrototypeName(avatarProtoRef)}");
 
+            // Remove non-persistent conditions from the current avatar
+            ConditionCollection previousConditions = CurrentAvatar?.ConditionCollection;
+            previousConditions?.RemoveAllConditions(false);
+
+            // Do the switch
             InventoryResult result = avatar.ChangeInventoryLocation(avatarInPlay, 0);
 
             if (result != InventoryResult.Success)
                 return Logger.WarnReturn(false, $"SwitchAvatar(): Failed to change library avatar's inventory location ({result})");
 
+            IsSwitchingAvatar = true;
+
+            // Transfer conditions to the new current avatar
+            ConditionCollection currentConditions = CurrentAvatar?.ConditionCollection;
+            if (previousConditions != null && currentConditions != null)
+                currentConditions.TransferConditionsFrom(previousConditions);
+
             EnableCurrentAvatar(true, lastCurrentAvatarId, prevRegionId, prevPosition, prevOrientation);
+
+            IsSwitchingAvatar = false;
+
+            ScheduleCommunityBroadcast();
+
+            GetRegion()?.PlayerSwitchedToAvatarEvent.Invoke(new(this, avatarProtoRef));
+
             return true;
         }
 
         public bool EnableCurrentAvatar(bool withSwapInPower, ulong lastCurrentAvatarId, ulong regionId, in Vector3 position, in Orientation orientation)
         {
-            // TODO: Use this for teleportation within region as well
-
             if (CurrentAvatar == null)
                 return Logger.WarnReturn(false, "EnableCurrentAvatar(): CurrentAvatar == null");
 
@@ -1005,7 +1529,7 @@ namespace MHServerEmu.Games.Entities
             if (region == null)
                 return Logger.WarnReturn(false, "EnableCurrentAvtar(): region == null");
 
-            Logger.Info($"EnableCurrentAvatar(): {CurrentAvatar} entering world");
+            Logger.Trace($"EnableCurrentAvatar(): [{CurrentAvatar}] entering world in region [{region}]");
 
             // Disable initial visibility and schedule swap-in power if requested
             using EntitySettings settings = ObjectPoolManager.Instance.Get<EntitySettings>();
@@ -1019,14 +1543,32 @@ namespace MHServerEmu.Games.Entities
             if (CurrentAvatar.EnterWorld(region, CurrentAvatar.FloorToCenter(position), orientation, settings) == false)
                 return false;
 
+            // Reset resources AFTER entering world because entering world initializes resources
+            if (withSwapInPower)
+                CurrentAvatar.ResetResources(true);
+
             OnChangeActiveAvatar(0, lastCurrentAvatarId);
             return true;
         }
 
         public int GetLevelCapForCharacter(PrototypeId agentProtoRef)
         {
-            // TODO
-            return 60;
+            AgentPrototype agentProto = agentProtoRef.As<AgentPrototype>();
+
+            switch (agentProto)
+            {
+                case AvatarPrototype avatarProto:
+                    if (HasAvatarAsStarter(agentProtoRef))
+                        return Avatar.GetStarterAvatarLevelCap();
+
+                    return Avatar.GetAvatarLevelCap();
+
+                case AgentTeamUpPrototype teamUpProto:
+                    return Agent.GetTeamUpLevelCap();
+
+                default:
+                    return Logger.WarnReturn(0, $"GetLevelCapForCharacter(): Agent is neither an Avatar nor a Team-Up: [{agentProto}]");
+            }
         }
 
         public void SetAvatarLibraryProperties()
@@ -1040,42 +1582,96 @@ namespace MHServerEmu.Games.Entities
 
             int maxAvatarLevel = 1;
 
+            TimeSpan timePlayed = TimeSpan.Zero;
+            int legendaryMissionsComplete = 0;
+            int pvpWins = 0;
+            int pvpLosses = 0;
+
             foreach (Avatar avatar in new AvatarIterator(this))
             {
                 PrototypeId avatarProtoRef = avatar.PrototypeDataRef;
 
-                // Library Level
-                // NOTE: setting AvatarLibraryLevel above level 60 displays as prestige levels in the UI
-                int characterLevel = avatar.Properties[PropertyEnum.CharacterLevel];
-                maxAvatarLevel = Math.Max(characterLevel, maxAvatarLevel);
-                Properties[PropertyEnum.AvatarLibraryLevel, 0, avatarProtoRef] = characterLevel;
-
-                // Costume
+                // AvatarLibraryLevel will be set by running the level up logic in the avatar (see OnAvatarCharacterLevelChanged())
                 Properties[PropertyEnum.AvatarLibraryCostume, 0, avatarProtoRef] = avatar.Properties[PropertyEnum.CostumeCurrent];
-
-                // Team-up
                 Properties[PropertyEnum.AvatarLibraryTeamUp, 0, avatarProtoRef] = avatar.Properties[PropertyEnum.AvatarTeamUpAgent];
 
-                // Unlock extra emotes
-                Properties[PropertyEnum.AvatarEmoteUnlocked, avatarProtoRef, (PrototypeId)11651334702101696313] = true; // Powers/Emotes/EmoteCongrats.prototype
-                Properties[PropertyEnum.AvatarEmoteUnlocked, avatarProtoRef, (PrototypeId)773103106671775187] = true;   // Powers/Emotes/EmoteDance.prototype
+                // Update max level
+                maxAvatarLevel = Math.Max(maxAvatarLevel, avatar.CharacterLevel);
+
+                // Add statistics to total
+                timePlayed += avatar.GetTimePlayed();
+                legendaryMissionsComplete += avatar.Properties[PropertyEnum.LegendaryMissionsComplete];
+                pvpWins += avatar.Properties[PropertyEnum.PvPWins];
+                pvpLosses += avatar.Properties[PropertyEnum.PvPLosses];
             }
 
             Properties[PropertyEnum.PlayerMaxAvatarLevel] = maxAvatarLevel;
 
-            // TODO: Move mission manager somewhere else
-            _missionManager.SetAvatar(CurrentAvatar.PrototypeDataRef);
+            Properties[PropertyEnum.AvatarTotalTimePlayed] = timePlayed;
+            Properties[PropertyEnum.LegendaryMissionsComplete] = legendaryMissionsComplete;
+            Properties[PropertyEnum.PvPWins] = pvpWins;
+            Properties[PropertyEnum.PvPLosses] = pvpLosses;
+        }
+
+        public void SetTeamUpLibraryProperties()
+        {
+            if (Properties.HasProperty(PropertyEnum.TeamUpsAtMaxLevelPersistent))
+                return;
+
+            Inventory teamUpLibrary = GetInventory(InventoryConvenienceLabel.TeamUpLibrary);
+            if (teamUpLibrary == null)
+                return;
+
+            EntityManager entityManager = Game.EntityManager;
+
+            int teamUpsAtMaxLevel = 0;
+            foreach (var entry in teamUpLibrary)
+            {
+                Agent teamUpAgent = entityManager.GetEntity<Agent>(entry.Id);
+                if (teamUpAgent == null)
+                {
+                    Logger.Warn("SetTeamUpLibraryProperties(): teamUpAgent == null");
+                    continue;
+                }
+
+                if (teamUpAgent.IsAtLevelCap)
+                    teamUpsAtMaxLevel++;
+            }
+
+            if (teamUpsAtMaxLevel > 0)
+                Properties[PropertyEnum.TeamUpsAtMaxLevelPersistent] = teamUpsAtMaxLevel;
+        }
+
+        public void OnChangeActiveAvatar(int avatarIndex, ulong lastCurrentAvatarId)
+        {
+            // TODO: Apply and remove avatar properties stored in the player
+
+            SendMessage(NetMessageCurrentAvatarChanged.CreateBuilder()
+                .SetAvatarIndex(avatarIndex)
+                .SetLastCurrentEntityId(lastCurrentAvatarId)
+                .Build());
         }
 
         public void OnAvatarCharacterLevelChanged(Avatar avatar)
         {
             int characterLevel = avatar.CharacterLevel;
+            int prestigeLevel = avatar.PrestigeLevel;
+            int levelCap = Avatar.GetAvatarLevelCap();
+            int totalLevel = prestigeLevel * levelCap + characterLevel;
 
-            Properties[PropertyEnum.AvatarLibraryLevel, 0, avatar.PrototypeDataRef] = characterLevel;
+            Properties[PropertyEnum.AvatarLibraryLevel, (int)avatar.AvatarMode, avatar.PrototypeDataRef] = totalLevel;
+
+            if (avatar.AvatarMode == AvatarMode.Normal)
+            {
+                OnScoringEvent(new(ScoringEventType.AvatarLevelTotal, totalLevel));
+                OnScoringEvent(new(ScoringEventType.AvatarLevelTotalAllAvatars, ScoringEvents.GetPlayerAvatarsTotalLevels(this)));
+            }
 
             // Update max avatar level for things like mode unlocks
             if (characterLevel > Properties[PropertyEnum.PlayerMaxAvatarLevel])
                 Properties[PropertyEnum.PlayerMaxAvatarLevel] = characterLevel;
+
+            UpdateUISystemLocks();
         }
 
         public bool CanUseLiveTuneBonuses()
@@ -1087,10 +1683,338 @@ namespace MHServerEmu.Games.Entities
                 return playerMaxAvatarLevel >= serverBonusUnlockLevelOverride;
 
             // NOTE: ServerBonusUnlockLevel is set to 60 in 1.52.
-            // TODO: Uncomment the real check when we no longer need to rely on live tuning for balancing rewards.
-            //return playerMaxAvatarLevel >= GameDatabase.GlobalsPrototype.ServerBonusUnlockLevel;
+            return playerMaxAvatarLevel >= GameDatabase.GlobalsPrototype.ServerBonusUnlockLevel;
+        }
+
+        public bool HasAvatarFullyUnlocked(PrototypeId avatarRef)
+        {
+            AvatarUnlockType unlockType = GetAvatarUnlockType(avatarRef);
+            return unlockType != AvatarUnlockType.None && unlockType != AvatarUnlockType.Starter;
+        }
+
+        public bool HasAvatarAsStarter(PrototypeId avatarRef)
+        {
+            AvatarUnlockType unlockType = GetAvatarUnlockType(avatarRef);
+            return unlockType == AvatarUnlockType.Starter;
+        }
+
+        public bool HasAvatarAsCappedStarter(Avatar avatar)
+        {
+            return HasAvatarAsStarter(avatar.PrototypeDataRef) && avatar.CharacterLevel >= Avatar.GetStarterAvatarLevelCap();
+        }
+
+        public AvatarUnlockType GetAvatarUnlockType(PrototypeId avatarRef)
+        {
+            var avatarProto = GameDatabase.GetPrototype<AvatarPrototype>(avatarRef);
+            if (avatarProto == null) return AvatarUnlockType.None;
+            AvatarUnlockType unlockType = (AvatarUnlockType)(int)Properties[PropertyEnum.AvatarUnlock, avatarRef];
+            if (unlockType == AvatarUnlockType.None && avatarProto.IsStarterAvatar)
+                return AvatarUnlockType.Starter;
+            return unlockType;
+        }
+
+        public bool UnlockAvatar(PrototypeId avatarRef, bool sendToClient)
+        {
+            AvatarUnlockType currentUnlockType = GetAvatarUnlockType(avatarRef);
+            if (currentUnlockType != AvatarUnlockType.None && currentUnlockType != AvatarUnlockType.Starter)
+                return false;
+
+            Properties[PropertyEnum.AvatarUnlock, avatarRef] = (int)AvatarUnlockType.Type2;
+            GetRegion()?.PlayerUnlockedAvatarEvent.Invoke(new(this, avatarRef));
+            OnScoringEvent(new(ScoringEventType.AvatarsUnlocked, avatarRef.As<AvatarPrototype>(), 1));
+
+            if (sendToClient)
+                SendMessage(NetMessageNewAvatarAcquired.CreateBuilder().SetPrototypeId((ulong)avatarRef).Build());
+
             return true;
         }
+
+        public int GetCharacterLevelForAvatar(PrototypeId avatarRef, AvatarMode avatarMode)
+        {
+            int levelCap = Avatar.GetAvatarLevelCap();
+            if (levelCap <= 0) return 0;
+            int level = Properties[PropertyEnum.AvatarLibraryLevel, (int)avatarMode, avatarRef];
+            if (level <= 0) return 0;
+            level %= levelCap;
+            return level == 0 ? levelCap : level;
+        }
+
+        public int GetPrestigeLevelForAvatar(PrototypeId avatarRef, AvatarMode avatarMode)
+        {
+            int levelCap = Avatar.GetAvatarLevelCap();
+            if (levelCap <= 0) return 0;
+            int level = Properties[PropertyEnum.AvatarLibraryLevel, (int)avatarMode, avatarRef];
+            if (level <= 0) return 0;
+            return (level - 1) / levelCap;
+        }
+
+        public int GetMaxCharacterLevelAttainedForAvatar(PrototypeId avatarRef, AvatarMode avatarMode = AvatarMode.Normal)
+        {
+            return Math.Min(Properties[PropertyEnum.AvatarLibraryLevel, (int)avatarMode, avatarRef], Avatar.GetAvatarLevelCap());
+        }
+
+        private CanSwitchAvatarResult CanSwitchToAvatar(Avatar currentAvatar, Avatar avatarToSwitchTo, bool ignoreGameplayRestrictions)
+        {
+            if (currentAvatar == avatarToSwitchTo) return Logger.WarnReturn(CanSwitchAvatarResult.NotAllowedUnknown, "CanSwitchToAvatar(): currentAvatar == avatarToSwitchTo");
+
+            // Check ownership
+            if (avatarToSwitchTo.InventoryLocation.InventoryConvenienceLabel != InventoryConvenienceLabel.AvatarLibrary)
+                return Logger.WarnReturn(CanSwitchAvatarResult.NotAllowedUnknown, $"CanSwitchToAvatar(): Attempting to switch to avatar not in avatar library\ncurrentAvatar=[{currentAvatar}], avatarToSwitchTo={avatarToSwitchTo}");
+
+            if (Owns(avatarToSwitchTo) == false)
+                return Logger.WarnReturn(CanSwitchAvatarResult.NotAllowedUnknown, $"CanSwitchToAvatar(): Attempting to switch to avatar not belonging to this player\ncurrentAvatar=[{currentAvatar}], avatarToSwitchTo={avatarToSwitchTo}");
+
+            // Check live tuning
+            AvatarPrototype avatarToSwitchToProto = avatarToSwitchTo.AvatarPrototype;
+            if (avatarToSwitchToProto == null) return Logger.WarnReturn(CanSwitchAvatarResult.NotAllowedUnknown, "CanSwitchToAvatar(): avatarToSwitchToProto == null");
+
+            if (avatarToSwitchToProto.IsLiveTuningEnabled() == false)
+                return CanSwitchAvatarResult.NotAllowedUnknown;
+
+            // Do not check anything else if not requested
+            if (ignoreGameplayRestrictions)
+                return CanSwitchAvatarResult.Success;
+
+            // Generic check if avatar switch is possible
+            CanSwitchAvatarResult genericCheckResult = CanSwitchAvatars();
+            if (genericCheckResult != CanSwitchAvatarResult.Success)
+                return genericCheckResult;
+
+            // Avatar-specific checks
+            if (currentAvatar.IsDead)
+                return CanSwitchAvatarResult.NotAllowedUnknown;
+
+            Region region = GetRegion();
+            if (region == null)
+                return CanSwitchAvatarResult.NotAllowedInRegion;
+
+            RegionPrototype regionProto = region.Prototype;
+
+            // Run eval checks
+            if (regionProto.RunEvalAccessRestriction(this, avatarToSwitchTo, region.DifficultyTierRef) == false)
+                return CanSwitchAvatarResult.NotAllowedInRegion;
+
+            // Check roster restriction
+            if (region.IsRestrictedRosterEnabled)
+            {
+                bool success = false;
+                PrototypeId avatarToSwitchToProtoRef = avatarToSwitchToProto.DataRef;
+                foreach (PrototypeId avatarProtoRef in regionProto.RestrictedRoster)
+                {
+                    if (avatarProtoRef == avatarToSwitchToProtoRef)
+                        success = true;
+                }
+
+                if (success == false)
+                    return CanSwitchAvatarResult.NotAllowedInRegion;
+            }
+
+            return CanSwitchAvatarResult.Success;
+        }
+
+        private CanSwitchAvatarResult CanSwitchAvatars(PlayerAvatarIndex avatarIndex = PlayerAvatarIndex.Primary)
+        {
+            Region region = GetRegion();
+            if (region == null) return Logger.WarnReturn(CanSwitchAvatarResult.NotAllowedUnknown, "CanSwitchAvatars(): region == null");
+
+            // Region lock
+            if (region.AvatarSwapEnabled == false && CurrentHUDTutorial?.HighlightAvatars.HasValue() == false)
+                return CanSwitchAvatarResult.NotAllowedInRegion;
+
+            RegionPrototype regionProto = region.Prototype;
+            if (regionProto == null) return Logger.WarnReturn(CanSwitchAvatarResult.NotAllowedUnknown, "CanSwitchAvatars(): regionProto == null");
+
+            if (regionProto.Behavior == RegionBehavior.PrivateStory)
+                return CanSwitchAvatarResult.NotAllowedInPrivateInstance;
+
+            // Transform mode
+            Avatar avatar = GetActiveAvatarByIndex((int)avatarIndex);
+            if (avatar == null) return Logger.WarnReturn(CanSwitchAvatarResult.NotAllowedUnknown, "CanSwitchAvatars(): avatar == null");
+
+            PrototypeId transformModeProtoRef = avatar.CurrentTransformMode;
+            if (transformModeProtoRef != PrototypeId.Invalid)
+            {
+                TransformModePrototype transformModeProto = transformModeProtoRef.As<TransformModePrototype>();
+                if (transformModeProto == null) return Logger.WarnReturn(CanSwitchAvatarResult.NotAllowedUnknown, "CanSwitchAvatars(): transformModeProto == null");
+
+                if (transformModeProto.GetDuration(avatar) != TimeSpan.Zero)
+                    return CanSwitchAvatarResult.NotAllowedInTransformMode; 
+            }
+
+            // Property restriction
+            if (avatar.Properties[PropertyEnum.NoAvatarSwap])
+                return CanSwitchAvatarResult.NotAllowedGeneric;
+
+            // Throwable
+            if (avatar.GetThrowablePower() != null)
+                return CanSwitchAvatarResult.NotAllowedGeneric;
+
+            // Check if the region prohibits the use of swap powers
+            GlobalsPrototype globalsProto = GameDatabase.GlobalsPrototype;
+
+            if (regionProto.PowerKeywordBlacklist.HasValue())
+            {
+                PowerPrototype swapOutPowerProto = globalsProto.AvatarSwapOutPower.As<PowerPrototype>();
+                if (swapOutPowerProto == null) return Logger.WarnReturn(CanSwitchAvatarResult.NotAllowedUnknown, "CanSwitchAvatars(): swapOutPowerProto == null");
+
+                PowerPrototype swapInPowerProto = globalsProto.AvatarSwapInPower.As<PowerPrototype>();
+                if (swapInPowerProto == null) return Logger.WarnReturn(CanSwitchAvatarResult.NotAllowedUnknown, "CanSwitchAvatars(): swapInPowerProto == null");
+
+                if (swapOutPowerProto.Keywords.ShareElement(regionProto.PowerKeywordBlacklist) || swapInPowerProto.Keywords.ShareElement(regionProto.PowerKeywordBlacklist))
+                    return CanSwitchAvatarResult.NotAllowedInRegion;
+            }
+
+            // Queue status
+            if (MatchQueueStatus.IsOwnerInQueue())
+                return CanSwitchAvatarResult.NotAllowedInQueue;
+
+            // Do not allow switching while using powers
+            PrototypeId activePowerRef = avatar.ActivePowerRef;
+            if (activePowerRef != PrototypeId.Invalid && activePowerRef != globalsProto.AvatarSwapChannelPower && activePowerRef != globalsProto.AvatarSwapOutPower)
+                return CanSwitchAvatarResult.NotAllowedGeneric;
+
+            return CanSwitchAvatarResult.Success;
+        }
+
+        #endregion
+
+        #region Alternate Advancement (Omega and Infinity)
+
+        public long GetTotalInfinityPoints()
+        {
+            long infinityPoints = 0;
+
+            for (InfinityGem gem = 0; gem < InfinityGem.NumGems; gem++)
+                infinityPoints += Properties[PropertyEnum.InfinityPoints, (int)gem];
+
+            return infinityPoints;
+        }
+
+        public void AwardInfinityXP(long amount, bool notifyClient)
+        {
+            if (amount <= 0)
+                return;
+
+            long infinityXP = Math.Min(InfinityXP + amount, GameDatabase.AdvancementGlobalsPrototype.InfinityXPCap);
+            Properties[PropertyEnum.InfinityXP] = infinityXP;
+
+            TryInfinityLevelUp(notifyClient);
+        }
+
+        public void TryInfinityLevelUp(bool notifyClient)
+        {
+            long pointsBefore = GetTotalInfinityPoints();
+            long pointsAfter = CalcInfinityPointsFromXP(InfinityXP);
+
+            // Early out if we don't have any points
+            if (pointsAfter <= pointsBefore)
+                return;
+
+            long pointsPerGem = Math.DivRem(pointsAfter - pointsBefore, (int)InfinityGem.NumGems, out long pointsPerGemRemainder);
+
+            InfinityGemBonusTable infinityBonusTable = GameDataTables.Instance.InfinityGemBonusTable;
+
+            NetMessageInfinityPointGain.Builder messageBuilder = notifyClient ? NetMessageInfinityPointGain.CreateBuilder() : null;
+
+            InfinityGem gemStart = (InfinityGem)(int)Properties[PropertyEnum.InfinityGemNext];
+            InfinityGem gemCurrent = gemStart;
+            InfinityGem gemLast = gemStart;
+
+            // Need to use a do loop here instead of for to ensure at least one iteration of it
+            do
+            {
+                long numPointsGained = pointsPerGem;
+
+                // Distribute the remainder
+                if (pointsPerGemRemainder > 0)
+                {
+                    numPointsGained++;
+                    pointsPerGemRemainder--;
+
+                    if (pointsPerGemRemainder == 0)
+                        gemLast = gemCurrent;
+                }
+
+                // Adjust the number of points
+                if (numPointsGained > 0)
+                {
+                    Properties.AdjustProperty((int)numPointsGained, new(PropertyEnum.InfinityPoints, (PropertyParam)gemCurrent));
+                    
+                    messageBuilder?.AddPointsGained(NetStructInfinityPointGain.CreateBuilder()
+                        .SetNumPointsGained(numPointsGained)
+                        .SetInfinityGemEnum((int)gemCurrent));
+                }
+
+                gemCurrent = infinityBonusTable.GetNextGem(gemCurrent);
+            } while (gemCurrent != gemStart);
+
+            Properties[PropertyEnum.InfinityGemNext] = (int)infinityBonusTable.GetNextGem(gemLast);
+
+            Avatar avatar = CurrentAvatar;
+            if (messageBuilder != null && avatar != null && avatar.IsInfinitySystemUnlocked())
+            {
+                messageBuilder.SetAvatarId(avatar.Id);
+                Game.NetworkManager.SendMessageToInterested(messageBuilder.Build(), avatar, AOINetworkPolicyValues.AOIChannelProximity | AOINetworkPolicyValues.AOIChannelOwner);
+            }
+        }
+
+        private static long CalcInfinityPointsFromXP(long xp)
+        {
+            long points = (long)Math.Sqrt(xp / AdvancementGlobalsPrototype.InfinityXPFactor);
+            return Math.Min(points, GameDatabase.AdvancementGlobalsPrototype.InfinityPointsCap);
+        }
+
+        public long GetOmegaPoints()
+        {
+            return Properties[PropertyEnum.OmegaPoints];
+        }
+
+        public void AwardOmegaXP(long amount, bool notifyClient)
+        {
+            if (amount <= 0)
+                return;
+
+            long omegaXP = Math.Min(OmegaXP + amount, GameDatabase.AdvancementGlobalsPrototype.InfinityXPCap);
+            Properties[PropertyEnum.OmegaXP] = omegaXP;
+
+            TryOmegaLevelUp(notifyClient);
+        }
+
+        public void TryOmegaLevelUp(bool notifyClient)
+        {
+            // TODO: Verify if it's working correctly
+
+            long pointsBefore = GetOmegaPoints();
+            long pointsAfter = CalcOmegaPointsFromXP(OmegaXP);
+
+            // Early out if we don't have any points
+            if (pointsAfter <= pointsBefore)
+                return;
+
+            long numPointsGained = pointsAfter - pointsBefore;
+            Properties.AdjustProperty((int)numPointsGained, PropertyEnum.OmegaPoints);
+
+            Avatar avatar = CurrentAvatar;
+            if (notifyClient && avatar != null && avatar.IsOmegaSystemUnlocked())
+            {
+                NetMessageOmegaPointGain message = NetMessageOmegaPointGain.CreateBuilder()
+                    .SetAvatarId(avatar.Id)
+                    .SetNumPointsGained((uint)numPointsGained)
+                    .Build();
+
+                Game.NetworkManager.SendMessageToInterested(message, avatar, AOINetworkPolicyValues.AOIChannelProximity | AOINetworkPolicyValues.AOIChannelOwner);
+            }
+        }
+
+        private static long CalcOmegaPointsFromXP(long xp)
+        {
+            int points = MathHelper.RoundToInt(Math.Sqrt(xp / AdvancementGlobalsPrototype.OmegaXPFactor));
+            return Math.Min(points, GameDatabase.AdvancementGlobalsPrototype.OmegaPointsCap);
+        }
+
+        #endregion
+
+        #region Difficulty
 
         public bool CanChangeDifficulty(PrototypeId difficultyTierProtoRef)
         {
@@ -1114,6 +2038,21 @@ namespace MHServerEmu.Games.Entities
             return GameDatabase.GlobalsPrototype.DifficultyTierDefault;
         }
 
+        public PrototypeId GetDifficultyTierForRegion(PrototypeId regionProtoRef, PrototypeId preferenceProtoRef = PrototypeId.Invalid)
+        {
+            if (preferenceProtoRef == PrototypeId.Invalid)
+                preferenceProtoRef = GetDifficultyTierPreference();
+
+            PrototypeId difficultyTierProtoRef = RegionPrototype.ConstrainDifficulty(regionProtoRef, preferenceProtoRef);
+            if (difficultyTierProtoRef == preferenceProtoRef)
+                return preferenceProtoRef;
+
+            if (CanChangeDifficulty(difficultyTierProtoRef))
+                return difficultyTierProtoRef;
+
+            return PrototypeId.Invalid;
+        }
+
         #endregion
 
         #region Loading and Teleports
@@ -1124,12 +2063,16 @@ namespace MHServerEmu.Games.Entities
             var movieProto = GameDatabase.GetPrototype<FullscreenMoviePrototype>(movieRef);
             if (movieProto == null) return;
             if (movieProto.MovieType == MovieType.Cinematic)
+            {
                 Properties[PropertyEnum.FullScreenMovieSession] = Game.Random.Next();
+                Properties[PropertyEnum.FullScreenMoviePlaying] = true;
+            }
         }
 
         public void OnFullscreenMovieFinished(PrototypeId movieRef, bool userCancelled, uint syncRequestId)
         {
-            // TODO syncRequestId ?
+            if (syncRequestId != 0 && syncRequestId < FullscreenMovieSyncRequestId) return;
+
             Logger.Trace($"OnFullscreenMovieFinished {GameDatabase.GetFormattedPrototypeName(movieRef)} Canceled = {userCancelled} by {_playerName}");
 
             var movieProto = GameDatabase.GetPrototype<FullscreenMoviePrototype>(movieRef);
@@ -1138,6 +2081,7 @@ namespace MHServerEmu.Games.Entities
             if (movieProto.MovieType == MovieType.Cinematic)
             {
                 FullScreenMovieDequeued(movieRef);
+                GetRegion()?.CinematicFinishedEvent.Invoke(new(this, movieRef));
                 Properties.RemoveProperty(PropertyEnum.FullScreenMovieSession);
             }
         }
@@ -1192,13 +2136,27 @@ namespace MHServerEmu.Games.Entities
 
         public void OnLoadingScreenFinished()
         {
-            IsOnLoadingScreen = false;
+            if (IsOnLoadingScreen)
+            {
+                IsOnLoadingScreen = false;
+                var region = GetRegion();
+                if (region == null) return;
+                region.LoadingScreenFinishedEvent.Invoke(new(this, region.PrototypeDataRef));
+                region.OnLoadingFinished();
+            }
         }
 
         public void BeginTeleport(ulong regionId, in Vector3 position, in Orientation orientation)
         {
             _teleportData.Set(regionId, position, orientation);
             QueueLoadingScreen(regionId);
+        }
+
+        public void TEMP_ScheduleMoveToTarget(PrototypeId targetProtoRef, TimeSpan delay)
+        {
+            // REMOVEME: Get rid of this when we overhaul the teleport system
+            EventPointer<MoveToTargetEvent> moveToTargetEvent = new();
+            ScheduleEntityEvent(moveToTargetEvent, delay, targetProtoRef);
         }
 
         public void OnCellLoaded(uint cellId, ulong regionId)
@@ -1219,7 +2177,7 @@ namespace MHServerEmu.Games.Entities
             EnableCurrentAvatar(false, CurrentAvatar.Id, _teleportData.RegionId, _teleportData.Position, _teleportData.Orientation);
             _teleportData.Clear();
             DequeueLoadingScreen();
-            TryPlayIntroKismetSeqForRegion(CurrentAvatar.RegionLocation.RegionId);
+            TryPlayKismetSequences();
 
             return true;
         }
@@ -1240,7 +2198,8 @@ namespace MHServerEmu.Games.Entities
 
         public MapDiscoveryData GetMapDiscoveryData(ulong regionId)
         {
-            Region region = Game.RegionManager.GetRegion(regionId);
+            var manager = Game.RegionManager;
+            Region region = manager.GetRegion(regionId);
             if (region == null) return Logger.WarnReturn<MapDiscoveryData>(null, "GetMapDiscoveryData(): region == null");
 
             if (_mapDiscoveryDict.TryGetValue(regionId, out MapDiscoveryData mapDiscoveryData) == false)
@@ -1248,6 +2207,12 @@ namespace MHServerEmu.Games.Entities
                 mapDiscoveryData = new(region);
                 _mapDiscoveryDict.Add(regionId, mapDiscoveryData);
             }
+
+            // clear old regions if limit is reached
+            if (_mapDiscoveryDict.Count > 25)
+                foreach (var kvp in _mapDiscoveryDict)
+                    if (manager.GetRegion(kvp.Key) == null)
+                        _mapDiscoveryDict.Remove(kvp.Key);
 
             return mapDiscoveryData;
         }
@@ -1293,152 +2258,33 @@ namespace MHServerEmu.Games.Entities
             return mapDiscoveryData != null && mapDiscoveryData.IsEntityDiscovered(worldEntity);
         }
 
-        public bool SendMiniMapUpdate()
+        public bool RevealDiscoveryMap(Vector3 position)
         {
-            Logger.Trace($"SendMiniMapUpdate(): {this}");
+            var region = CurrentAvatar?.Region;
+            if (region == null) return Logger.WarnReturn(false, "UpdateMapDiscovery(): region == null");
 
-            Region region = GetRegion();
-            if (region == null) return Logger.WarnReturn(false, "SendMiniMapUpdate(): region == null");
+            MapDiscoveryData mapDiscoveryData = GetMapDiscoveryDataForEntity(CurrentAvatar);
+            if (mapDiscoveryData == null) return Logger.WarnReturn(false, "UpdateDiscoveryMap(): mapDiscoveryData == null");
 
-            MapDiscoveryData mapDiscoveryData = GetMapDiscoveryData(region.Id);
-            if (mapDiscoveryData == null) return Logger.WarnReturn(false, "SendMiniMapUpdate(): mapDiscoveryData == null");
+            bool reveal = mapDiscoveryData.RevealPosition(this, position);
 
-            LowResMap lowResMap = mapDiscoveryData.LowResMap;
-            if (lowResMap == null) return Logger.WarnReturn(false, "SendMiniMapUpdate(): lowResMap == null");
+            // TODO party reveal
 
-            SendMessage(ArchiveMessageBuilder.BuildUpdateMiniMapMessage(lowResMap));
-            return true;
+            return reveal;
         }
 
         #endregion
 
-        public override void OnDeallocate()
+        #region Trading
+
+        public void CancelPlayerTrade()
         {
-            Game.EntityManager.RemovePlayer(this);
-            base.OnDeallocate();
+            // TODO
         }
 
-        public bool TryPlayIntroKismetSeqForRegion(ulong regionId)
-        {
-            // TODO/REMOVEME: Remove this when we have working Kismet sequence triggers
-            Region region = Game.RegionManager.GetRegion(regionId);
-            if (region == null) return Logger.WarnReturn(false, "TryPlayIntroKismetSeqForRegion(): region == null");
+        #endregion
 
-            KismetSeqPrototypeId kismetSeqRef = (RegionPrototypeId)region.PrototypeDataRef switch
-            {
-                RegionPrototypeId.NPERaftRegion             => KismetSeqPrototypeId.RaftHeliPadQuinJetLandingStart,
-                RegionPrototypeId.TimesSquareTutorialRegion => KismetSeqPrototypeId.Times01CaptainAmericaLanding,
-                RegionPrototypeId.TutorialBankRegion        => KismetSeqPrototypeId.BlackCatEntrance,
-                _ => 0
-            };
-
-            if (kismetSeqRef == 0)
-                return false;
-
-            PlayKismetSeq((PrototypeId)kismetSeqRef);
-            return true;
-        }
-
-        public void PlayKismetSeq(PrototypeId kismetSeqRef)
-        {
-            SendPlayKismetSeq(kismetSeqRef);
-        }
-
-        public void OnPlayKismetSeqDone(PrototypeId kismetSeqPrototypeId)
-        {
-            if (kismetSeqPrototypeId == PrototypeId.Invalid) return;
-
-            if ((KismetSeqPrototypeId)kismetSeqPrototypeId == KismetSeqPrototypeId.RaftHeliPadQuinJetLandingStart)
-            {
-                // TODO trigger by hotspot
-                KismetSeqPrototypeId kismetSeqRef = KismetSeqPrototypeId.RaftHeliPadQuinJetDustoff;
-                SendMessage(NetMessagePlayKismetSeq.CreateBuilder().SetKismetSeqPrototypeId((ulong)kismetSeqRef).Build());
-            }
-            else if ((KismetSeqPrototypeId)kismetSeqPrototypeId == KismetSeqPrototypeId.OpDailyBugleVultureKismet)
-            {
-                // TODO trigger by MissionManager
-                foreach (var entity in CurrentAvatar.RegionLocation.Cell.Entities)
-                    if ((KismetBosses)entity.PrototypeDataRef == KismetBosses.EGD15GVulture)
-                        entity.Properties[PropertyEnum.Visible] = true;
-            }
-            else if ((KismetSeqPrototypeId)kismetSeqPrototypeId == KismetSeqPrototypeId.SinisterEntrance)
-            {
-                // TODO trigger by MissionManager
-                foreach (var entity in CurrentAvatar.RegionLocation.Cell.Entities)
-                    if ((KismetBosses)entity.PrototypeDataRef == KismetBosses.MrSinisterCH7)
-                        entity.Properties[PropertyEnum.Visible] = true;
-            }
-        }
-
-        public override string ToString()
-        {
-            return $"{base.ToString()}, dbGuid=0x{DatabaseUniqueId:X}";
-        }
-
-        protected override void BuildString(StringBuilder sb)
-        {
-            base.BuildString(sb);
-
-            sb.AppendLine($"{nameof(_missionManager)}: {_missionManager}");
-            sb.AppendLine($"{nameof(_avatarProperties)}: {_avatarProperties}");
-            sb.AppendLine($"{nameof(_shardId)}: {_shardId}");
-            sb.AppendLine($"{nameof(_playerName)}: {_playerName}");
-            sb.AppendLine($"{nameof(_consoleAccountIds)}[0]: {_consoleAccountIds[0]}");
-            sb.AppendLine($"{nameof(_consoleAccountIds)}[1]: {_consoleAccountIds[1]}");
-            sb.AppendLine($"{nameof(_secondaryPlayerName)}: {_secondaryPlayerName}");
-            sb.AppendLine($"{nameof(_matchQueueStatus)}: {_matchQueueStatus}");
-            sb.AppendLine($"{nameof(_emailVerified)}: {_emailVerified}");
-            sb.AppendLine($"{nameof(_accountCreationTimestamp)}: {Clock.UnixTimeToDateTime(_accountCreationTimestamp)}");
-            sb.AppendLine($"{nameof(_partyId)}: {_partyId}");
-
-            if (_guildId != GuildMember.InvalidGuildId)
-            {
-                sb.AppendLine($"{nameof(_guildId)}: {_guildId}");
-                sb.AppendLine($"{nameof(_guildName)}: {_guildName}");
-                sb.AppendLine($"{nameof(_guildMembership)}: {_guildMembership}");
-            }
-
-            sb.AppendLine($"{nameof(_community)}: {_community}");
-
-            for (int i = 0; i < _unlockedInventoryList.Count; i++)
-                sb.AppendLine($"{nameof(_unlockedInventoryList)}[{i}]: {GameDatabase.GetPrototypeName(_unlockedInventoryList[i])}");
-
-            if (_badges.Any())
-            {
-                sb.Append($"{nameof(_badges)}: ");
-                foreach (AvailableBadges badge in _badges)
-                    sb.Append(badge.ToString()).Append(' ');
-                sb.AppendLine();
-            }
-
-            sb.AppendLine($"{nameof(_gameplayOptions)}: {_gameplayOptions}");
-            sb.AppendLine($"{nameof(_achievementState)}: {_achievementState}");
-
-            foreach (var kvp in _stashTabOptionsDict)
-                sb.AppendLine($"{nameof(_stashTabOptionsDict)}[{GameDatabase.GetFormattedPrototypeName(kvp.Key)}]: {kvp.Value}");
-        }
-
-        /// <summary>
-        /// Initializes <see cref="StashTabOptions"/> for any stash tabs that are unlocked but don't have any options yet.
-        /// </summary>
-        private void OnEnterGameInitStashTabOptions()
-        {
-            foreach (PrototypeId stashRef in GetStashInventoryProtoRefs(false, true))
-            {
-                if (_stashTabOptionsDict.ContainsKey(stashRef) == false)
-                    StashTabInsert(stashRef, 0);
-            }
-        }
-
-        public void SetGameplayOptions(NetMessageSetPlayerGameplayOptions clientOptions)
-        {
-            GameplayOptions newOptions = new(clientOptions.OptionsData);
-            Logger.Debug(newOptions.ToString());
-
-            _gameplayOptions = newOptions;
-
-            // TODO: Process new options
-        }
+        #region Targeting
 
         public bool IsTargetable(AlliancePrototype allianceProto)
         {
@@ -1457,16 +2303,17 @@ namespace MHServerEmu.Games.Entities
             return target;
         }
 
-        public bool SetDialogTarget(ulong targetId, ulong interactorId)
+        public bool SetDialogTargetId(ulong targetId, ulong interactorId)
         {
             if (targetId != InvalidId && interactorId != InvalidId)
             {
                 var interactor = Game.EntityManager.GetEntity<WorldEntity>(interactorId);
-                if (interactor == null || interactor.IsInWorld == false) return false;
+                if (interactor == null || interactor.IsInWorld == false)
+                    return false;
 
                 var target = Game.EntityManager.GetEntity<WorldEntity>(targetId);
                 if (ValidateDialogTarget(target, interactorId) == false)
-                    return Logger.WarnReturn(false, $"ValidateDialogTarget false for {target.PrototypeName} with {interactor.PrototypeName}");
+                    return Logger.WarnReturn(false, $"SetDialogTargetId(): Failed to validate dialog target for target=[{target}], interactor=[{interactor}]");
             }
 
             DialogTargetId = targetId;
@@ -1485,35 +2332,24 @@ namespace MHServerEmu.Games.Entities
             return true;
         }
 
-        public bool HasAvatarFullyUnlocked(PrototypeId avatarRef)
-        {
-            AvatarUnlockType unlockType = GetAvatarUnlockType(avatarRef);
-            return unlockType != AvatarUnlockType.None && unlockType != AvatarUnlockType.Starter;
-        }
+        #endregion
 
-        public AvatarUnlockType GetAvatarUnlockType(PrototypeId avatarRef)
-        {
-            var avatarProto = GameDatabase.GetPrototype<AvatarPrototype>(avatarRef);
-            if (avatarProto == null) return AvatarUnlockType.None;
-            AvatarUnlockType unlockType = (AvatarUnlockType)(int)Properties[PropertyEnum.AvatarUnlock, avatarRef];
-            if (unlockType == AvatarUnlockType.None && avatarProto.IsStarterAvatar)
-                return AvatarUnlockType.Starter;
-            return unlockType;
-        }
+        #region Missions and Chapters
 
-        public int GetCharacterLevelForAvatar(PrototypeId avatarRef, AvatarMode avatarMode)
+        public void InitializeMissionTrackerFilters()
         {
-            int levelCap = Avatar.GetAvatarLevelCap();
-            if (levelCap <= 0) return 0;
-            int level = Properties[PropertyEnum.AvatarLibraryLevel, (int)avatarMode, avatarRef];
-            if (level <= 0) return 0;
-            level %= levelCap;
-            return level == 0 ? levelCap : level;
+            foreach (PrototypeId filterRef in GameDatabase.DataDirectory.IteratePrototypesInHierarchy<MissionTrackerFilterPrototype>(PrototypeIterateFlags.NoAbstractApprovedOnly))
+            {
+                var filterProto = GameDatabase.GetPrototype<MissionTrackerFilterPrototype>(filterRef);
+                if (filterProto.DisplayByDefault)
+                    Properties[PropertyEnum.MissionTrackerFilter, filterRef] = true;
+            }
         }
 
         public void SetActiveChapter(PrototypeId chapterRef)
         {
             Properties[PropertyEnum.ActiveMissionChapter] = chapterRef;
+            GetRegion()?.ActiveChapterChangedEvent.Invoke(new(this, chapterRef));
         }
 
         public bool ChapterIsUnlocked(PrototypeId chapterRef)
@@ -1529,6 +2365,39 @@ namespace MHServerEmu.Games.Entities
             if (avatar == null) return;
             avatar.Properties[PropertyEnum.ChapterUnlocked, chapterRef] = true;
         }
+
+        public void MissionInteractRelease(WorldEntity entity, PrototypeId missionRef)
+        {
+            if (missionRef == PrototypeId.Invalid) return;
+            if (InterestedInEntity(entity, AOINetworkPolicyValues.AOIChannelOwner))
+                SendMessage(NetMessageMissionInteractRelease.DefaultInstance);
+        }
+
+        public void RequestLegendaryMissionReroll()
+        {
+            var game = Game;
+            var avatar = CurrentAvatar;
+            var manager = MissionManager;
+            if (game == null || avatar == null || manager == null) return;
+
+            var currencyProto = GameDatabase.CurrencyGlobalsPrototype;
+            var missionProto = GameDatabase.MissionGlobalsPrototype;
+            if (currencyProto == null || missionProto?.LegendaryRerollCost == null) return;
+
+            using EvalContextData evalContext = ObjectPoolManager.Instance.Get<EvalContextData>();
+            evalContext.Game = Game;
+            evalContext.SetVar_EntityPtr(EvalContext.Default, avatar);
+            int rerollCost = Eval.RunInt(missionProto.LegendaryRerollCost, evalContext);
+            var propId = new PropertyId(PropertyEnum.Currency, currencyProto.Credits);
+            if (Properties[propId] < rerollCost) return;
+
+            manager.LegendaryMissionReroll();
+            Properties.AdjustProperty(-rerollCost, propId);
+        }
+
+        #endregion
+
+        #region Waypoint
 
         public void UnlockChapters()
         {
@@ -1558,6 +2427,20 @@ namespace MHServerEmu.Games.Entities
             collection[propId] = false;
         }
 
+        public bool WaypointIsUnlocked(PrototypeId waypointRef)
+        {
+            var waypointProto = GameDatabase.GetPrototype<WaypointPrototype>(waypointRef);
+            if (waypointProto == null) return false;
+
+            PropertyCollection collection;
+            if (waypointProto.IsAccountWaypoint)
+                collection = Properties;
+            else
+                collection = CurrentAvatar.Properties;
+
+            return collection[PropertyEnum.Waypoint, waypointRef];
+        }
+
         public void UnlockWaypoint(PrototypeId waypointRef)
         {
             var waypointProto = GameDatabase.GetPrototype<WaypointPrototype>(waypointRef);
@@ -1574,6 +2457,8 @@ namespace MHServerEmu.Games.Entities
             {
                 SendWaypointUnlocked();
                 collection[propId] = true;
+
+                OnScoringEvent(new(ScoringEventType.WaypointUnlocked, waypointProto));
             }
         }
 
@@ -1587,15 +2472,105 @@ namespace MHServerEmu.Games.Entities
             }
         }
 
+        #endregion
+
+        #region Kismet
+
+        public void PlayKismetSeq(PrototypeId kismetSeq)
+        {
+            var avatar = CurrentAvatar;
+            if (avatar == null) return;
+
+            var kismetProto = GameDatabase.GetPrototype<KismetSequencePrototype>(kismetSeq);
+            if (kismetProto == null) return;
+
+            if (kismetProto.KismetSeqBlocking)
+            {
+                if (IsFullscreenMoviePlaying) return;
+                FullScreenMovieQueued(kismetSeq);
+            }
+
+            SendPlayKismetSeq(kismetSeq);
+        }
+
+        public void QueuePlayKismetSeq(PrototypeId kismetSeq)
+        {
+            if (_teleportData.IsValid)
+                _kismetSeqQueue.Enqueue(kismetSeq);
+            else
+                PlayKismetSeq(kismetSeq);
+        }
+
+        public bool TryPlayKismetSequences()
+        {
+            // play kismetSeq from Queue
+            while (_kismetSeqQueue.Count > 0)
+            {
+                var kismetSeq = _kismetSeqQueue.Dequeue();
+                if (kismetSeq != PrototypeId.Invalid)
+                    PlayKismetSeq(kismetSeq);
+            }
+
+            // try play kismetSeq for region
+            var region = CurrentAvatar.Region;
+            if (region == null) return Logger.WarnReturn(false, "TryPlayKismetSequences(): region == null");
+
+            var startTarget = GameDatabase.GetPrototype<RegionConnectionTargetPrototype>(region.Prototype.StartTarget);
+            if (startTarget == null || startTarget.IntroKismetSeq == PrototypeId.Invalid) return false;
+            var targetCellRef = GameDatabase.GetDataRefByAsset(startTarget.Cell);
+            var cellRef = CurrentAvatar.Cell.PrototypeDataRef;
+            if (targetCellRef != cellRef) return false;
+
+            PlayKismetSeq(startTarget.IntroKismetSeq);
+            return true;
+        }
+
+        public void OnPlayKismetSeqDone(PrototypeId kismetSeqRef, uint syncRequestId)
+        {
+            if (syncRequestId != 0 && syncRequestId < FullscreenMovieSyncRequestId) return;
+
+            if (kismetSeqRef == PrototypeId.Invalid) return;
+            var kismetSeqProto = GameDatabase.GetPrototype<KismetSequencePrototype>(kismetSeqRef);
+            if (kismetSeqProto == null) return;
+            if (kismetSeqProto.KismetSeqBlocking && IsFullscreenMoviePlaying)
+            {
+                FullScreenMovieDequeued(kismetSeqRef);
+                SendMissionInteract(Id);
+                GetRegion()?.KismetSeqFinishedEvent.Invoke(new(this, kismetSeqRef));
+            }
+        }
+
+        #endregion
+
         #region SendMessage
 
-        public void SendMessage(IMessage message) => PlayerConnection?.SendMessage(message);
+        public void SendMessage(IMessage message)
+        {
+            PlayerConnection?.SendMessage(message);
+        }
 
         public void SendPlayKismetSeq(PrototypeId kismetSeqRef)
         {
             SendMessage(NetMessagePlayKismetSeq.CreateBuilder()
                 .SetKismetSeqPrototypeId((ulong)kismetSeqRef)
                 .Build());
+        }
+
+        public void SendFullscreenMovieSync()
+        {
+            if (Properties.HasProperty(PropertyEnum.FullScreenMovieQueued) == false) return;
+
+            var message = NetMessageFullscreenMovieSync.CreateBuilder();
+            message.SetSyncRequestId(++FullscreenMovieSyncRequestId);
+
+            foreach (var kvp in Properties.IteratePropertyRange(PropertyEnum.FullScreenMovieQueued))
+            {
+                Property.FromParam(kvp.Key, 0, out PrototypeId movieRef);
+                if (movieRef == PrototypeId.Invalid) continue;
+                message.AddMovieProtoId((ulong)movieRef);
+            }
+
+            SendMessage(message.Build());
         }
 
         public void SendAIAggroNotification(PrototypeId bannerMessageRef, Agent aiAgent, Player targetPlayer, bool party = false)
@@ -1616,9 +2591,42 @@ namespace MHServerEmu.Games.Entities
             }
         }
 
+        public void SendMissionInteract(ulong targetId)
+        {
+            var avatar = CurrentAvatar;
+            if (avatar == null) return;
+            var target = Game.EntityManager.GetEntity<WorldEntity>(targetId);
+
+            if (target != null)
+            {
+                var entityDesc = new EntityDesc(target);
+                var outInteractData = new InteractData { IndicatorType = HUDEntityOverheadIcon.None };
+                var interactionType = InteractionManager.CallGetInteractionStatus(entityDesc, avatar, 0, InteractionFlags.Default, ref outInteractData);           
+                if (interactionType.HasFlag(InteractionMethod.Converse) && outInteractData.IndicatorType.HasValue)
+                {
+                    var indicatorType = outInteractData.IndicatorType.Value;
+                    if (indicatorType == HUDEntityOverheadIcon.DiscoveryBestower
+                        || indicatorType == HUDEntityOverheadIcon.MissionBestower
+                        || indicatorType == HUDEntityOverheadIcon.DiscoveryAdvancer
+                        || indicatorType == HUDEntityOverheadIcon.MissionAdvancer)
+                    {
+                        var message = NetMessageMissionInteractRepeat.CreateBuilder()
+                            .SetTargetEntityId(targetId)
+                            .SetMissionPrototypeId(0).Build(); // client not use MissionPrototype
+
+                        Game.NetworkManager.SendMessageToInterested(message, this, AOINetworkPolicyValues.AOIChannelOwner);
+                        return;
+                    }
+                }
+            }
+
+            var messageRelease = NetMessageMissionInteractRelease.DefaultInstance;
+            Game.NetworkManager.SendMessageToInterested(messageRelease, this, AOINetworkPolicyValues.AOIChannelOwner);           
+        }
+
         public void SendRegionRestrictedRosterUpdate(bool enabled)
         {
-            var message = NetMessageRegionRestrictedRosterUpdate.CreateBuilder().SetEnabled(enabled).Build();
+            var message = NetMessageRegionRestrictedRosterUpdate.CreateBuilder().SetEnabled(enabled).Build(); 
             SendMessage(message);
         }
 
@@ -1638,6 +2646,16 @@ namespace MHServerEmu.Games.Entities
         {
             var message = NetMessagePlayStoryBanter.CreateBuilder().SetBanterAssetId((ulong)banterRef).Build();
             SendMessage(message);
+        }
+
+        public void SendUINotification(UINotificationPrototype notification)
+        {
+            if (notification is BannerMessagePrototype banner)
+                SendBannerMessage(banner);
+            else if (notification is StoryNotificationPrototype story)
+                SendStoryNotification(story);
+            else if (notification is HUDTutorialPrototype tutorial)
+                SendHUDTutorial(tutorial);
         }
 
         private void SendWaypointUnlocked()
@@ -1721,11 +2739,119 @@ namespace MHServerEmu.Games.Entities
 
         #endregion
 
-        public PrototypeId GetPublicEventTeam(PublicEventPrototype eventProto)
+        #region Scoring Events
+
+        public void OnScoringEvent(in ScoringEvent scoringEvent, ulong entityId = Entity.InvalidId)
         {
-            int eventInstance = eventProto.GetEventInstance();
-            var teamProp = new PropertyId(PropertyEnum.PublicEventTeamAssignment, eventProto.DataRef, eventInstance);
-            return Properties[teamProp];
+            AchievementManager.OnScoringEvent(scoringEvent, entityId);
+            LeaderboardManager.OnScoringEvent(scoringEvent, entityId);
+        }
+
+        public void UpdateScoringEventContext()
+        {
+            ScoringEventContext = new(this);
+            AchievementManager.OnUpdateEventContext();
+            LeaderboardManager.OnUpdateEventContext();
+        }
+
+        #endregion
+
+        #region Time Played
+
+        public TimeSpan GetTimePlayed()
+        {
+            TimeSpan timePlayed = Properties[PropertyEnum.AvatarTotalTimePlayed];
+
+            Avatar avatar = CurrentAvatar;
+            if (avatar != null)
+                timePlayed += avatar.GetTimePlayed() - avatar.Properties[PropertyEnum.AvatarTotalTimePlayed];
+
+            return timePlayed;
+        }
+
+        public void UpdateTimePlayed()
+        {
+            Properties[PropertyEnum.AvatarTotalTimePlayed] = GetTimePlayed();
+        }
+
+        private void CheckHoursPlayed()
+        {
+            int count = (int)Math.Floor(GetTimePlayed().TotalHours);
+            OnScoringEvent(new(ScoringEventType.HoursPlayed, count));
+
+            Avatar avatar = CurrentAvatar;
+            if (avatar != null)
+            {
+                count = (int)Math.Floor(avatar.GetTimePlayed().TotalHours);
+                OnScoringEvent(new(ScoringEventType.HoursPlayedByAvatar, avatar.Prototype, count));
+            }
+
+            ScheduleCheckHoursPlayedEvent();
+        }
+
+        private void ScheduleCheckHoursPlayedEvent()
+        {
+            if (_checkHoursPlayedEvent.IsValid) return;
+            var scheduler = Game?.GameEventScheduler;
+            if (scheduler == null) return;
+            scheduler.ScheduleEvent(_checkHoursPlayedEvent, TimeSpan.FromMinutes(1), _pendingEvents);
+            _checkHoursPlayedEvent.Get().Initialize(this);
+        }
+
+        #endregion
+
+        #region Tutorial
+
+        public void UnlockNewPlayerUISystems()
+        {
+            if (_newPlayerUISystemsUnlocked)
+                return;
+
+            foreach (PrototypeId uiSystemLockRef in GameDatabase.UIGlobalsPrototype.UISystemLockList)
+            {
+                var uiSystemLockProto = GameDatabase.GetPrototype<UISystemLockPrototype>(uiSystemLockRef);
+                if (uiSystemLockProto.IsNewPlayerExperienceLocked && Properties[PropertyEnum.UISystemLock, uiSystemLockRef] != 1)
+                    Properties[PropertyEnum.UISystemLock, uiSystemLockRef] = 1;
+            }
+
+            if (Game.CustomGameOptions.AutoUnlockAvatars)
+            {
+                // HACK: Unlock avatars here too
+                foreach (PrototypeId avatarRef in GameDatabase.DataDirectory.IteratePrototypesInHierarchy<AvatarPrototype>(PrototypeIterateFlags.NoAbstractApprovedOnly))
+                {
+                    if (avatarRef == (PrototypeId)6044485448390219466) continue;   //zzzBrevikOLD.prototype
+                    UnlockAvatar(avatarRef, false);
+                }
+            }
+
+            if (Game.GameOptions.TeamUpSystemEnabled && Game.CustomGameOptions.AutoUnlockTeamUps)
+            {
+                // HACK: And team-ups as well
+                Inventory teamUpLibrary = GetInventory(InventoryConvenienceLabel.TeamUpLibrary);
+                if (teamUpLibrary.Count == 0)
+                {
+                    foreach (PrototypeId teamUpRef in GameDatabase.DataDirectory.IteratePrototypesInHierarchy<AgentTeamUpPrototype>(PrototypeIterateFlags.NoAbstractApprovedOnly))
+                        UnlockTeamUpAgent(teamUpRef, false);
+                }
+            }
+
+            _newPlayerUISystemsUnlocked = true;
+        }
+
+        public void UpdateUISystemLocks()
+        {
+            foreach (PrototypeId uiSystemLockProtoRef in GameDatabase.UIGlobalsPrototype.UISystemLockList)
+            {
+                UISystemLockPrototype uiSystemLockProto = uiSystemLockProtoRef.As<UISystemLockPrototype>();
+                if (uiSystemLockProto.UnlockLevel == -1)
+                    continue;
+
+                int currentState = Properties[PropertyEnum.UISystemLock, uiSystemLockProtoRef];
+                int maxAvatarLevel = Properties[PropertyEnum.PlayerMaxAvatarLevel];
+
+                if (currentState == 0 && maxAvatarLevel >= uiSystemLockProto.UnlockLevel)
+                    Properties[PropertyEnum.UISystemLock, uiSystemLockProtoRef] = 1;
+            }
         }
 
         public void SetTipSeen(PrototypeId tipDataRef)
@@ -1747,7 +2873,7 @@ namespace MHServerEmu.Games.Entities
                 bool send = hudTutorialProto != null;
                 if (CurrentHUDTutorial != null)
                 {
-                    foreach (var entry in inventory)
+                    foreach(var entry in inventory)
                     {
                         var avatar = manager.GetEntity<Avatar>(entry.Id);
                         avatar?.ResetTutorialProps();
@@ -1788,12 +2914,172 @@ namespace MHServerEmu.Games.Entities
             ShowHUDTutorial(null);
         }
 
-        public void MissionInteractRelease(WorldEntity entity, PrototypeId missionRef)
+        #endregion
+
+        #region Vanity Titles
+
+        public bool UnlockVanityTitle(PrototypeId vanityTitleProtoRef)
         {
-            if (missionRef == PrototypeId.Invalid) return;
-            if (InterestedInEntity(entity, AOINetworkPolicyValues.AOIChannelOwner))
-                SendMessage(NetMessageMissionInteractRelease.DefaultInstance);
+            VanityTitlePrototype vanityTitleProto = vanityTitleProtoRef.As<VanityTitlePrototype>();
+            if (vanityTitleProto == null) return Logger.WarnReturn(false, "UnlockVanityTitle(): vanityTitleProto == null");
+
+            Properties[PropertyEnum.VanityTitleUnlocked, vanityTitleProtoRef] = true;
+            return true;
         }
+
+        public bool IsVanityTitleUnlocked(PrototypeId vanityTitleProtoRef)
+        {
+            if (vanityTitleProtoRef == PrototypeId.Invalid) return Logger.WarnReturn(false, "IsVanityTitleUnlocked(): vanityTitleProtoRef == PrototypeId.Invalid");
+            return Properties.HasProperty(new PropertyId(PropertyEnum.VanityTitleUnlocked, vanityTitleProtoRef));
+        }
+
+        #endregion
+
+        #region Daily Login
+
+        public void CheckDailyLogin()
+        {
+            // Send currency balance so that the client has something to display without opening the store.
+            // TODO: Add coupons here?
+            SendMessage(NetMessageGetCurrencyBalanceResponse.CreateBuilder()
+                .SetCurrencyBalance(GazillioniteBalance)
+                .Build());
+
+            // Update veteran (login) rewards
+            if (Game.GameOptions.VeteranRewardsEnabled)
+            {
+                int loginCount = GetLoginCount();
+
+                GiveLoginRewards(loginCount);
+                Properties[PropertyEnum.LoginCount] = loginCount;
+            }
+
+            // Send gifting restrictions update.
+            // NOTE: Currently we don't actually need this since we don't rely on external services,
+            // but I'm leaving this here for consistency with our packet captures.
+            SendMessage(NetMessageGiftingRestrictionsUpdate.CreateBuilder()
+                .SetEmailVerified(_emailVerified)
+                .SetAccountCreationTimestampUtc((long)_accountCreationTimestamp.TotalSeconds)
+                .Build());
+        }
+
+        private int GetLoginCount()
+        {
+            // Check the rollover (daily at 10 AM UTC+0, same as shared quests)
+            using PropertyCollection rolloverProperties = ObjectPoolManager.Instance.Get<PropertyCollection>();
+            rolloverProperties[PropertyEnum.LootCooldownRolloverWallTime, 0, (PropertyParam)Weekday.All] = 10f;
+
+            TimeSpan currentTime = Clock.UnixTime;
+
+            if (LootUtilities.GetLastLootCooldownRolloverWallTime(rolloverProperties, currentTime, out TimeSpan lastRolloverTime) == false)
+                return Logger.WarnReturn(0, "GetLoginCount(): Failed to get last loot cooldown rollover wall time");
+
+            if (lastRolloverTime > _loginRewardCooldownTimeStart)
+            {
+                _loginCount++;
+                _loginRewardCooldownTimeStart = currentTime;
+                Logger.Trace($"GetLoginCount(): Rollover for player [{this}], loginCount = {_loginCount}");
+            }
+
+            return (int)_loginCount;
+        }
+
+        private void GiveLoginRewards(int loginCount)
+        {
+            LootManager lootManager = Game.LootManager;
+
+            foreach (PrototypeId loginRewardProtoRef in DataDirectory.Instance.IteratePrototypesInHierarchy<LoginRewardPrototype>(PrototypeIterateFlags.NoAbstract))
+            {
+                LoginRewardPrototype loginRewardProto = loginRewardProtoRef.As<LoginRewardPrototype>();
+                if (loginRewardProto == null)
+                {
+                    Logger.Warn("GiveLoginRewards(): loginRewardProto == null");
+                    continue;
+                }
+
+                if (loginRewardProto.Day > loginCount)
+                    continue;
+
+                PropertyId rewardId = new(PropertyEnum.LoginRewardReceivedDate, loginRewardProtoRef);
+
+                if (Properties.HasProperty(rewardId))
+                    continue;
+
+                if (lootManager.GiveItem(loginRewardProto.Item, LootContext.CashShop, this) == false)
+                {
+                    Logger.Warn($"GiveLoginRewards(): Failed to give login reward {loginRewardProto} to player [{this}]");
+                    continue;
+                }
+
+                Properties[rewardId] = (long)Clock.UnixTime.TotalSeconds;
+            }
+        }
+
+        private void SetGiftingRestrictions()
+        {
+            // Email is always verified (for now)
+            _emailVerified = true;
+
+            // We are taking advantage of the fact that our database guids include account creation timestamp.
+            // Review this code if this ever changes.
+            _accountCreationTimestamp = TimeSpan.FromSeconds(DatabaseUniqueId >> 16 & 0xFFFFFFFF);
+        }
+
+        #endregion
+
+        #region Communities
+
+        // Community update broadcasts are done via scheduled events to avoid multiple broadcasts at once.
+
+        public void ScheduleCommunityBroadcast()
+        {
+            if (_communityBroadcastEvent.IsValid)
+                return;
+
+            Game.GameEventScheduler.ScheduleEvent(_communityBroadcastEvent, TimeSpan.Zero, _pendingEvents);
+            _communityBroadcastEvent.Get().Initialize(this);
+        }
+
+        public CommunityMemberBroadcast BuildCommunityBroadcast()
+        {
+            Region region = GetRegion();
+            Avatar avatar = CurrentAvatar;
+
+            return CommunityMemberBroadcast.CreateBuilder()
+                .SetMemberPlayerDbId(DatabaseUniqueId)
+                .SetCurrentRegionRefId(region != null ? (ulong)region.PrototypeDataRef : 0)
+                .SetCurrentDifficultyRefId(region != null ? (ulong)region.DifficultyTierRef : 0)
+                .AddSlots(CommunityMemberAvatarSlot.CreateBuilder()
+                    .SetAvatarRefId(avatar != null ? (ulong)avatar.PrototypeDataRef : 0)
+                    .SetCostumeRefId(avatar != null ? (ulong)avatar.EquippedCostumeRef : 0)
+                    .SetLevel(avatar != null ? (uint)avatar.CharacterLevel : 0)
+                    .SetPrestigeLevel(avatar != null ? (uint)avatar.PrestigeLevel : 0))
+                .SetCurrentPlayerName(GetName())
+                .SetIsOnline(1)
+                .Build();
+        }
+
+        private void DoCommunityBroadcast()
+        {
+            // TODO: Send a broadcast message to the player manager to update other game instances
+
+            // Update players in this game instance
+            foreach (Player otherPlayer in new PlayerIterator(Game))
+            {
+                Community community = otherPlayer.Community;
+                CommunityMember member = community.GetMember(DatabaseUniqueId);
+
+                // Skip communities that don't have this player as a member
+                if (member == null)
+                    continue;
+
+                community.RequestLocalBroadcast(member);
+            }
+        }
+
+        #endregion
+
+        #region Scheduled Events
 
         private class ScheduledHUDTutorialResetEvent : CallMethodEvent<Entity>
         {
@@ -1802,7 +3088,67 @@ namespace MHServerEmu.Games.Entities
 
         private class SwitchAvatarEvent : CallMethodEvent<Entity>
         {
-            protected override CallbackDelegate GetCallback() => (t) => ((Player)t).SwitchAvatar();
+            protected override CallbackDelegate GetCallback() => (t) => (t as Player).SwitchAvatar();
+        }
+
+        private class CheckHoursPlayedEvent : CallMethodEvent<Player>
+        {
+            protected override CallbackDelegate GetCallback() => (player) => player.CheckHoursPlayed();
+        }
+
+        private class MoveToTargetEvent : CallMethodEventParam1<Entity, PrototypeId>
+        {
+            protected override CallbackDelegate GetCallback() => (t, p1) => ((Player)t).PlayerConnection.MoveToTarget(p1);
+        }
+
+        private class CommunityBroadcastEvent : CallMethodEvent<Entity>
+        {
+            protected override CallbackDelegate GetCallback() => (t) => ((Player)t).DoCommunityBroadcast();
+        }
+
+        #endregion
+
+        protected override void BuildString(StringBuilder sb)
+        {
+            base.BuildString(sb);
+
+            sb.AppendLine($"{nameof(MissionManager)}: {MissionManager}");
+            sb.AppendLine($"{nameof(_avatarProperties)}: {_avatarProperties}");
+            sb.AppendLine($"{nameof(_shardId)}: {_shardId}");
+            sb.AppendLine($"{nameof(_playerName)}: {_playerName}");
+            sb.AppendLine($"{nameof(_consoleAccountIds)}[0]: {_consoleAccountIds[0]}");
+            sb.AppendLine($"{nameof(_consoleAccountIds)}[1]: {_consoleAccountIds[1]}");
+            sb.AppendLine($"{nameof(_secondaryPlayerName)}: {_secondaryPlayerName}");
+            sb.AppendLine($"{nameof(MatchQueueStatus)}: {MatchQueueStatus}");
+            sb.AppendLine($"{nameof(_emailVerified)}: {_emailVerified}");
+            sb.AppendLine($"{nameof(_accountCreationTimestamp)}: {Clock.UnixTimeToDateTime(_accountCreationTimestamp)}");
+            sb.AppendLine($"{nameof(_partyId)}: {_partyId}");
+
+            if (_guildId != GuildMember.InvalidGuildId)
+            {
+                sb.AppendLine($"{nameof(_guildId)}: {_guildId}");
+                sb.AppendLine($"{nameof(_guildName)}: {_guildName}");
+                sb.AppendLine($"{nameof(_guildMembership)}: {_guildMembership}");
+            }
+
+            sb.AppendLine($"{nameof(_community)}: {_community}");
+
+            for (int i = 0; i < _unlockedInventoryList.Count; i++)
+                sb.AppendLine($"{nameof(_unlockedInventoryList)}[{i}]: {GameDatabase.GetPrototypeName(_unlockedInventoryList[i])}");
+
+            if (_badges.Count > 0)
+            {
+                sb.Append($"{nameof(_badges)}: ");
+                foreach (AvailableBadges badge in _badges)
+                    sb.Append(badge.ToString()).Append(' ');
+                sb.AppendLine();
+            }
+
+            sb.AppendLine($"{nameof(GameplayOptions)}: {GameplayOptions}");
+            sb.AppendLine($"{nameof(AchievementState)}: {AchievementState}");
+
+            foreach (var kvp in _stashTabOptionsDict)
+                sb.AppendLine($"{nameof(_stashTabOptionsDict)}[{GameDatabase.GetFormattedPrototypeName(kvp.Key)}]: {kvp.Value}");
         }
 
         private struct TeleportData

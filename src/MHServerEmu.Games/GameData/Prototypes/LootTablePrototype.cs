@@ -9,6 +9,7 @@ using MHServerEmu.Games.GameData.Calligraphy.Attributes;
 using MHServerEmu.Games.GameData.LiveTuning;
 using MHServerEmu.Games.GameData.Tables;
 using MHServerEmu.Games.Loot;
+using MHServerEmu.Games.Loot.Visitors;
 
 namespace MHServerEmu.Games.GameData.Prototypes
 {
@@ -27,7 +28,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
         {
         }
 
-        public virtual void Visit(LootTableNodeVisitor visitor)
+        public virtual void Visit<T>(T visitor) where T: ILootTableNodeVisitor
         {
             visitor.Visit(this);
         }
@@ -156,7 +157,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
                     using DropFilterArguments pickFilterArgs = ObjectPoolManager.Instance.Get<DropFilterArguments>();
                     DropFilterArguments.Initialize(pickFilterArgs, null, rollFor, level, rarityProtoRef.Value, 0, slot, resolver.LootContext);
-                    pickFilterArgs.DropDistanceSq = settings.DropDistanceThresholdSq;
+                    pickFilterArgs.DropDistanceSq = settings.DropDistanceSq;
 
                     if (picker.Empty() ||
                         LootUtilities.PickValidItem(resolver, picker, resolvedTeamUpProto, pickFilterArgs, ref pickedItemProto, restrictionFlags, ref rarityProtoRef) == false)
@@ -173,7 +174,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
                 using DropFilterArguments pushFilterArgs = ObjectPoolManager.Instance.Get<DropFilterArguments>();
                 DropFilterArguments.Initialize(pushFilterArgs, pickedItemProto, rollFor, level, rarityProtoRef.Value, 0, slot, resolver.LootContext);
-                pushFilterArgs.DropDistanceSq = settings.DropDistanceThresholdSq;
+                pushFilterArgs.DropDistanceSq = settings.DropDistanceSq;
 
                 if (pickedItemProto.IsCurrency)
                 {
@@ -226,6 +227,17 @@ namespace MHServerEmu.Games.GameData.Prototypes
             NoDropPercent = Math.Clamp(NoDropPercent, 0f, 1f);
 
             LootTablePrototypeEnumValue = GetEnumValueFromBlueprint(LiveTuningData.GetLootTableBlueprintDataRef());
+        }
+
+        public override void Visit<T>(T visitor)
+        {
+            base.Visit(visitor);
+
+            if (Choices.IsNullOrEmpty())
+                return;
+
+            foreach (LootNodePrototype node in Choices)
+                node.Visit(visitor);
         }
 
         public bool IsLiveTuningEnabled()
@@ -376,8 +388,51 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
         private LootRollResult PickLiveTuningNodes(LootRollSettings settings, IItemResolver resolver)
         {
-            // TODO
-            return LootRollResult.NoRoll;
+            int groupNum = (int)LiveTuningManager.GetLiveLootTableTuningVar(this, LootTableTuningVar.eLTTV_GroupNum);
+            if (groupNum == LiveTuningData.DefaultTuningVarValue)
+                return LootRollResult.NoRoll;
+
+            LiveTuningManager.GetLiveLootGroup(groupNum, out IReadOnlyList<WorldEntityPrototype> lootGroup);
+            if (lootGroup.Count == 0)
+                return LootRollResult.NoRoll;
+
+            LootRollResult result = LootRollResult.NoRoll;
+            for (int i = 0; i < lootGroup.Count; i++)
+            {
+                WorldEntityPrototype entityProto = lootGroup[i];
+                if (entityProto == null)
+                {
+                    Logger.Warn("PickLiveTuningNodes(): entityProto == null");
+                    continue;
+                }
+
+                // Check custom drop chance
+                float noDropPercent = LiveTuningManager.GetLiveWorldEntityTuningVar(entityProto, WorldEntityTuningVar.eWETV_LootNoDropPercent);
+                if (Segment.EpsilonTest(noDropPercent, LiveTuningData.DefaultTuningVarValue) == false && resolver.CheckDropChance(settings, noDropPercent) == false)
+                    continue;
+
+                // CUSTOM: Override loot context for live tuning drops to allow costumes to drop
+                resolver.LootContextOverride = LootContext.CashShop;
+
+                switch (entityProto)
+                {
+                    case AgentPrototype agentProto:
+                        result |= LootDropAgentPrototype.RollAgent(agentProto, 1, settings, resolver);
+                        break;
+
+                    case ItemPrototype itemProto:
+                        result |= RollItem(itemProto, 1, settings, resolver, null);
+                        break;
+
+                    default:
+                        Logger.Warn($"PickLiveTuningNodes(): None ItemPrototype or AgentPrototype being used in a live-tuning roll!\n Prototype: {entityProto}");
+                        break;
+                }
+
+                resolver.LootContextOverride = LootContext.None;
+            }
+
+            return result;
         }
     }
 
