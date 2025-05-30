@@ -22,6 +22,7 @@ namespace MHServerEmu.DatabaseAccess.MySQL
         private const int CurrentSchemaVersion = 3;         // Increment this when making changes to the database schema
         private const int NumTestAccounts = 5;              // Number of test accounts to create for new databases
         private const int NumPlayerDataWriteAttempts = 3;   // Number of write attempts to do when saving player data
+        public bool isSchemaExist;
 
         private static readonly Logger Logger = LogManager.CreateLogger();
 
@@ -38,13 +39,16 @@ namespace MHServerEmu.DatabaseAccess.MySQL
             var config = ConfigManager.Instance.GetConfig<MySqlDBManagerConfig>();
             _connectionString = $"Data Source={_dbFilePath}";
             _dbFilePath = Path.Combine(FileHelper.DataDirectory, ConfigManager.Instance.GetConfig<SQLiteDBManagerConfig>().FileName);
+            using MySqlConnection connection = GetConnection();
+            int schemaVersion = GetSchemaVersion(connection);
+            var findSchema = connection.Query("SHOW DATABASES LIKE '" + config.MySqlDBName + "';");
+            connection.Close();
+            isSchemaExist = findSchema.Any();
+            if (schemaVersion < CurrentSchemaVersion) MigrateDatabaseFileToCurrentSchema();
             try
             {
-                using MySqlConnection schemaCheck = GetConnection();
-                var isSchemaExist = schemaCheck.Query("SHOW DATABASES LIKE '" + config.MySqlDBName + "';");
-                schemaCheck.Close();
-                if (!isSchemaExist.Any()) InitializeDatabaseFile();
-                if (File.Exists(_dbFilePath) == true & !isSchemaExist.Any())
+                if (!isSchemaExist) InitializeDatabaseFile();
+                if (File.Exists(_dbFilePath) == true & !isSchemaExist)
                 {
                     if (MigrateDatabaseFileToCurrentSchema() == false)
                         return false;
@@ -55,7 +59,7 @@ namespace MHServerEmu.DatabaseAccess.MySQL
             }
             catch
             {
-                if (File.Exists(_dbFilePath) == true)
+                if (File.Exists(_dbFilePath) == true & !isSchemaExist)
                 {
                     // Migrate existing database if needed
                     if (MigrateDatabaseFileToCurrentSchema() == false)
@@ -253,13 +257,14 @@ namespace MHServerEmu.DatabaseAccess.MySQL
         /// Migrates an existing database to the current schema if needed.
         private bool MigrateDatabaseFileToCurrentSchema()
         {
-
-            if (File.Exists(_dbFilePath) == true)
+            using MySqlConnection connection = GetConnection();
+            using MySqlConnection schemaCheck = GetConnection();
+            schemaCheck.Close();
+                if (File.Exists(_dbFilePath) == true & !isSchemaExist)
             {
                 var config = ConfigManager.Instance.GetConfig<MySqlDBManagerConfig>();
                 try
                 {
-                    using MySqlConnection connection = GetConnection();
                     File.WriteAllText($"{_dbFilePath}.Migrate.sql", DumpSQLiteDatabase(_dbFilePath, true));
                     string filePath = $"{_dbFilePath}.Migrate.sql";
                     Logger.Info("Importing SQLite Database into MySQL... This may take a while.");
@@ -279,7 +284,6 @@ namespace MHServerEmu.DatabaseAccess.MySQL
                         //Logger.Error(e.Message);
                     }
                     if (!InitializeDatabaseFile()) return false;
-                    using MySqlConnection connection = GetConnection();
                     File.WriteAllText($"{_dbFilePath}.Migrate.sql", DumpSQLiteDatabase(_dbFilePath, true));
                     string filePath = $"{_dbFilePath}.Migrate.sql";
                     Logger.Info("Importing SQLite Database into MySQL... This may take a while.");
@@ -294,9 +298,7 @@ namespace MHServerEmu.DatabaseAccess.MySQL
                 }
 
             }
-            else
-            {
-                using MySqlConnection connection = GetConnection();
+                
                 int schemaVersion = GetSchemaVersion(connection);
                 if (schemaVersion > CurrentSchemaVersion)
                     return Logger.ErrorReturn(false, $"Initialize(): Existing database uses unsupported schema version {schemaVersion} (current = {CurrentSchemaVersion})");
@@ -342,7 +344,7 @@ namespace MHServerEmu.DatabaseAccess.MySQL
                 }
 
                 Logger.Info($"Successfully migrated to schema version {CurrentSchemaVersion}");
-            }
+            
             return true;
         }
 
@@ -402,9 +404,10 @@ namespace MHServerEmu.DatabaseAccess.MySQL
         /// Returns the user_version value of the current database.
         private static int GetSchemaVersion(MySqlConnection connection)
         {
-            var queryResult = connection.Query<int>("PRAGMA user_version");
+
+            var queryResult = connection.Query<int>("SELECT * FROM " + ConfigManager.Instance.GetConfig<MySqlDBManagerConfig>().MySqlDBName + ".schemaversion"); 
             if (queryResult.Any())
-                return queryResult.First();
+                return queryResult.Last();
 
             return Logger.WarnReturn(-1, "GetSchemaVersion(): Failed to query user_version from the DB");
         }
@@ -414,7 +417,7 @@ namespace MHServerEmu.DatabaseAccess.MySQL
 
         private static void SetSchemaVersion(MySqlConnection connection, int version)
         {
-            connection.Execute($"UPDATE PRAGMA SET user_version={version} LIMIT 1");
+            connection.Execute($"UPDATE "+ ConfigManager.Instance.GetConfig<MySqlDBManagerConfig>().MySqlDBName + ".schemaversion SET user_version={version}");
         }
 
 
