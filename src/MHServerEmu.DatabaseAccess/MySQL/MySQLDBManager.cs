@@ -417,7 +417,7 @@ namespace MHServerEmu.DatabaseAccess.MySQL
 
         private static void SetSchemaVersion(MySqlConnection connection, int version)
         {
-            connection.Execute($"UPDATE "+ ConfigManager.Instance.GetConfig<MySqlDBManagerConfig>().MySqlDBName + ".schemaversion SET user_version={version}");
+            connection.Execute($"UPDATE "+ ConfigManager.Instance.GetConfig<MySqlDBManagerConfig>().MySqlDBName + ".schemaversion SET user_version="+CurrentSchemaVersion);
         }
 
 
