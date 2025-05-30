@@ -32,7 +32,7 @@ namespace MHServerEmu.Leaderboards
             _isRunning = config.LeaderboardsEnabled;
             if (_isRunning == false)
                 return;
-            if (IDBManager.Instance.Equals(SQLiteDBManager.Instance) | IDBManager.Instance.Equals(MySQLDBManager.Instance))
+            if (IDBManager.Instance.Equals(SQLiteDBManager.Instance))
             {
 
                 _database.Initialize(true);

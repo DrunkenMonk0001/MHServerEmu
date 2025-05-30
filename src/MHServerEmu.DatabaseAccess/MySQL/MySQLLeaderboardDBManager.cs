@@ -5,7 +5,6 @@ using MHServerEmu.DatabaseAccess.MySqlDB;
 using MySql.Data.MySqlClient;
 using MHServerEmu.Core.Helpers;
 using MHServerEmu.DatabaseAccess.Models.Leaderboards;
-using MHServerEmu.DatabaseAccess.SQLite;
 
 
 namespace MHServerEmu.DatabaseAccess.MySQL
@@ -59,7 +58,7 @@ namespace MHServerEmu.DatabaseAccess.MySQL
             connectionInit.Execute("USE " + config.MySqlDBName);
             connectionInit.Execute(MySqlInitializationScript);
 
-            Logger.Info($"Initialized a new database file at {Path.GetRelativePath(FileHelper.ServerRoot, _dbFilePath)} using schema version {CurrentSchemaVersion}");
+            Logger.Info($"Initialized leaderboards data");
 
             return true;
         }
@@ -316,12 +315,13 @@ namespace MHServerEmu.DatabaseAccess.MySQL
 
             using var connection = GetConnection();
             using var transaction = connection.BeginTransaction();
-
+            connection.Execute("SET FOREIGN_KEY_CHECKS=0;", transaction: transaction);
             const string insertCommand = @"
                 INSERT INTO MetaEntries (LeaderboardId, InstanceId, SubLeaderboardId, SubInstanceId)
                 VALUES (@LeaderboardId, @InstanceId, @SubLeaderboardId, @SubInstanceId)";
 
             connection.Execute(insertCommand, instances, transaction);
+            connection.Execute("SET FOREIGN_KEY_CHECKS=1;", transaction: transaction);
             transaction.Commit();
         }
 
