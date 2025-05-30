@@ -2,6 +2,9 @@
 using MHServerEmu.Core.Config;
 using MHServerEmu.Core.Logging;
 using MHServerEmu.Core.Network;
+using MHServerEmu.DatabaseAccess.Json;
+using MHServerEmu.DatabaseAccess.MySQL;
+using MHServerEmu.DatabaseAccess;
 using MHServerEmu.DatabaseAccess.SQLite;
 using MHServerEmu.Games;
 
@@ -27,25 +30,31 @@ namespace MHServerEmu.Leaderboards
         {
             var config = ConfigManager.Instance.GetConfig<GameOptionsConfig>();
             _isRunning = config.LeaderboardsEnabled;
-
             if (_isRunning == false)
                 return;
+            if (IDBManager.Instance.Equals(SQLiteDBManager.Instance))
+            {
 
-            _database.Initialize(SQLiteLeaderboardDBManager.Instance);
+                _database.Initialize(true);
+            }
+            else
+            {
+                _database.Initialize(false);
+            }
 
             while (_isRunning)
-            {
-                // Update state for instances
-                _database.UpdateState();
+                {
+                    // Update state for instances
+                    _database.UpdateState();
 
-                // Process score updates
-                _database.ProcessLeaderboardScoreUpdateQueue();
+                    // Process score updates
+                    _database.ProcessLeaderboardScoreUpdateQueue();
 
-                // Process rewards
-                _rewardManager.Update();
+                    // Process rewards
+                    _rewardManager.Update();
 
-                Thread.Sleep(UpdateTimeMS);
-            }
+                    Thread.Sleep(UpdateTimeMS);
+                }
         }
 
         public void Shutdown() 

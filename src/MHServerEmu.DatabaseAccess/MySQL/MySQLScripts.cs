@@ -24,5 +24,14 @@ namespace MHServerEmu.DatabaseAccess.MySqlA
 
             return File.ReadAllText(filePath);
         }
+
+        public static string GetLeaderboardsScript()
+        {
+            string filePath = Path.Combine(FileHelper.DataDirectory, "MySql", "InitializeLeaderboardsDatabase.sql");
+            if (File.Exists(filePath) == false)
+                return Logger.WarnReturn(string.Empty, $"GetDatabaseInitializationScript(): Initialization script file not found at {FileHelper.GetRelativePath(filePath)}");
+
+            return File.ReadAllText(filePath);
+        }
     }
 }

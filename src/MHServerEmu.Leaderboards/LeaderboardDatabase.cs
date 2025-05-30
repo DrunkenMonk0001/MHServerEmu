@@ -9,6 +9,7 @@ using MHServerEmu.Core.Network;
 using MHServerEmu.Core.System.Time;
 using MHServerEmu.DatabaseAccess;
 using MHServerEmu.DatabaseAccess.Models.Leaderboards;
+using MHServerEmu.DatabaseAccess.MySQL;
 using MHServerEmu.DatabaseAccess.SQLite;
 using MHServerEmu.Games.GameData;
 using MHServerEmu.Games.GameData.Prototypes;
@@ -35,7 +36,8 @@ namespace MHServerEmu.Leaderboards
         private Queue<GameServiceProtocol.LeaderboardScoreUpdateBatch> _pendingScoreUpdateQueue = new();
         private Queue<GameServiceProtocol.LeaderboardScoreUpdateBatch> _scoreUpdateQueue = new();
 
-        public SQLiteLeaderboardDBManager DBManager { get; private set; }
+        public dynamic DBManager { get; private set; }
+
         public int LeaderboardCount { get => _leaderboards.Count; }
         public static LeaderboardDatabase Instance { get; } = new();
 
@@ -44,9 +46,12 @@ namespace MHServerEmu.Leaderboards
         /// <summary>
         /// Initializes the <see cref="LeaderboardDatabase"/> instance.
         /// </summary>
-        public bool Initialize(SQLiteLeaderboardDBManager instance)
+        public bool Initialize(bool SQLite)
         {
-            DBManager = instance;
+            if (!SQLite)
+                DBManager = MYSQLLeaderboardDBManager.Instance;
+            else
+                DBManager = SQLiteLeaderboardDBManager.Instance;
 
             var stopwatch = Stopwatch.StartNew();
 

@@ -19,7 +19,7 @@ namespace MHServerEmu.DatabaseAccess.MySQL
     /// </summary>
     public class MySQLDBManager : IDBManager
     {
-        private const int CurrentSchemaVersion = 2;         // Increment this when making changes to the database schema
+        private const int CurrentSchemaVersion = 3;         // Increment this when making changes to the database schema
         private const int NumTestAccounts = 5;              // Number of test accounts to create for new databases
         private const int NumPlayerDataWriteAttempts = 3;   // Number of write attempts to do when saving player data
 
@@ -44,7 +44,7 @@ namespace MHServerEmu.DatabaseAccess.MySQL
                 var isSchemaExist = schemaCheck.Query("SHOW DATABASES LIKE '" + config.MySqlDBName + "';");
                 schemaCheck.Close();
                 if (!isSchemaExist.Any()) InitializeDatabaseFile();
-                if (File.Exists(_dbFilePath) == true)
+                if (File.Exists(_dbFilePath) == true & !isSchemaExist.Any())
                 {
                     if (MigrateDatabaseFileToCurrentSchema() == false)
                         return false;
@@ -79,6 +79,27 @@ namespace MHServerEmu.DatabaseAccess.MySQL
 
             account = accounts.FirstOrDefault();
             return account != null;
+        }
+
+        public bool TryGetPlayerName(ulong id, out string playerName)
+        {
+            using MySqlConnection connection = GetConnection();
+
+            playerName = connection.QueryFirstOrDefault<string>("SELECT PlayerName FROM Account WHERE Id = @Id", new { Id = (long)id });
+
+            return string.IsNullOrWhiteSpace(playerName) == false;
+        }
+
+        public bool GetPlayerNames(Dictionary<ulong, string> playerNames)
+        {
+            using MySqlConnection connection = GetConnection();
+
+            var accounts = connection.Query<DBAccount>("SELECT Id, PlayerName FROM Account");
+
+            foreach (DBAccount account in accounts)
+                playerNames[(ulong)account.Id] = account.PlayerName;
+
+            return playerNames.Count > 0;
         }
 
         public bool QueryIsPlayerNameTaken(string playerName)
