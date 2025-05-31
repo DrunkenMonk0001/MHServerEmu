@@ -2,7 +2,6 @@
 using MHServerEmu.Core.Network;
 using MHServerEmu.Core.System.Time;
 using MHServerEmu.DatabaseAccess.Models.Leaderboards;
-using MHServerEmu.DatabaseAccess.SQLite;
 
 namespace MHServerEmu.Leaderboards
 {
@@ -22,7 +21,7 @@ namespace MHServerEmu.Leaderboards
         private Queue<GameServiceProtocol.LeaderboardRewardConfirmation> _processConfirmationQueue = new();
 
         private readonly object _queueLock = new();
-
+        
         public LeaderboardRewardManager()
         {
         }
@@ -92,7 +91,7 @@ namespace MHServerEmu.Leaderboards
                 return Logger.WarnReturn(false, $"QueryRewards(): Participant 0x{participantId:X} already has pending rewards");
 
             // Query the database and exit early if there are no rewards to give
-            List<DBRewardEntry> dbRewards = SQLiteLeaderboardDBManager.Instance.GetRewards((long)participantId);
+            List<DBRewardEntry> dbRewards = LeaderboardDatabase.Instance.DBManager.GetRewards((long)participantId);
             if (dbRewards.Count == 0)
                 return true;
 
@@ -142,7 +141,7 @@ namespace MHServerEmu.Leaderboards
 
             // Update reward in the database
             reward.UpdateRewardedDate();
-            SQLiteLeaderboardDBManager.Instance.UpdateReward(reward);
+            LeaderboardDatabase.Instance.DBManager.Instance.UpdateReward(reward);
 
             // Finish this batch of rewards if we have received confirmations for everything
             if (rewards.Count == 0)
