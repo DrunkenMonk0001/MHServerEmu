@@ -35,7 +35,7 @@ namespace MHServerEmu.Leaderboards
 
         private Queue<GameServiceProtocol.LeaderboardScoreUpdateBatch> _pendingScoreUpdateQueue = new();
         private Queue<GameServiceProtocol.LeaderboardScoreUpdateBatch> _scoreUpdateQueue = new();
-
+        public bool IsInitialized { get; private set; }
         public dynamic DBManager { get; private set; }
 
         public int LeaderboardCount { get => _leaderboards.Count; }
@@ -86,7 +86,7 @@ namespace MHServerEmu.Leaderboards
 
             // Send initial leaderboard state to game instances
             SendLeaderboardsToGames();
-
+            IsInitialized = true;
             Logger.Info($"Initialized {_leaderboards.Count} leaderboards in {stopwatch.ElapsedMilliseconds} ms");
             return true;
         }

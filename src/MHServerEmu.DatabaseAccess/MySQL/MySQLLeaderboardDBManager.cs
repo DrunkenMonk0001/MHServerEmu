@@ -17,8 +17,6 @@ namespace MHServerEmu.DatabaseAccess.MySQL
         private static readonly Logger Logger = LogManager.CreateLogger();
         public static MYSQLLeaderboardDBManager Instance { get; } = new();
 
-        private string _dbFilePath;
-        private string _connectionString;
 
         private MYSQLLeaderboardDBManager() { }
 
