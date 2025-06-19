@@ -8,14 +8,15 @@
   </PropertyGroup>
 
   <PropertyGroup>
-    <AssemblyVersion>0.6.0.0</AssemblyVersion>
+    <AssemblyVersion>0.7.0.0</AssemblyVersion>
     <FileVersion>$(AssemblyVersion)</FileVersion>
     <InformationalVersion>$(AssemblyVersion)</InformationalVersion>
   </PropertyGroup>
-
-  <ItemGroup>
+  
+    <ItemGroup>
     <PackageReference Include="MySql.Data" Version="9.0.0" />
   </ItemGroup>
+  
   
   <ItemGroup>
     <ProjectReference Include="..\MHServerEmu.Core\MHServerEmu.Core.csproj" />
@@ -31,12 +32,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Update="Data\MySql\InitializeLeaderboardsDatabase.sql">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Update="Data\MySql\Migrations\2.sql">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
     <None Update="Data\SQLite\InitializeDatabase.sql">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
@@ -53,19 +48,6 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
-  
-    <ItemGroup>
-    <None Update="Data\MySql\InitializeDatabase.sql">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Update="Data\MySql\Migrations\0.sql">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Update="Data\MySql\Migrations\1.sql">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-  </ItemGroup>
-
 
   <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
     <Content Include="Interop\win-x64\SQLite.Interop.dll">

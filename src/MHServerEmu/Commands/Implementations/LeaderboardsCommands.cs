@@ -1,9 +1,9 @@
 ﻿using System.Text;
 using MHServerEmu.Commands.Attributes;
 using MHServerEmu.Core.Memory;
+using MHServerEmu.Core.Network;
 using MHServerEmu.Core.System.Time;
 using MHServerEmu.DatabaseAccess.Models;
-using MHServerEmu.Frontend;
 using MHServerEmu.Games.GameData;
 using MHServerEmu.Leaderboards;
 
@@ -17,16 +17,20 @@ namespace MHServerEmu.Commands.Implementations
         [Command("reloadschedule")]
         [CommandDescription("Reloads leaderboard schedule from JSON.")]
         [CommandUsage("leaderboards reloadschedule")]
-        public string ReloadSchedule(string[] @params, FrontendClient client)
+        public string ReloadSchedule(string[] @params, NetClient client)
         {
-            LeaderboardDatabase.Instance.ReloadAndReapplySchedule();
+            LeaderboardDatabase leaderboardDB = LeaderboardDatabase.Instance;
+            if (leaderboardDB.IsInitialized == false)
+                return "Leaderboard database is not available.";
+
+            leaderboardDB.ReloadAndReapplySchedule();
             return "Leaderboard schedule reloaded.";
         }
 
         [Command("instance")]
         [CommandDescription("Shows details for the specified leaderboard instance.")]
         [CommandUsage("leaderboards instance [instanceId]")]
-        public string Instance(string[] @params, FrontendClient client)
+        public string Instance(string[] @params, NetClient client)
         {
             if (@params.Length == 0) return "Invalid arguments. Type 'help leaderboards instance' to get help.";
             if (long.TryParse(@params[0], out long instanceId) == false)
@@ -42,7 +46,7 @@ namespace MHServerEmu.Commands.Implementations
         [Command("leaderboard")]
         [CommandDescription("Shows details for the specified leaderboard.")]
         [CommandUsage("leaderboards leaderboard [prototypeGuid]")]
-        public string Leaderboard(string[] @params, FrontendClient client)
+        public string Leaderboard(string[] @params, NetClient client)
         {
             if (@params.Length == 0) return "Invalid arguments. Type 'help leaderboards leaderboard' to get help.";
             if (long.TryParse(@params[0], out long leaderboardId) == false)
@@ -58,7 +62,7 @@ namespace MHServerEmu.Commands.Implementations
         [Command("now")]
         [CommandDescription("Shows all active instances.")]
         [CommandUsage("leaderboards now")]
-        public string Now(string[] @params, FrontendClient client)
+        public string Now(string[] @params, NetClient client)
         {
             var sb = new StringBuilder();
             sb.AppendLine($"Current Time: [{Clock.UtcNowTimestamp}] {Clock.UtcNowPrecise}");
@@ -81,7 +85,7 @@ namespace MHServerEmu.Commands.Implementations
         [Command("enabled")]
         [CommandDescription("Shows enabled leaderboards.")]
         [CommandUsage("leaderboards enabled")]
-        public string Enabled(string[] @params, FrontendClient client)
+        public string Enabled(string[] @params, NetClient client)
         {
             var sb = new StringBuilder();
             sb.AppendLine($"Current Time: [{Clock.UtcNowTimestamp}] {Clock.UtcNowPrecise}");
@@ -104,7 +108,7 @@ namespace MHServerEmu.Commands.Implementations
         [Command("all")]
         [CommandDescription("Shows all leaderboards.")]
         [CommandUsage("leaderboards all")]
-        public string All(string[] @params, FrontendClient client)
+        public string All(string[] @params, NetClient client)
         {
             var sb = new StringBuilder();
             sb.AppendLine($"Current Time: [{Clock.UtcNowTimestamp}] {Clock.UtcNowPrecise}");

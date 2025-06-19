@@ -447,6 +447,17 @@ namespace MHServerEmu.Games.GameData.Prototypes
             return levelingCurve.MaxPosition;
         }
 
+        public PetTechAffixInfoPrototype GetPetTechAffixInfoPrototype(AffixPosition position)
+        {
+            if (PetTechAffixInfo.IsNullOrEmpty()) return Logger.WarnReturn<PetTechAffixInfoPrototype>(null, "GetPetTechAffixInfoPrototype(): PetTechAffixInfo.IsNullOrEmpty()");
+            if (position < AffixPosition.PetTech1 || position > AffixPosition.PetTech5) return Logger.WarnReturn<PetTechAffixInfoPrototype>(null, "GetPetTechAffixInfoPrototype(): position < AffixPosition.PetTech1 || position > AffixPosition.PetTech5");
+
+            int index = position - AffixPosition.PetTech1;
+            if (index < 0 || index >= PetTechAffixInfo.Length) return Logger.WarnReturn<PetTechAffixInfoPrototype>(null, "GetPetTechAffixInfoPrototype(): index < 0 || index >= PetTechAffixInfo.Length");
+
+            return PetTechAffixInfo[index];
+        }
+
         public PrestigeLevelPrototype GetPrestigeLevelPrototype(int prestigeLevel)
         {
             if (prestigeLevel < 0 || prestigeLevel > MaxPrestigeLevel) return Logger.WarnReturn<PrestigeLevelPrototype>(null, "GetPrestigeLevelPrototype(): prestigeLevel < 0 || prestigeLevel > MaxPrestigeLevel");
@@ -799,6 +810,10 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public int InfinityNotificationThreshold { get; protected set; }
         public PrototypeId HelpTextConsole { get; protected set; }
         public PrototypeId MessageRegionNotDownloaded { get; protected set; }
+
+        //---
+
+        public const PrototypeId ChatSystemLock = (PrototypeId)809347018162704299;
     }
 
     public class UINotificationGlobalsPrototype : Prototype
