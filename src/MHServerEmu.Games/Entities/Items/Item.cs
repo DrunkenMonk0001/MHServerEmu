@@ -1264,14 +1264,32 @@ namespace MHServerEmu.Games.Entities.Items
 
         private bool DoInventoryStashTokenInteraction(InventoryStashTokenPrototype inventoryStashTokenProto, Player player)
         {
-            // TODO
-            return false;
+            PrototypeId invStashProtoRef = inventoryStashTokenProto.Inventory;
+
+            if (player.IsInventoryUnlocked(invStashProtoRef))
+                return false;
+
+            if (player.UnlockInventory(invStashProtoRef) == false)
+                return Logger.WarnReturn(false, $"DoInventoryStashTokenInteraction(): Failed to unlock inventory {invStashProtoRef.GetName()} for player [{player}] by interacting with [{this}]");
+
+            return true;
         }
 
         private bool DoEmoteTokenInteraction(EmoteTokenPrototype emoteTokenProto, Player player)
         {
-            // TODO
-            return false;
+            PrototypeId avatarDataRef = emoteTokenProto.Avatar;
+            if (avatarDataRef == PrototypeId.Invalid) return Logger.WarnReturn(false, "DoEmoteTokenInteraction(): avatarDataRef == PrototypeId.Invalid");
+
+            PrototypeId emotePowerDataRef = emoteTokenProto.EmotePower;
+            if (emotePowerDataRef == PrototypeId.Invalid) return Logger.WarnReturn(false, "DoEmoteTokenInteraction(): emotePowerDataRef == PrototypeId.Invalid");
+
+            if (player.HasAvatarEmoteUnlocked(avatarDataRef, emotePowerDataRef))
+                return false;
+
+            if (player.UnlockAvatarEmote(avatarDataRef, emotePowerDataRef) == false)
+                return Logger.WarnReturn(false, $"DoEmoteTokenInteraction(): Failed to unlock emote! avatar=[{avatarDataRef.GetName()}], emote=[{emotePowerDataRef.GetName()}], item=[{this}], player=[{player}]");
+
+            return true;
         }
 
         private bool DoCraftingRecipeInteraction(CraftingRecipePrototype craftingRecipeProto, Player player)
@@ -2298,16 +2316,27 @@ namespace MHServerEmu.Games.Entities.Items
 
         private InteractionValidateResult PlayerCanUseInventoryStashToken(Player player, InventoryStashTokenPrototype inventoryStashTokenProto)
         {
-            // TODO
-            Logger.Debug($"PlayerCanUseInventoryStashToken(): {inventoryStashTokenProto}");
-            return InteractionValidateResult.UnknownFailure;
+            PrototypeId invStashProtoRef = inventoryStashTokenProto.Inventory;
+            if (invStashProtoRef == PrototypeId.Invalid) return Logger.WarnReturn(InteractionValidateResult.UnknownFailure, "PlayerCanUseInventoryStashToken(): invStashProtoRef == PrototypeId.Invalid");
+
+            if (player.IsInventoryUnlocked(invStashProtoRef))
+                return InteractionValidateResult.InventoryAlreadyUnlocked;
+
+            return InteractionValidateResult.Success;
         }
 
         private InteractionValidateResult PlayerCanUseEmoteToken(Player player, EmoteTokenPrototype emoteTokenProto)
         {
-            // TODO
-            Logger.Debug($"PlayerCanUseEmoteToken(): {emoteTokenProto}");
-            return InteractionValidateResult.UnknownFailure;
+            PrototypeId avatarDataRef = emoteTokenProto.Avatar;
+            if (avatarDataRef == PrototypeId.Invalid) return Logger.WarnReturn(InteractionValidateResult.UnknownFailure, "PlayerCanUseEmoteToken(): avatarDataRef == PrototypeId.Invalid");
+
+            PrototypeId emotePowerDataRef = emoteTokenProto.EmotePower;
+            if (emotePowerDataRef == PrototypeId.Invalid) return Logger.WarnReturn(InteractionValidateResult.UnknownFailure, "PlayerCanUseEmoteToken(): emotePowerDataRef == PrototypeId.Invalid");
+
+            if (player.HasAvatarEmoteUnlocked(avatarDataRef, emotePowerDataRef))
+                return InteractionValidateResult.Error6;
+
+            return InteractionValidateResult.Success;
         }
 
         private InteractionValidateResult PlayerCanUseCraftingRecipe(Player player)
@@ -2334,9 +2363,12 @@ namespace MHServerEmu.Games.Entities.Items
 
         private InteractionValidateResult PlayerCanUseAwardTeamUpXP(Player player, Avatar avatar)
         {
-            // TODO
-            Logger.Debug($"PlayerCanUseAwardTeamUpXP(): {avatar}");
-            return InteractionValidateResult.UnknownFailure;
+            Agent teamUpAgent = avatar.CurrentTeamUpAgent;
+
+            if (teamUpAgent == null || teamUpAgent.IsAtLevelCap)
+                return InteractionValidateResult.ItemNotUsable;
+
+            return InteractionValidateResult.Success;
         }
 
         private InteractionValidateResult PlayerCanUsePowerAction(Player player, Avatar avatar)

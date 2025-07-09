@@ -52,6 +52,7 @@ namespace MHServerEmu.Games.Entities.Avatars
         private readonly EventPointer<TransformModeChangeEvent> _transformModeChangeEvent = new();
         private readonly EventPointer<TransformModeExitPowerEvent> _transformModeExitPowerEvent = new();
         private readonly EventPointer<UnassignMappedPowersForRespecEvent> _unassignMappedPowersForRespec = new();
+        private readonly EventPointer<RegionTeleportEvent> _regionTeleportEvent = new();
 
         private readonly EventPointer<EnableEnduranceRegenEvent>[] _enableEnduranceRegenEvents = new EventPointer<EnableEnduranceRegenEvent>[(int)ManaType.NumTypes];
         private readonly EventPointer<UpdateEnduranceEvent>[] _updateEnduranceEvents = new EventPointer<UpdateEnduranceEvent>[(int)ManaType.NumTypes];
@@ -376,6 +377,7 @@ namespace MHServerEmu.Games.Entities.Avatars
                     return Logger.WarnReturn(ChangePositionResult.InvalidPosition, $"ChangeRegionPosition(): Invalid position {position.Value}");
 
                 player.BeginTeleport(RegionLocation.RegionId, position.Value, orientation != null ? orientation.Value : Orientation.Zero);
+                ConditionCollection.RemoveCancelOnIntraRegionTeleportConditions();
                 ExitWorld();
                 player.AOI.Update(position.Value);
                 result = ChangePositionResult.Teleport;
@@ -554,6 +556,39 @@ namespace MHServerEmu.Games.Entities.Avatars
                 .Build();
 
             Game.NetworkManager.SendMessageToInterested(message, this, AOINetworkPolicyValues.AOIChannelProximity | AOINetworkPolicyValues.AOIChannelOwner);
+        }
+
+        #endregion
+
+        #region Teleports
+
+        public void SetLastTownRegion(PrototypeId regionProtoRef)
+        {
+            Properties[PropertyEnum.LastTownRegion] = regionProtoRef;
+
+            Player player = GetOwnerOfType<Player>();
+            if (player != null)
+                player.Properties[PropertyEnum.LastTownRegionForAccount] = regionProtoRef;
+        }
+
+        public void ScheduleRegionTeleport(PrototypeId targetProtoRef, TimeSpan delay)
+        {
+            if (_regionTeleportEvent.IsValid)
+                Game.GameEventScheduler.CancelEvent(_regionTeleportEvent);
+
+            if (IsDead)
+                Resurrect();
+
+            ScheduleEntityEvent(_regionTeleportEvent, delay, targetProtoRef);
+        }
+
+        private bool DoRegionTeleport(PrototypeId targetProtoRef)
+        {
+            Player player = GetOwnerOfType<Player>();
+            if (player == null) return Logger.WarnReturn(false, "DoRegionTeleport(): player == null");
+
+            Transition.TeleportToTarget(player, targetProtoRef);
+            return true;
         }
 
         #endregion
@@ -802,9 +837,15 @@ namespace MHServerEmu.Games.Entities.Avatars
                 }
 
                 // Invoke the AvatarUsedPowerEvent
-                var player = GetOwnerOfType<Player>();
-                if (player != null)
-                    Region?.AvatarUsedPowerEvent.Invoke(new(player, this, powerRef, settings.TargetEntityId));
+                Player player = GetOwnerOfType<Player>();
+                Region region = Region;
+                if (player != null && region != null)
+                {
+                    region.AvatarUsedPowerEvent.Invoke(new(player, this, powerRef, settings.TargetEntityId));
+
+                    if (powerProto.PowerCategory == PowerCategoryType.EmotePower)
+                        region.EmotePerformedEvent.Invoke(new(player, powerRef));
+                }
             }
             else
             {
@@ -1873,6 +1914,48 @@ namespace MHServerEmu.Games.Entities.Avatars
                 return 0;
 
             return player.PowerSpecIndexUnlocked;
+        }
+
+        public bool SetActivePowerSpec(int newSpecIndex)
+        {
+            if (newSpecIndex < 0) return Logger.WarnReturn(false, "SetActivePowerSpec(): specIndex < 0");
+
+            int currentSpecIndex = GetPowerSpecIndexActive();
+            if (newSpecIndex == currentSpecIndex)
+                return true;
+
+            if (newSpecIndex > GetPowerSpecIndexUnlocked())
+                return false;
+
+            if (Properties.HasProperty(PropertyEnum.IsInCombat))
+                return false;
+
+            // Unassign talents
+            List<PrototypeId> talentPowerList = ListPool<PrototypeId>.Instance.Get();
+            GetTalentPowersForSpec(currentSpecIndex, talentPowerList);
+
+            foreach (PrototypeId talentPowerRef in talentPowerList)
+                UnassignTalentPower(talentPowerRef, currentSpecIndex, true);
+
+            ListPool<PrototypeId>.Instance.Return(talentPowerList);
+
+            // Clear mapped powers
+            if (CanStealPowers() == false)
+                UnassignAllMappedPowers();
+
+            // Change spec
+            Properties[PropertyEnum.PowerSpecIndexActive] = newSpecIndex;
+
+            // Refresh powers
+            if (IsInWorld)
+            {
+                UpdateTalentPowers();
+                UpdatePowerProgressionPowers(true);
+            }
+
+            RefreshAbilityKeyMapping(false); // false because the client will do it on its own when it handles the change in PowerSpecIndexActive
+
+            return false;
         }
 
         public override bool RespecPowerSpec(int specIndex, PowersRespecReason reason, bool skipValidation = false, PrototypeId powerProtoRef = PrototypeId.Invalid)
@@ -6327,6 +6410,11 @@ namespace MHServerEmu.Games.Entities.Avatars
         private class UnassignMappedPowersForRespecEvent : CallMethodEvent<Entity>
         {
             protected override CallbackDelegate GetCallback() => (t) => ((Avatar)t).UnassignMappedPowersForRespec();
+        }
+
+        private class RegionTeleportEvent : CallMethodEventParam1<Entity, PrototypeId>
+        {
+            protected override CallbackDelegate GetCallback() => (t, p1) => ((Avatar)t).DoRegionTeleport(p1);
         }
 
         #endregion

@@ -511,8 +511,6 @@ namespace MHServerEmu.Games.Powers
         private bool DoActivateComboPower(Power triggeredPower, PowerEventActionPrototype triggeredPowerEvent, ref PowerActivationSettings initialSettings)
         {
             // Activate combo power - a power triggered by a power event action
-            //Logger.Debug($"DoActivateComboPower(): {triggeredPower.Prototype}");
-
             if (Owner == null) return Logger.WarnReturn(false, "DoActivateComboPower(): Owner == null");
 
             if (Owner.IsSimulated == false)
@@ -666,26 +664,21 @@ namespace MHServerEmu.Games.Powers
         // 1
         private bool DoPowerEventActionBodyslide()
         {
-            Logger.Trace($"DoPowerEventActionBodyslide(): Owner={Owner}");
-
             Player player = Owner.GetOwnerOfType<Player>();
             if (player == null) return Logger.WarnReturn(false, $"DoPowerEventActionBodyslide(): player == null");
 
-            var bodySliderTargetRef = GameDatabase.GlobalsPrototype.DefaultStartTargetFallbackRegion;
-            var region = player.GetRegion();
-            if (region != null && region.Prototype.BodySliderOneWay)
-                if (region.Prototype.BodySliderTarget != PrototypeId.Invalid)
-                    bodySliderTargetRef = region.Prototype.BodySliderTarget;
+            Avatar avatar = player.CurrentAvatar;
+            if (avatar == null) return Logger.WarnReturn(false, $"DoPowerEventActionBodyslide(): avatar == null");
 
-            player.PlayerConnection.MoveToTarget(bodySliderTargetRef);
+            PrototypeId bodyslideTargetRef = Bodyslider.GetBodyslideTargetRef(player);
+
+            avatar.ScheduleRegionTeleport(bodyslideTargetRef, TimeSpan.Zero);
             return true;
         }
 
         // 2, 3
         private bool DoPowerEventActionCancelScheduledActivation(PowerEventActionPrototype triggeredPowerEvent, ref PowerActivationSettings settings)
         {
-            //Logger.Debug($"DoPowerEventActionCancelScheduledActivation(): {triggeredPowerEvent.Power.GetName()}");
-
             if (triggeredPowerEvent.Power == PrototypeId.Invalid)
             {
                 return Logger.WarnReturn(false,
@@ -789,9 +782,34 @@ namespace MHServerEmu.Games.Powers
         }
 
         // 5
-        private void DoPowerEventActionDespawnTarget(PowerEventActionPrototype triggeredPowerEvent, ref PowerActivationSettings settings)
+        private bool DoPowerEventActionDespawnTarget(PowerEventActionPrototype triggeredPowerEvent, ref PowerActivationSettings settings)
         {
-            Logger.Warn($"DoPowerEventActionDespawnTarget(): Not implemented");
+            WorldEntity target = Game.EntityManager.GetEntity<WorldEntity>(settings.TargetEntityId);
+            if (target == null || target.IsInWorld == false)
+                return true;
+
+            if (target is Avatar || target.IsTeamUpAgent)
+                return Logger.WarnReturn(false, "DoPowerEventActionDespawnTarget(): target is Avatar || target.IsTeamUpAgent");
+
+            if (target == Owner)
+            {
+                // Delay owner destruction
+                float delay = triggeredPowerEvent.GetEventParam(Properties, Owner);
+                if (delay < 0f)
+                {
+                    Logger.Warn("DoPowerEventActionDespawnTarget(): delay < 0f");
+                    delay = 0f;
+                }
+
+                target.ScheduleDestroyEvent(TimeSpan.FromSeconds(delay));
+            }
+            else
+            {
+                // Destroy other targets instantly
+                target.Destroy();
+            }
+
+            return true;
         }
 
         // 6
@@ -856,8 +874,6 @@ namespace MHServerEmu.Games.Powers
         // 9
         private bool DoPowerEventActionRestoreThrowable(ref PowerActivationSettings settings)
         {
-            Logger.Trace($"DoPowerEventActionRestoreThrowable()");
-
             if (Owner is not Agent agentOwner)
                 return Logger.WarnReturn(false, $"DoPowerEventActionRestoreThrowable(): Owner cannot throw");
 
@@ -867,8 +883,6 @@ namespace MHServerEmu.Games.Powers
         // 8, 10, 11
         private bool DoPowerEventActionScheduleActivation(PowerEventActionPrototype triggeredPowerEvent, ref PowerActivationSettings settings, PowerEventActionType actionType)
         {
-            //Logger.Debug($"DoPowerEventActionScheduleActivation(): {triggeredPowerEvent.Power.GetName()}");
-
             if (triggeredPowerEvent.Power == PrototypeId.Invalid && actionType != PowerEventActionType.RescheduleActivationInSeconds)
             {
                 return Logger.WarnReturn(false,
@@ -1038,8 +1052,6 @@ namespace MHServerEmu.Games.Powers
         // 15, 16
         private bool DoPowerEventActionTogglePower(PowerEventActionPrototype triggeredPowerEvent, ref PowerActivationSettings settings, PowerEventActionType actionType)
         {
-            //Logger.Debug($"DoPowerEventActionTogglePower(): {triggeredPowerEvent.Power.GetName()} - {actionType}");
-
             Power triggeredPower = Owner?.GetPower(triggeredPowerEvent.Power);
             if (triggeredPower == null) return Logger.WarnReturn(false, "DoPowerEventActionTogglePower(): triggeredPower == null");
 
@@ -1124,8 +1136,6 @@ namespace MHServerEmu.Games.Powers
         // 19
         private bool DoPowerEventActionUsePower(PowerEventActionPrototype triggeredPowerEvent, ref PowerActivationSettings settings)
         {
-            //Logger.Debug($"DoPowerEventActionUsePower(): {triggeredPowerEvent.Power.GetName()}");
-
             // Validate
 
             if (Owner == null) return Logger.WarnReturn(false, "DoPowerEventActionUsePower(): Owner == null");
@@ -1242,8 +1252,6 @@ namespace MHServerEmu.Games.Powers
         // 23
         private bool DoPowerEventActionEndPower(PrototypeId powerProtoRef, EndPowerFlags flags)
         {
-            //Logger.Debug($"DoPowerEventActionEndPower(): powerProtoRef={powerProtoRef.GetName()}, flags={flags}");
-            
             if (powerProtoRef == PrototypeId.Invalid)
                 return Logger.WarnReturn(false, $"DoPowerEventActionEndPower(): Encountered a triggered power event with an invalid power ref!\n{this}");
 
@@ -1355,8 +1363,6 @@ namespace MHServerEmu.Games.Powers
         // 28
         private bool DoPowerEventActionTeamUpAgentSummon(PowerEventActionPrototype triggeredPowerEvent)
         {
-            //Logger.Debug($"DoPowerEventActionTeamUpAgentSummon()");
-
             if (Owner is not Avatar avatar)
                 return Logger.WarnReturn(false, $"DoPowerEventActionTeamUpAgentSummon(): A non-avatar entity {Owner} is trying to summon a team-up agent");
 
@@ -1369,9 +1375,19 @@ namespace MHServerEmu.Games.Powers
         }
 
         // 29
-        private void DoPowerEventActionTeleportRegion(PowerEventActionPrototype triggeredPowerEvent, ref PowerActivationSettings settings)
+        private bool DoPowerEventActionTeleportRegion(PowerEventActionPrototype triggeredPowerEvent, ref PowerActivationSettings settings)
         {
-            Logger.Warn($"DoPowerEventActionTeleportRegion(): Not implemented");
+            if (triggeredPowerEvent.PowerEventContext is not PowerEventContextTeleportRegionPrototype regionTeleportContext)
+                return Logger.WarnReturn(false, "DoPowerEventActionTeleportRegion(): Incompatible power event context type");
+
+            PrototypeId targetProtoRef = regionTeleportContext.Destination;
+            if (targetProtoRef == PrototypeId.Invalid) return Logger.WarnReturn(false, "DoPowerEventActionTeleportRegion(): targetProtoRef == PrototypeId.Invalid");
+
+            Avatar avatar = Game.EntityManager.GetEntity<Avatar>(settings.TargetEntityId);
+            if (avatar == null) return Logger.WarnReturn(false, "DoPowerEventActionTeleportRegion(): avatar == null");
+
+            avatar.ScheduleRegionTeleport(targetProtoRef, TimeSpan.Zero);
+            return true;
         }
 
         // 30

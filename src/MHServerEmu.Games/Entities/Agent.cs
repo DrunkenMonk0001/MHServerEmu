@@ -629,6 +629,13 @@ namespace MHServerEmu.Games.Entities
             PrototypeId throwablePowerRef = throwableEntity.Properties[PropertyEnum.ThrowablePower];
             AssignPower(throwablePowerRef, indexProps);
 
+            // Invoke event if needed
+            if (this is Avatar && throwableEntity.IsInWorld)
+            {
+                Player player = GetOwnerOfType<Player>();
+                throwableEntity.Region.ThrowablePickedUpEvent.Invoke(new(player, throwableEntity));
+            }
+
             // Remove the entity we are throwing from the world
             throwableEntity.ExitWorld();
             throwableEntity.ConditionCollection?.RemoveAllConditions(true);
@@ -1193,9 +1200,6 @@ namespace MHServerEmu.Games.Entities
         private bool UpdatePowerBoost(PrototypeId boostParamProtoRef)
         {
             if (this is not Avatar && IsTeamUpAgent == false) return Logger.WarnReturn(false, "UpdatePowerBoost(): this is not Avatar && IsTeamUpAgent == false");
-
-            // This probably shouldn't be happening in 1.52
-            Logger.Debug($"UpdatePowerBoost(): {boostParamProtoRef.GetName()} for [{this}]");
 
             Prototype boostParamProto = boostParamProtoRef.As<Prototype>();
 

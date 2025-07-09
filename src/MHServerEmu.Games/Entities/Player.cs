@@ -24,9 +24,10 @@ using MHServerEmu.Games.GameData;
 using MHServerEmu.Games.GameData.Calligraphy;
 using MHServerEmu.Games.GameData.LiveTuning;
 using MHServerEmu.Games.GameData.Prototypes;
-using MHServerEmu.Games.Leaderboards;
 using MHServerEmu.Games.GameData.Tables;
+using MHServerEmu.Games.Leaderboards;
 using MHServerEmu.Games.Loot;
+using MHServerEmu.Games.MetaGames;
 using MHServerEmu.Games.Missions;
 using MHServerEmu.Games.Navi;
 using MHServerEmu.Games.Network;
@@ -112,8 +113,8 @@ namespace MHServerEmu.Games.Entities
         private Queue<PrototypeId> _kismetSeqQueue = new();
         private Dictionary<PrototypeId, StashTabOptions> _stashTabOptionsDict = new();
 
-        // TODO: Serialize on migration
         private Dictionary<ulong, MapDiscoveryData> _mapDiscoveryDict = new();
+        private MapDiscoveryData _lastAccessedMapDiscoveryData = null;
 
         private uint _loginCount;
         private TimeSpan _loginRewardCooldownTimeStart;
@@ -364,8 +365,6 @@ namespace MHServerEmu.Games.Entities
 
             bool success = base.Serialize(archive);
 
-            if (archive.IsReplication == false) PlayerConnection.MigrationData.TransferMap(_mapDiscoveryDict, archive.IsPacking);
-
             if (archive.Version >= ArchiveVersion.AddedMissions)
                 success &= Serializer.Transfer(archive, MissionManager);
 
@@ -418,7 +417,8 @@ namespace MHServerEmu.Games.Entities
 
             if (archive.InvolvesClient == false)
             {
-                // TODO: Serialize map discovery data
+                if (archive.Version >= ArchiveVersion.ImplementedMapDiscoveryDataPersistence)
+                    success &= Serializer.Transfer(archive, ref _mapDiscoveryDict);
 
                 if (archive.Version >= ArchiveVersion.AddedVendorPurchaseData)
                 {
@@ -457,6 +457,8 @@ namespace MHServerEmu.Games.Entities
 
         public override void EnterGame(EntitySettings settings = null)
         {
+            CheckMapDiscoveryDataExpiration();
+
             SendMessage(NetMessageMarkFirstGameFrame.CreateBuilder()
                 .SetCurrentservergametime((ulong)Game.CurrentTime.TotalMilliseconds)
                 .SetCurrentservergameid(Game.Id)
@@ -595,6 +597,27 @@ namespace MHServerEmu.Games.Entities
         public bool ViewedRegion(ulong regionId)
         {
             return PlayerConnection.WorldView.ContainsRegionInstanceId(regionId);
+        }
+
+        public MetaGameTeam GetPvPTeam()
+        {
+            Region region = GetRegion();
+            if (region == null)
+                return null;
+
+            EntityManager entityManager = Game.EntityManager;
+            foreach (ulong metaGameId in region.MetaGames)
+            {
+                PvP pvp = entityManager.GetEntity<PvP>(metaGameId);
+                if (pvp == null)
+                    continue;
+
+                MetaGameTeam team = pvp.GetTeamByPlayer(this);
+                if (team != null)
+                    return team;
+            }
+
+            return null;
         }
 
         #endregion
@@ -951,6 +974,12 @@ namespace MHServerEmu.Games.Entities
             if (unpackedArchivedEntity == false)
                 AdjustCraftingIngredientAvailable(item.PrototypeDataRef, item.CurrentStackSize, category);
 
+            // Trigger item collection event
+            InventoryPrototype inventoryProto = invLoc.InventoryPrototype;
+            int stackSize = item.CurrentStackSize;
+            if (stackSize > 0 && inventoryProto != null && (inventoryProto.IsPlayerGeneralInventory || inventoryProto.IsEquipmentInventory))
+                GetRegion()?.PlayerCollectedItemEvent.Invoke(new(this, item, stackSize));
+
             // Highlight items that get put into stash tabs different from the current one
             if (invLoc.InventoryRef != CurrentOpenStashPagePrototypeRef &&
                 (category == InventoryCategory.PlayerStashGeneral ||
@@ -994,6 +1023,12 @@ namespace MHServerEmu.Games.Entities
                     }
                 }
             }
+
+            // Trigger item loss event
+            InventoryPrototype inventoryProto = invLoc.InventoryPrototype;
+            int stackSize = item.CurrentStackSize;
+            if (stackSize > 0 && inventoryProto != null && (inventoryProto.IsPlayerGeneralInventory || inventoryProto.IsEquipmentInventory))
+                GetRegion()?.PlayerLostItemEvent.Invoke(new(this, item, -stackSize));
 
             // Adjust available ingredients for auto populated inputs
             AdjustCraftingIngredientAvailable(item.PrototypeDataRef, -item.CurrentStackSize, category);
@@ -1947,6 +1982,54 @@ namespace MHServerEmu.Games.Entities
             return HasAvatarAsStarter(avatar.PrototypeDataRef) && avatar.CharacterLevel >= Avatar.GetStarterAvatarLevelCap();
         }
 
+        public bool UnlockPowerSpecIndex(int index)
+        {
+            if (index < 0)
+                return false;
+
+            if (index > GameDatabase.AdvancementGlobalsPrototype.MaxPowerSpecIndexForAvatars)
+                return false;
+
+            // NOTE: Power specs are unlocked in order even though the client specifies spec prototypes in its requests
+            int nextSpecIndex = PowerSpecIndexUnlocked + 1;
+            if (nextSpecIndex != index)
+                return false;
+
+            Properties[PropertyEnum.PowerSpecIndexUnlocked] = nextSpecIndex;
+            return true;
+        }
+
+        public bool HasAvatarEmoteUnlocked(PrototypeId avatarProtoRef, PrototypeId emoteProtoRef)
+        {
+            return Properties.HasProperty(new PropertyId(PropertyEnum.AvatarEmoteUnlocked, avatarProtoRef, emoteProtoRef));
+        }
+
+        public bool UnlockAvatarEmote(PrototypeId avatarProtoRef, PrototypeId emoteProtoRef)
+        {
+            AvatarPrototype avatarProto = avatarProtoRef.As<AvatarPrototype>();
+            if (avatarProto == null) return Logger.WarnReturn(false, "UnlockAvatarEmote(): avatarProto == null");
+
+            PowerPrototype emoteProto = emoteProtoRef.As<PowerPrototype>();
+            if (emoteProto == null) return Logger.WarnReturn(false, "UnlockAvatarEmote(): emoteProto == null");
+            if (emoteProto.PowerCategory != PowerCategoryType.EmotePower) return Logger.WarnReturn(false, "UnlockAvatarEmote(): emoteProto.PowerCategory != PowerCategoryType.EmotePower");
+
+            if (HasAvatarEmoteUnlocked(avatarProtoRef, emoteProtoRef))
+                return Logger.WarnReturn(false, $"UnlockAvatarEmote(): Player [{this}] is attempting to unlock emote {emoteProtoRef.GetNameFormatted()} for {avatarProtoRef.GetNameFormatted()} that is already unlocked");
+
+            Properties[PropertyEnum.AvatarEmoteUnlocked, avatarProtoRef, emoteProtoRef] = true;
+
+            // Assign the newly unlocked emote power if needed
+            Avatar avatar = CurrentAvatar;
+            if (avatar != null && avatar.PrototypeDataRef == avatarProtoRef && avatar.IsInWorld && avatar.GetPower(emoteProtoRef) == null)
+            {
+                PowerIndexProperties indexProps = new(0, avatar.CharacterLevel, avatar.CombatLevel);
+                if (avatar.AssignPower(emoteProtoRef, indexProps) == null)
+                    return Logger.WarnReturn(false, $"UnlockAvatarEmote(): Failed to assign emote power {emoteProtoRef.GetNameFormatted()} to avatar [{avatar}]");
+            }
+
+            return true;
+        }
+
         public AvatarUnlockType GetAvatarUnlockType(PrototypeId avatarRef)
         {
             var avatarProto = GameDatabase.GetPrototype<AvatarPrototype>(avatarRef);
@@ -2303,7 +2386,7 @@ namespace MHServerEmu.Games.Entities
 
         public void OnFullscreenMovieStarted(PrototypeId movieRef)
         {
-            Logger.Trace($"OnFullscreenMovieStarted {GameDatabase.GetFormattedPrototypeName(movieRef)} for {_playerName}");
+            //Logger.Trace($"OnFullscreenMovieStarted {GameDatabase.GetFormattedPrototypeName(movieRef)} for {_playerName}");
             var movieProto = GameDatabase.GetPrototype<FullscreenMoviePrototype>(movieRef);
             if (movieProto == null) return;
             if (movieProto.MovieType == MovieType.Cinematic)
@@ -2317,7 +2400,7 @@ namespace MHServerEmu.Games.Entities
         {
             if (syncRequestId != 0 && syncRequestId < FullscreenMovieSyncRequestId) return;
 
-            Logger.Trace($"OnFullscreenMovieFinished {GameDatabase.GetFormattedPrototypeName(movieRef)} Canceled = {userCancelled} by {_playerName}");
+            //Logger.Trace($"OnFullscreenMovieFinished {GameDatabase.GetFormattedPrototypeName(movieRef)} Canceled = {userCancelled} by {_playerName}");
 
             var movieProto = GameDatabase.GetPrototype<FullscreenMoviePrototype>(movieRef);
             if (movieProto == null) return;
@@ -2442,22 +2525,48 @@ namespace MHServerEmu.Games.Entities
 
         public MapDiscoveryData GetMapDiscoveryData(ulong regionId)
         {
-            var manager = Game.RegionManager;
-            Region region = manager.GetRegion(regionId);
+            Region region = Game.RegionManager.GetRegion(regionId);
             if (region == null) return Logger.WarnReturn<MapDiscoveryData>(null, "GetMapDiscoveryData(): region == null");
 
+            // MapDiscoveryData for the current region is frequently accessed when avatars move around, so we cache it
+            if (_lastAccessedMapDiscoveryData != null && _lastAccessedMapDiscoveryData.RegionId == regionId)
+            {
+                _lastAccessedMapDiscoveryData.UpdateAccessTimestamp();
+                return _lastAccessedMapDiscoveryData;
+            }
+
+            // Retrieve or create the MapDiscoveryData for the specified region
             if (_mapDiscoveryDict.TryGetValue(regionId, out MapDiscoveryData mapDiscoveryData) == false)
             {
-                mapDiscoveryData = new(region);
+                // Remove the oldest saved map if capped
+                const int MaxDiscoveredMaps = 25;
+                if (_mapDiscoveryDict.Count >= MaxDiscoveredMaps)
+                {
+                    ulong oldestRegionId = 0;
+                    TimeSpan oldestAccessTimestamp = TimeSpan.MaxValue;
+                    
+                    foreach (var kvp in _mapDiscoveryDict)
+                    {
+                        TimeSpan accessTimestamp = kvp.Value.AccessTimestamp;
+                        if (accessTimestamp >= oldestAccessTimestamp)
+                            continue;
+
+                        oldestRegionId = kvp.Key;
+                        oldestAccessTimestamp = accessTimestamp;
+                    }
+
+                    _mapDiscoveryDict.Remove(oldestRegionId);
+                }
+
+                // Allocate new MapDiscoveryData
+                mapDiscoveryData = new(region.Id);
                 _mapDiscoveryDict.Add(regionId, mapDiscoveryData);
             }
 
-            // clear old regions if limit is reached
-            if (_mapDiscoveryDict.Count > 25)
-                foreach (var kvp in _mapDiscoveryDict)
-                    if (manager.GetRegion(kvp.Key) == null)
-                        _mapDiscoveryDict.Remove(kvp.Key);
-
+            // Refresh and cache the data
+            mapDiscoveryData.InitIfNecessary(region);
+            mapDiscoveryData.UpdateAccessTimestamp();
+            _lastAccessedMapDiscoveryData = mapDiscoveryData;
             return mapDiscoveryData;
         }
 
@@ -2515,6 +2624,24 @@ namespace MHServerEmu.Games.Entities
             // TODO party reveal
 
             return reveal;
+        }
+
+        private void CheckMapDiscoveryDataExpiration()
+        {
+            // Reset map discovery after 8 hours of not being accessed.
+            const int MapDiscoveryLifespanHours = 8;
+
+            TimeSpan threshold = TimeSpan.FromHours(MapDiscoveryLifespanHours);
+            TimeSpan currentTime = Game.Current.CurrentTime;
+
+            foreach (var kvp in _mapDiscoveryDict)
+            {
+                TimeSpan lifetime = currentTime - kvp.Value.AccessTimestamp;
+                if (lifetime < threshold)
+                    continue;
+
+                _mapDiscoveryDict.Remove(kvp.Key);
+            }
         }
 
         #endregion
@@ -2931,13 +3058,17 @@ namespace MHServerEmu.Games.Entities
             SendMessage(message);
         }
 
-        public void SendOpenUIPanel(AssetId panelNameId)
+        public bool SendOpenUIPanel(AssetId panelNameId)
         {
-            if (panelNameId == AssetId.Invalid) return;
+            if (panelNameId == AssetId.Invalid) return Logger.WarnReturn(false, "SendOpenUIPanel(): panelNameId == AssetId.Invalid");
+
             string panelName = GameDatabase.GetAssetName(panelNameId);
-            if (panelName == "Unknown") return;
-            var message = NetMessageOpenUIPanel.CreateBuilder().SetPanelName(panelName).Build();
+            if (panelName == "Unknown") return Logger.WarnReturn(false, "SendOpenUIPanel(): panelName == Unknown");
+
+            NetMessageOpenUIPanel message = NetMessageOpenUIPanel.CreateBuilder().SetPanelName(panelName).Build();
             SendMessage(message);
+
+            return true;
         }
 
         public void SendWaypointNotification(PrototypeId waypointRef, bool show = true)

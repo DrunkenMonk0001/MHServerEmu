@@ -2,9 +2,6 @@
 using MHServerEmu.Core.Config;
 using MHServerEmu.Core.Logging;
 using MHServerEmu.Core.Network;
-using MHServerEmu.DatabaseAccess.Json;
-using MHServerEmu.DatabaseAccess.MySQL;
-using MHServerEmu.DatabaseAccess;
 using MHServerEmu.DatabaseAccess.SQLite;
 using MHServerEmu.Games;
 
@@ -22,16 +19,25 @@ namespace MHServerEmu.Leaderboards
         private readonly LeaderboardDatabase _database = LeaderboardDatabase.Instance;
         private readonly LeaderboardRewardManager _rewardManager = new();
 
-        private bool _isRunning;
+        private bool _isEnabled;
+
+        public GameServiceState State { get; private set; } = GameServiceState.Created;
 
         #region IGameService Implementation
 
         public void Run()
         {
+            State = GameServiceState.Starting;
+
             var config = ConfigManager.Instance.GetConfig<GameOptionsConfig>();
-            _isRunning = config.LeaderboardsEnabled;
-            if (_isRunning == false)
+            _isEnabled = config.LeaderboardsEnabled;
+
+            if (_isEnabled == false)
+            {
+                State = GameServiceState.Running;
                 return;
+            }
+
             if (IDBManager.Instance.Equals(SQLiteDBManager.Instance))
             {
 
@@ -42,25 +48,36 @@ namespace MHServerEmu.Leaderboards
                 _database.Initialize(false);
             }
 
-            while (_isRunning)
-                {
-                    // Update state for instances
-                    _database.UpdateState();
+            State = GameServiceState.Running;
 
-                    // Process score updates
-                    _database.ProcessLeaderboardScoreUpdateQueue();
+            while (State == GameServiceState.Running)
+            {
+                // Update state for instances
+                _database.UpdateState();
 
-                    // Process rewards
-                    _rewardManager.Update();
+                // Process score updates
+                _database.ProcessLeaderboardScoreUpdateQueue();
 
-                    Thread.Sleep(UpdateTimeMS);
-                }
+                // Process rewards
+                _rewardManager.Update();
+
+                Thread.Sleep(UpdateTimeMS);
+            }
+
+            State = GameServiceState.Shutdown;
         }
 
         public void Shutdown() 
         {
-            _database?.Save();
-            _isRunning = false;
+            if (_isEnabled)
+            {
+                _database?.Save();
+                State = GameServiceState.ShuttingDown;
+            }
+            else
+            {
+                State = GameServiceState.Shutdown;
+            }
         }
 
         public void ReceiveServiceMessage<T>(in T message) where T : struct, IGameServiceMessage
