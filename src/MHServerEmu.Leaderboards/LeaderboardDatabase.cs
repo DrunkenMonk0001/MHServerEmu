@@ -36,7 +36,7 @@ namespace MHServerEmu.Leaderboards
         private readonly DoubleBufferQueue<GameServiceProtocol.LeaderboardScoreUpdateBatch> _scoreUpdateQueue = new();
 
         public bool IsInitialized { get; private set; }
-        public SQLiteLeaderboardDBManager DBManager { get; private set; }
+        public dynamic DBManager { get; private set; }
         public int LeaderboardCount { get => _leaderboards.Count; }
         public static LeaderboardDatabase Instance { get; } = new();
 

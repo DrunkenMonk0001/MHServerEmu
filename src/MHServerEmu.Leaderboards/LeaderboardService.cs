@@ -38,7 +38,7 @@ namespace MHServerEmu.Leaderboards
                 return;
             }
 
-            if (IDBManager.Instance.Equals(SQLiteDBManager.Instance))
+            if (DatabaseAccess.IDBManager.Instance.Equals(SQLiteDBManager.Instance))
             {
 
                 _database.Initialize(true);
