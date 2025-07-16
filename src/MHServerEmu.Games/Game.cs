@@ -193,8 +193,12 @@ namespace MHServerEmu.Games
         {
             if (IsRunning == false || HasBeenShutDown)
                 return;
-
             IsRunning = false;
+            if ((endTime - startTime) > FixedTimeBetweenUpdates)
+                NextUpdateTime = endTime/* + FixedTimeBetweenUpdates*/;   // Give games that are lagging higher priority until we have proper load balancing
+            else
+                NextUpdateTime = startTime + FixedTimeBetweenUpdates;
+
         }
 
         public void AddClient(IFrontendClient client)

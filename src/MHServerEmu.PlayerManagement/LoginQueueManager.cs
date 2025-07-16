@@ -39,6 +39,36 @@ namespace MHServerEmu.PlayerManagement
         {
             _newClientQueue.Enqueue(client);
         }
+        
+        public bool RemovePendingClient(IFrontendClient client)
+        {
+            if (_pendingClients.Remove(client) == false)
+                return Logger.WarnReturn(false, $"RemovePendingClient(): Client [{client}] is not in the pending client collection");
+
+            return true;
+        }
+
+        /// <summary>
+        /// Disconnects clients that have successfully passed the login queue, but are not responding.
+        /// </summary>
+        private void TimeOutPendingClients()
+        {
+            TimeSpan now = Clock.UnixTime;
+
+            foreach (var kvp in _pendingClients)
+            {
+                if ((now - kvp.Value) <= PendingClientTimeout)
+                    continue;
+
+                IFrontendClient client = kvp.Key;
+
+                Logger.Warn($"Client [{client}] timed out after passing the login queue");
+
+                _pendingClients.Remove(client);
+                client.Disconnect();
+                RemoveClientSession(client);
+            }
+        }
 
         /// <summary>
         /// Accepts asynchronously added clients to the login queue.
