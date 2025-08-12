@@ -25,7 +25,6 @@ namespace MHServerEmu.DatabaseAccess.SQLite
         private string _connectionString;
 
         private int _maxBackupNumber;
-
         private CooldownTimer _backupTimer;
         private volatile bool _backupInProgress;
 
@@ -54,9 +53,8 @@ namespace MHServerEmu.DatabaseAccess.SQLite
             }
 
             _maxBackupNumber = config.MaxBackupNumber;
-            _backupInterval = TimeSpan.FromMinutes(config.BackupIntervalMinutes);
-            _lastBackupTime = Clock.GameTime;
-            
+            _backupTimer = new(TimeSpan.FromMinutes(config.BackupIntervalMinutes));
+
             Logger.Info($"Using database file {FileHelper.GetRelativePath(_dbFilePath)}");
             return true;
         }
@@ -74,7 +72,7 @@ namespace MHServerEmu.DatabaseAccess.SQLite
         public bool TryGetPlayerName(ulong id, out string playerName)
         {
             using SQLiteConnection connection = GetConnection();
-            
+
             playerName = connection.QueryFirstOrDefault<string>("SELECT PlayerName FROM Account WHERE Id = @Id", new { Id = (long)id });
 
             return string.IsNullOrWhiteSpace(playerName) == false;
@@ -83,7 +81,7 @@ namespace MHServerEmu.DatabaseAccess.SQLite
         public bool GetPlayerNames(Dictionary<ulong, string> playerNames)
         {
             using SQLiteConnection connection = GetConnection();
-            
+
             var accounts = connection.Query<DBAccount>("SELECT Id, PlayerName FROM Account");
 
             foreach (DBAccount account in accounts)
@@ -360,18 +358,6 @@ namespace MHServerEmu.DatabaseAccess.SQLite
         /// </summary>
         private void CreateBackup()
         {
-<<<<<<< HEAD
-            // TODO: Use SQLite backup functionality for this
-            TimeSpan now = Clock.GameTime;
-
-            if ((now - _lastBackupTime) < _backupInterval)
-                return;
-
-            if (FileHelper.CreateFileBackup(_dbFilePath, _maxBackupNumber))
-                Logger.Info("Created database file backup");
-
-            _lastBackupTime = now;
-=======
             try
             {
                 Logger.Info("Starting database backup...");
@@ -396,7 +382,6 @@ namespace MHServerEmu.DatabaseAccess.SQLite
             {
                 _backupInProgress = false;
             }
->>>>>>> upstream/master
         }
 
         /// <summary>
@@ -462,9 +447,9 @@ namespace MHServerEmu.DatabaseAccess.SQLite
             {
                 SelectAll = @$"SELECT * FROM {category} WHERE ContainerDbGuid = @ContainerDbGuid";
                 SelectIds = @$"SELECT DbGuid FROM {category} WHERE ContainerDbGuid = @ContainerDbGuid";
-                Delete    = @$"DELETE FROM {category} WHERE DbGuid IN @EntitiesToDelete";
-                Insert    = @$"INSERT OR IGNORE INTO {category} (DbGuid) VALUES (@DbGuid)";
-                Update    = @$"UPDATE {category} SET ContainerDbGuid=@ContainerDbGuid, InventoryProtoGuid=@InventoryProtoGuid,
+                Delete = @$"DELETE FROM {category} WHERE DbGuid IN @EntitiesToDelete";
+                Insert = @$"INSERT OR IGNORE INTO {category} (DbGuid) VALUES (@DbGuid)";
+                Update = @$"UPDATE {category} SET ContainerDbGuid=@ContainerDbGuid, InventoryProtoGuid=@InventoryProtoGuid,
                                Slot=@Slot, EntityProtoGuid=@EntityProtoGuid, ArchiveData=@ArchiveData WHERE DbGuid=@DbGuid";
             }
 

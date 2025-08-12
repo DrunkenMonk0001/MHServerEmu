@@ -170,19 +170,19 @@ namespace MHServerEmu.DatabaseAccess.MySQL
                 Logger.Info($"Initialized player data for account 0x{account.Id:X}");
             }
 
-            account.Avatars.AddRange(LoadEntitiesFromTable(connection, "Avatar", account.Id));
-            account.TeamUps.AddRange(LoadEntitiesFromTable(connection, "TeamUp", account.Id));
-            account.Items.AddRange(LoadEntitiesFromTable(connection, "Item", account.Id));
+            account.Avatars.AddRange(LoadEntitiesFromTable(connection, DBEntityCategory.Avatar, account.Id));
+            account.TeamUps.AddRange(LoadEntitiesFromTable(connection, DBEntityCategory.TeamUp, account.Id));
+            account.Items.AddRange(LoadEntitiesFromTable(connection, DBEntityCategory.Item, account.Id));
 
             foreach (DBEntity avatar in account.Avatars)
             {
-                account.Items.AddRange(LoadEntitiesFromTable(connection, "Item", avatar.DbGuid));
-                account.ControlledEntities.AddRange(LoadEntitiesFromTable(connection, "ControlledEntity", avatar.DbGuid));
+                account.Items.AddRange(LoadEntitiesFromTable(connection, DBEntityCategory.Item, avatar.DbGuid));
+                account.ControlledEntities.AddRange(LoadEntitiesFromTable(connection, DBEntityCategory.ControlledEntity, avatar.DbGuid));
             }
 
             foreach (DBEntity teamUp in account.TeamUps)
             {
-                account.Items.AddRange(LoadEntitiesFromTable(connection, "Item", teamUp.DbGuid));
+                account.Items.AddRange(LoadEntitiesFromTable(connection, DBEntityCategory.Item, teamUp.DbGuid));
             }
 
             return true;
@@ -358,28 +358,30 @@ namespace MHServerEmu.DatabaseAccess.MySQL
                     connection.Execute("SET FOREIGN_KEY_CHECKS=0;", transaction: transaction);
                     if (account.Player != null)
                     {
-                        connection.Execute(@"INSERT INTO Player (DbGuid) VALUES (@DbGuid) ON DUPLICATE KEY UPDATE DbGuid=@DbGuid", account.Player, transaction);
-                        connection.Execute(@"UPDATE Player SET ArchiveData=@ArchiveData, StartTarget=@StartTarget,
-                                    StartTargetRegionOverride=@StartTargetRegionOverride, AOIVolume=@AOIVolume, GazillioniteBalance=@GazillioniteBalance WHERE DbGuid = @DbGuid",
-                                    account.Player, transaction);
+                        connection.Execute(@$"INSERT IGNORE INTO Player (DbGuid) VALUES (@DbGuid)", account.Player, transaction);
+                        connection.Execute(@$"UPDATE Player SET ArchiveData=@ArchiveData, StartTarget=@StartTarget,
+                                            AOIVolume=@AOIVolume, GazillioniteBalance=@GazillioniteBalance WHERE DbGuid = @DbGuid",
+                                            account.Player, transaction);
                     }
                     else
                     {
                         Logger.Warn($"DoSavePlayerData(): Attempted to save null player entity data for account {account}");
                     }
-                    UpdateEntityTable(connection, transaction, "Avatar", account.Id, account.Avatars);
-                    UpdateEntityTable(connection, transaction, "TeamUp", account.Id, account.TeamUps);
-                    UpdateEntityTable(connection, transaction, "Item", account.Id, account.Items);
+                    // Update inventory entities
+                    UpdateEntityTable(connection, transaction, DBEntityCategory.Avatar, account.Id, account.Avatars);
+                    UpdateEntityTable(connection, transaction, DBEntityCategory.TeamUp, account.Id, account.TeamUps);
+                    UpdateEntityTable(connection, transaction, DBEntityCategory.Item, account.Id, account.Items);
+
                     foreach (DBEntity avatar in account.Avatars)
                     {
-                        UpdateEntityTable(connection, transaction, "Item", avatar.DbGuid, account.Items);
-                        UpdateEntityTable(connection, transaction, "ControlledEntity", avatar.DbGuid, account.ControlledEntities);
+                        UpdateEntityTable(connection, transaction, DBEntityCategory.Item, avatar.DbGuid, account.Items);
+                        UpdateEntityTable(connection, transaction, DBEntityCategory.ControlledEntity, avatar.DbGuid, account.ControlledEntities);
                     }
+
                     foreach (DBEntity teamUp in account.TeamUps)
                     {
-                        UpdateEntityTable(connection, transaction, "Item", teamUp.DbGuid, account.Items);
+                        UpdateEntityTable(connection, transaction, DBEntityCategory.Item, teamUp.DbGuid, account.Items);
                     }
-                    connection.Execute("SET FOREIGN_KEY_CHECKS=1;", transaction: transaction);
                     transaction.Commit();
                     return true;
                 }
@@ -414,32 +416,59 @@ namespace MHServerEmu.DatabaseAccess.MySQL
 
         /// Loads <see cref="DBEntity"/> instances belonging to the specified container from the specified table.
 
-        private static IEnumerable<DBEntity> LoadEntitiesFromTable(MySqlConnection connection, string tableName, long containerDbGuid)
+        private static IEnumerable<DBEntity> LoadEntitiesFromTable(MySqlConnection connection, DBEntityCategory category, long containerDbGuid)
         {
+            EntityQueryCache queries = EntityQueryCache.GetQueries(category);
             var @params = new { ContainerDbGuid = containerDbGuid };
-            return connection.Query<DBEntity>($"SELECT * FROM {tableName} WHERE ContainerDbGuid = @ContainerDbGuid", @params);
+            return connection.Query<DBEntity>(queries.SelectAll, @params);
         }
 
 
         /// Updates <see cref="DBEntity"/> instances belonging to the specified container in the specified table using the provided <see cref="DBEntityCollection"/>.
 
-        private static void UpdateEntityTable(MySqlConnection connection, MySqlTransaction transaction, string tableName,
+        private static void UpdateEntityTable(MySqlConnection connection, MySqlTransaction transaction, DBEntityCategory category,
             long containerDbGuid, DBEntityCollection dbEntityCollection)
         {
-            var @params = new { ContainerDbGuid = containerDbGuid };
-
-            // Delete items that no longer belong to this account
-            var storedEntities = connection.Query<long>($"SELECT DbGuid FROM {tableName} WHERE ContainerDbGuid = @ContainerDbGuid", @params);
+            EntityQueryCache queries = EntityQueryCache.GetQueries(category);
+            var storedEntities = connection.Query<long>(queries.SelectIds, new { ContainerDbGuid = containerDbGuid });
             var entitiesToDelete = storedEntities.Except(dbEntityCollection.Guids);
-            if (entitiesToDelete.Any()) connection.Execute($"DELETE FROM {tableName} WHERE DbGuid IN ({string.Join(',', entitiesToDelete)})");
+            connection.Execute(queries.Delete, new { EntitiesToDelete = entitiesToDelete });
 
-            // Insert and update
             IEnumerable<DBEntity> entries = dbEntityCollection.GetEntriesForContainer(containerDbGuid);
+            connection.Execute(queries.Insert, entries, transaction);
+            connection.Execute(queries.Update, entries, transaction);
+        }
 
-            connection.Execute(@$"INSERT IGNORE INTO {tableName} (DbGuid) VALUES (@DbGuid)", entries, transaction);
-            connection.Execute(@$"UPDATE {tableName} SET ContainerDbGuid=@ContainerDbGuid, InventoryProtoGuid=@InventoryProtoGuid,
-                                Slot=@Slot, EntityProtoGuid=@EntityProtoGuid, ArchiveData=@ArchiveData WHERE DbGuid=@DbGuid",
-                                entries, transaction);
+        /// Query cache for entity operations
+        private class EntityQueryCache
+        {
+            private static readonly Dictionary<DBEntityCategory, EntityQueryCache> QueryDict = new();
+
+            public string SelectAll { get; }
+            public string SelectIds { get; }
+            public string Delete { get; }
+            public string Insert { get; }
+            public string Update { get; }
+
+            private EntityQueryCache(DBEntityCategory category)
+            {
+                SelectAll = @$"SELECT * FROM {category} WHERE ContainerDbGuid = @ContainerDbGuid";
+                SelectIds = @$"SELECT DbGuid FROM {category} WHERE ContainerDbGuid = @ContainerDbGuid";
+                Delete = @$"DELETE FROM {category} WHERE DbGuid IN @EntitiesToDelete";
+                Insert = @$"INSERT IGNORE INTO {category} (DbGuid) VALUES (@DbGuid)";
+                Update = @$"UPDATE {category} SET ContainerDbGuid=@ContainerDbGuid, InventoryProtoGuid=@InventoryProtoGuid,
+                                   Slot=@Slot, EntityProtoGuid=@EntityProtoGuid, ArchiveData=@ArchiveData WHERE DbGuid=@DbGuid";
+            }
+
+            public static EntityQueryCache GetQueries(DBEntityCategory category)
+            {
+                if (QueryDict.TryGetValue(category, out EntityQueryCache queries) == false)
+                {
+                    queries = new(category);
+                    QueryDict.Add(category, queries);
+                }
+                return queries;
+            }
         }
 
         public static string DumpSQLiteDatabase(string dbFilePath, bool isExist)
