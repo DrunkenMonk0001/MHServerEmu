@@ -5,6 +5,7 @@ using MHServerEmu.DatabaseAccess.MySqlDB;
 using MySql.Data.MySqlClient;
 using MHServerEmu.Core.Helpers;
 using MHServerEmu.DatabaseAccess.Models.Leaderboards;
+using MHServerEmu.DatabaseAccess.MySQL;
 
 
 namespace MHServerEmu.DatabaseAccess.MySQL
@@ -43,7 +44,7 @@ namespace MHServerEmu.DatabaseAccess.MySQL
         private bool InitializeDatabaseFile()
         {
 
-            string MySqlInitializationScript = MySqlA.MySQLScripts.GetLeaderboardsScript();
+            string MySqlInitializationScript = MySqlScripts.GetLeaderboardsScript();
             var config = ConfigManager.Instance.GetConfig<MySqlDBManagerConfig>();
             if (MySqlInitializationScript == string.Empty)
                 return Logger.ErrorReturn(false, "InitializeDatabaseFile(): Failed to get database initialization script");

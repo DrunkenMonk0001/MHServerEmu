@@ -4,7 +4,6 @@ using MHServerEmu.Core.Logging;
 using MHServerEmu.Core.System.Time;
 using MHServerEmu.DatabaseAccess.Models;
 using MHServerEmu.DatabaseAccess.MySqlDB;
-using MHServerEmu.DatabaseAccess.MySqlA;
 using MySql.Data.MySqlClient;
 using MHServerEmu.Core.Helpers;
 using MHServerEmu.DatabaseAccess.SQLite;
@@ -19,7 +18,7 @@ namespace MHServerEmu.DatabaseAccess.MySQL
     /// </summary>
     public class MySQLDBManager : IDBManager
     {
-        private const int CurrentSchemaVersion = 3;         // Increment this when making changes to the database schema
+        private const int CurrentSchemaVersion = 4;         // Increment this when making changes to the database schema
         private const int NumTestAccounts = 5;              // Number of test accounts to create for new databases
         private const int NumPlayerDataWriteAttempts = 3;   // Number of write attempts to do when saving player data
         public bool isSchemaExist;
@@ -110,8 +109,8 @@ namespace MHServerEmu.DatabaseAccess.MySQL
         {
             using MySqlConnection connection = GetConnection();
 
-            // This check is innately case insensitive
-            var results = connection.Query<string>("SELECT PlayerName FROM Account WHERE PlayerName = @PlayerName", new { PlayerName = playerName });
+            // This check is now explicitly case insensitive using collation
+            var results = connection.Query<string>("SELECT PlayerName FROM Account WHERE PlayerName = @PlayerName COLLATE utf8mb4_general_ci", new { PlayerName = playerName });
             return results.Any();
         }
 
@@ -218,7 +217,7 @@ namespace MHServerEmu.DatabaseAccess.MySQL
 
         private bool InitializeDatabaseFile()
         {
-            string MySqlInitializationScript = MySqlA.MySQLScripts.GetInitializationScript();
+            string MySqlInitializationScript = MySqlScripts.GetInitializationScript();
             var config = ConfigManager.Instance.GetConfig<MySqlDBManagerConfig>();
             if (MySqlInitializationScript == string.Empty)
                 return Logger.ErrorReturn(false, "InitializeDatabaseFile(): Failed to get database initialization script");
@@ -317,7 +316,7 @@ namespace MHServerEmu.DatabaseAccess.MySQL
                 {
                     Logger.Info($"Migrating version {schemaVersion} => {schemaVersion + 1}...");
 
-                    string migrationScript = MySQLScripts.GetMigrationScript(schemaVersion);
+                    string migrationScript = MySqlScripts.GetMigrationScript(schemaVersion);
                     if (migrationScript == string.Empty)
                     {
                         Logger.Error($"MigrateDatabaseFileToCurrentSchema(): Failed to get database migration script for version {schemaVersion}");
@@ -354,42 +353,34 @@ namespace MHServerEmu.DatabaseAccess.MySQL
             {
                 using MySqlConnection connection = GetConnection();
                 using MySqlTransaction transaction = connection.BeginTransaction();
-
                 try
                 {
                     connection.Execute("SET FOREIGN_KEY_CHECKS=0;", transaction: transaction);
-
                     if (account.Player != null)
                     {
                         connection.Execute(@"INSERT INTO Player (DbGuid) VALUES (@DbGuid) ON DUPLICATE KEY UPDATE DbGuid=@DbGuid", account.Player, transaction);
                         connection.Execute(@"UPDATE Player SET ArchiveData=@ArchiveData, StartTarget=@StartTarget,
-                                            StartTargetRegionOverride=@StartTargetRegionOverride, AOIVolume=@AOIVolume WHERE DbGuid = @DbGuid",
-                                            account.Player, transaction);
+                                    StartTargetRegionOverride=@StartTargetRegionOverride, AOIVolume=@AOIVolume, GazillioniteBalance=@GazillioniteBalance WHERE DbGuid = @DbGuid",
+                                    account.Player, transaction);
                     }
                     else
                     {
                         Logger.Warn($"DoSavePlayerData(): Attempted to save null player entity data for account {account}");
                     }
-
                     UpdateEntityTable(connection, transaction, "Avatar", account.Id, account.Avatars);
                     UpdateEntityTable(connection, transaction, "TeamUp", account.Id, account.TeamUps);
                     UpdateEntityTable(connection, transaction, "Item", account.Id, account.Items);
-
                     foreach (DBEntity avatar in account.Avatars)
                     {
                         UpdateEntityTable(connection, transaction, "Item", avatar.DbGuid, account.Items);
                         UpdateEntityTable(connection, transaction, "ControlledEntity", avatar.DbGuid, account.ControlledEntities);
                     }
-
                     foreach (DBEntity teamUp in account.TeamUps)
                     {
                         UpdateEntityTable(connection, transaction, "Item", teamUp.DbGuid, account.Items);
                     }
-
                     connection.Execute("SET FOREIGN_KEY_CHECKS=1;", transaction: transaction);
-
                     transaction.Commit();
-
                     return true;
                 }
                 catch (Exception e)
