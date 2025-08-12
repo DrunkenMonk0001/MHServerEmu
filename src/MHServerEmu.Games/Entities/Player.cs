@@ -7,6 +7,7 @@ using MHServerEmu.Core.Extensions;
 using MHServerEmu.Core.Helpers;
 using MHServerEmu.Core.Logging;
 using MHServerEmu.Core.Memory;
+using MHServerEmu.Core.Network;
 using MHServerEmu.Core.Serialization;
 using MHServerEmu.Core.System.Time;
 using MHServerEmu.Core.VectorMath;
@@ -86,6 +87,7 @@ namespace MHServerEmu.Games.Entities
         private readonly EventPointer<CheckHoursPlayedEvent> _checkHoursPlayedEvent = new();
         private readonly EventPointer<ScheduledHUDTutorialResetEvent> _hudTutorialResetEvent = new();
         private readonly EventPointer<CommunityBroadcastEvent> _communityBroadcastEvent = new();
+        private readonly EventPointer<WorldViewUpdateEvent> _worldViewUpdateEvent = new();
         private readonly EventGroup _pendingEvents = new();
 
         private ReplicatedPropertyCollection _avatarProperties = new();
@@ -594,11 +596,6 @@ namespace MHServerEmu.Games.Entities
                     area.PopulationArea?.UpdateSpawnMap(position);
         }
 
-        public bool ViewedRegion(ulong regionId)
-        {
-            return PlayerConnection.WorldView.ContainsRegionInstanceId(regionId);
-        }
-
         public MetaGameTeam GetPvPTeam()
         {
             Region region = GetRegion();
@@ -618,6 +615,27 @@ namespace MHServerEmu.Games.Entities
             }
 
             return null;
+        }
+
+        public bool IsRegionInWorldView(ulong regionId)
+        {
+            return PlayerConnection.WorldView.ContainsRegion(regionId);
+        }
+
+        public void ScheduleWorldViewUpdate()
+        {
+            if (_worldViewUpdateEvent.IsValid)
+                return;
+
+            ScheduleEntityEvent(_worldViewUpdateEvent, TimeSpan.Zero);
+        }
+
+        private void OnWorldViewUpdate()
+        {
+            // Remove bodyslide return parameters if the region is no longer available
+            ulong bodySliderRegionId = Properties[PropertyEnum.BodySliderRegionId];
+            if (bodySliderRegionId != 0 && IsRegionInWorldView(bodySliderRegionId) == false)
+                RemoveBodysliderProperties();
         }
 
         #endregion
@@ -1755,25 +1773,42 @@ namespace MHServerEmu.Games.Entities
 
             if (avatarProtoRef == PrototypeId.Invalid) return Logger.WarnReturn(false, "SwitchAvatar(): Failed to find pending avatar switch");
 
+            Region region = GetRegion();
+            if (region == null) return Logger.WarnReturn(false, "SwitchAvatar(): region == null");
+
             // Get information about the previous avatar
-            ulong lastCurrentAvatarId = CurrentAvatar != null ? CurrentAvatar.Id : InvalidId;
-            ulong prevRegionId = CurrentAvatar.RegionLocation.RegionId;
-            Vector3 prevPosition = CurrentAvatar.RegionLocation.Position;
-            Orientation prevOrientation = CurrentAvatar.RegionLocation.Orientation;
+            Avatar currentAvatar = CurrentAvatar;
+
+            ulong lastCurrentAvatarId = currentAvatar.Id;
+            ulong prevRegionId = currentAvatar.RegionLocation.RegionId;
+            Vector3 avatarPosition = currentAvatar.RegionLocation.Position;
+            Orientation avatarOrientation = currentAvatar.RegionLocation.Orientation;
 
             // Find the avatar to switch to
             Inventory avatarLibrary = GetInventory(InventoryConvenienceLabel.AvatarLibrary);
             Inventory avatarInPlay = GetInventory(InventoryConvenienceLabel.AvatarInPlay);
 
-            if (avatarLibrary.GetMatchingEntity(avatarProtoRef) is not Avatar avatar)
+            if (avatarLibrary.GetMatchingEntity(avatarProtoRef) is not Avatar nextAvatar)
                 return Logger.WarnReturn(false, $"SwitchAvatar(): Failed to find avatar entity for avatarProtoRef {GameDatabase.GetPrototypeName(avatarProtoRef)}");
 
+            // Adjust entrance position if needed
+            if (nextAvatar.AvatarPrototype.Bounds is not CapsuleBoundsPrototype boundsProto)
+                return Logger.WarnReturn(false, $"SwitchAvatar(): Failed to get avatar bounds for avatar [{nextAvatar}]");
+
+            // Disable collisions for the check
+            currentAvatar.Properties[PropertyEnum.NoEntityCollide] = true;
+            bool isPositionValid = Avatar.AdjustStartPositionIfNeeded(region, ref avatarPosition, false, boundsProto.Radius);
+            currentAvatar.Properties[PropertyEnum.NoEntityCollide] = false;
+
+            if (isPositionValid == false)
+                return false;
+
             // Remove non-persistent conditions from the current avatar
-            ConditionCollection previousConditions = CurrentAvatar?.ConditionCollection;
+            ConditionCollection previousConditions = currentAvatar.ConditionCollection;
             previousConditions?.RemoveAllConditions(false);
 
             // Do the switch
-            InventoryResult result = avatar.ChangeInventoryLocation(avatarInPlay, 0);
+            InventoryResult result = nextAvatar.ChangeInventoryLocation(avatarInPlay, 0);
 
             if (result != InventoryResult.Success)
                 return Logger.WarnReturn(false, $"SwitchAvatar(): Failed to change library avatar's inventory location ({result})");
@@ -1785,13 +1820,26 @@ namespace MHServerEmu.Games.Entities
             if (previousConditions != null && currentConditions != null)
                 currentConditions.TransferConditionsFrom(previousConditions);
 
-            EnableCurrentAvatar(true, lastCurrentAvatarId, prevRegionId, prevPosition, prevOrientation);
+            EnableCurrentAvatar(true, lastCurrentAvatarId, prevRegionId, avatarPosition, avatarOrientation);
 
             IsSwitchingAvatar = false;
 
+            // Unreserve private story regions so that the avatar we switched to can do the story without fiddling with region instances.
+            ServiceMessage.ClearPrivateStoryRegions clearPrivateStoryRegions = new(DatabaseUniqueId);
+            ServerManager.Instance.SendMessageToService(GameServiceType.PlayerManager, clearPrivateStoryRegions);
+
+            // Remove bodyslider properties if they are for a private story region, which should no longer be accessible.
+            if (HasBodysliderProperties())
+            {
+                PrototypeId bodysliderRegionProtoRef = Properties[PropertyEnum.BodySliderRegionRef];
+                RegionPrototype regionProto = bodysliderRegionProtoRef.As<RegionPrototype>();
+                if (regionProto != null && regionProto.Behavior == RegionBehavior.PrivateStory)
+                    RemoveBodysliderProperties();
+            }
+
             ScheduleCommunityBroadcast();
 
-            GetRegion()?.PlayerSwitchedToAvatarEvent.Invoke(new(this, avatarProtoRef));
+            region.PlayerSwitchedToAvatarEvent.Invoke(new(this, avatarProtoRef));
 
             return true;
         }
@@ -2479,11 +2527,17 @@ namespace MHServerEmu.Games.Entities
             QueueLoadingScreen(regionId);
         }
 
-        public void TEMP_ScheduleMoveToTarget(PrototypeId targetProtoRef, TimeSpan delay)
+        public bool HasBodysliderProperties()
         {
-            // REMOVEME: Get rid of this when we overhaul the teleport system
-            EventPointer<MoveToTargetEvent> moveToTargetEvent = new();
-            ScheduleEntityEvent(moveToTargetEvent, delay, targetProtoRef);
+            return Properties[PropertyEnum.BodySliderRegionId] != 0ul &&
+                   Properties[PropertyEnum.BodySliderRegionRef] != PrototypeId.Invalid &&
+                   Properties[PropertyEnum.BodySliderDifficultyRef] != PrototypeId.Invalid;
+        }
+
+        public void RemoveBodysliderProperties()
+        {
+            foreach (PropertyEnum prop in Property.BodysliderProperties)
+                Properties.RemoveProperty(prop);
         }
 
         public void OnCellLoaded(uint cellId, ulong regionId)
@@ -2624,6 +2678,39 @@ namespace MHServerEmu.Games.Entities
             // TODO party reveal
 
             return reveal;
+        }
+
+        public void ResetMapDiscoveryForStoryWarp()
+        {
+            PrototypeId chapterProtoRef = ActiveChapter;
+            if (chapterProtoRef == PrototypeId.Invalid)
+                return;
+
+            ChapterPrototype chapterProto = chapterProtoRef.As<ChapterPrototype>();
+            if (chapterProto == null)
+                return;
+
+            int chapterNumber = chapterProto.ChapterNumber;
+
+            foreach (var kvp in _mapDiscoveryDict)
+            {
+                PrototypeId regionProtoRef = kvp.Value.RegionProtoRef;
+                if (regionProtoRef == PrototypeId.Invalid)
+                    continue;
+
+                RegionPrototype regionProto = regionProtoRef.As<RegionPrototype>();
+                if (regionProto == null)
+                    continue;
+
+                ChapterPrototype regionChapterProto = regionProto.Chapter.As<ChapterPrototype>();
+                if (regionChapterProto == null)
+                    continue;
+
+                if (regionChapterProto.ChapterNumber >= chapterNumber)
+                    _mapDiscoveryDict.Remove(kvp.Key);
+            }
+
+            _lastAccessedMapDiscoveryData = null;
         }
 
         private void CheckMapDiscoveryDataExpiration()
@@ -3478,14 +3565,14 @@ namespace MHServerEmu.Games.Entities
             protected override CallbackDelegate GetCallback() => (player) => player.CheckHoursPlayed();
         }
 
-        private class MoveToTargetEvent : CallMethodEventParam1<Entity, PrototypeId>
-        {
-            protected override CallbackDelegate GetCallback() => (t, p1) => ((Player)t).PlayerConnection.MoveToTarget(p1);
-        }
-
         private class CommunityBroadcastEvent : CallMethodEvent<Entity>
         {
             protected override CallbackDelegate GetCallback() => (t) => ((Player)t).DoCommunityBroadcast();
+        }
+
+        private class WorldViewUpdateEvent : CallMethodEvent<Entity>
+        {
+            protected override CallbackDelegate GetCallback() => (t) => ((Player)t).OnWorldViewUpdate();
         }
 
         #endregion
