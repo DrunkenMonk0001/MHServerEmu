@@ -427,41 +427,54 @@ namespace MHServerEmu.DatabaseAccess.MySQL
         /// Updates <see cref="DBEntity"/> instances belonging to the specified container in the specified table using the provided <see cref="DBEntityCollection"/>.
 
         private static void UpdateEntityTable(MySqlConnection connection, MySqlTransaction transaction, DBEntityCategory category,
-            long containerDbGuid, DBEntityCollection dbEntityCollection)
+    long containerDbGuid, DBEntityCollection dbEntityCollection)
+{
+    EntityQueryCache queries = EntityQueryCache.GetQueries(category);
+
+    // 1. Find and delete entities that are in the DB but not in the in-memory collection
+    var storedEntities = connection.Query<long>(queries.SelectIds, new { ContainerDbGuid = containerDbGuid }).ToList();
+    var currentGuids = dbEntityCollection.GetEntriesForContainer(containerDbGuid).Select(e => e.DbGuid).ToHashSet();
+    var entitiesToDelete = storedEntities.Except(currentGuids).ToList();
+    if (entitiesToDelete.Count > 0)
+    {
+        connection.Execute(
+            $"DELETE FROM {category} WHERE DbGuid IN @EntitiesToDelete",
+            new { EntitiesToDelete = entitiesToDelete },
+            transaction
+        );
+    }
+
+    // 2. Upsert only dirty entities
+    var dirtyEntities = dbEntityCollection.GetEntriesForContainer(containerDbGuid)
+        .Where(e => e.IsDirty)
+        .ToList();
+    if (dirtyEntities.Count > 0)
+    {
+        var sql = new StringBuilder();
+        sql.Append($"INSERT INTO {category} (DbGuid, ContainerDbGuid, InventoryProtoGuid, Slot, EntityProtoGuid, ArchiveData) VALUES ");
+        var parameters = new DynamicParameters();
+        for (int i = 0; i < dirtyEntities.Count; i++)
         {
-            // Only operate on dirty entities
-            var dirtyEntities = dbEntityCollection.GetEntriesForContainer(containerDbGuid)
-                .Where(e => e.IsDirty)
-                .ToList();
-            if (dirtyEntities.Count == 0)
-                return;
-
-            // Build bulk upsert SQL
-            var sql = new StringBuilder();
-            sql.Append($"INSERT INTO {category} (DbGuid, ContainerDbGuid, InventoryProtoGuid, Slot, EntityProtoGuid, ArchiveData) VALUES ");
-            var parameters = new DynamicParameters();
-            for (int i = 0; i < dirtyEntities.Count; i++)
-            {
-                var e = dirtyEntities[i];
-                if (i > 0) sql.Append(",");
-                sql.Append($"(@DbGuid{i}, @ContainerDbGuid{i}, @InventoryProtoGuid{i}, @Slot{i}, @EntityProtoGuid{i}, @ArchiveData{i})");
-                parameters.Add($"DbGuid{i}", e.DbGuid);
-                parameters.Add($"ContainerDbGuid{i}", e.ContainerDbGuid);
-                parameters.Add($"InventoryProtoGuid{i}", e.InventoryProtoGuid);
-                parameters.Add($"Slot{i}", e.Slot);
-                parameters.Add($"EntityProtoGuid{i}", e.EntityProtoGuid);
-                parameters.Add($"ArchiveData{i}", e.ArchiveData);
-            }
-            sql.Append(" ON DUPLICATE KEY UPDATE ");
-            sql.Append("ContainerDbGuid=VALUES(ContainerDbGuid), InventoryProtoGuid=VALUES(InventoryProtoGuid), ");
-            sql.Append("Slot=VALUES(Slot), EntityProtoGuid=VALUES(EntityProtoGuid), ArchiveData=VALUES(ArchiveData);");
-
-            connection.Execute(sql.ToString(), parameters, transaction);
-
-            // Clear dirty flag
-            foreach (var entity in dirtyEntities)
-                entity.IsDirty = false;
+            var e = dirtyEntities[i];
+            if (i > 0) sql.Append(",");
+            sql.Append($"(@DbGuid{i}, @ContainerDbGuid{i}, @InventoryProtoGuid{i}, @Slot{i}, @EntityProtoGuid{i}, @ArchiveData{i})");
+            parameters.Add($"DbGuid{i}", e.DbGuid);
+            parameters.Add($"ContainerDbGuid{i}", e.ContainerDbGuid);
+            parameters.Add($"InventoryProtoGuid{i}", e.InventoryProtoGuid);
+            parameters.Add($"Slot{i}", e.Slot);
+            parameters.Add($"EntityProtoGuid{i}", e.EntityProtoGuid);
+            parameters.Add($"ArchiveData{i}", e.ArchiveData);
         }
+        sql.Append(" ON DUPLICATE KEY UPDATE ");
+        sql.Append("ContainerDbGuid=VALUES(ContainerDbGuid), InventoryProtoGuid=VALUES(InventoryProtoGuid), ");
+        sql.Append("Slot=VALUES(Slot), EntityProtoGuid=VALUES(EntityProtoGuid), ArchiveData=VALUES(ArchiveData);");
+
+        connection.Execute(sql.ToString(), parameters, transaction);
+
+        foreach (var entity in dirtyEntities)
+            entity.IsDirty = false;
+    }
+}
 
         /// Query cache for entity operations
         private class EntityQueryCache
