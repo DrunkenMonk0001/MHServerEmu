@@ -35,6 +35,7 @@ namespace MHServerEmu.DatabaseAccess.Models
 
         public bool Add(DBEntity dbEntity)
         {
+            dbEntity.IsDirty = true; // Mark as dirty on add
             if (_allEntities.TryAdd(dbEntity.DbGuid, dbEntity) == false)
                 return Logger.WarnReturn(false, $"Add(): Guid 0x{dbEntity.DbGuid} is already in use");
 
@@ -54,7 +55,10 @@ namespace MHServerEmu.DatabaseAccess.Models
             bool success = true;
 
             foreach (DBEntity dbEntity in dbEntities)
+            {
+                dbEntity.IsDirty = true; // Mark as dirty on add
                 success |= Add(dbEntity);
+            }
 
             return success;
         }
