@@ -10,6 +10,7 @@
         public uint Slot { get; set; }
         public long EntityProtoGuid { get; set; }
         public byte[] ArchiveData { get; set; }
+        public bool IsDirty { get; set; } // Add dirty flag for change tracking
 
         public override string ToString()
         {
