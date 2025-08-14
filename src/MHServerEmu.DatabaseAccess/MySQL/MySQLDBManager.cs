@@ -1,10 +1,9 @@
 ﻿using Dapper;
 using MHServerEmu.Core.Config;
 using MHServerEmu.Core.Logging;
-using MHServerEmu.Core.System.Time;
 using MHServerEmu.DatabaseAccess.Models;
 using MHServerEmu.DatabaseAccess.MySqlDB;
-using MySql.Data.MySqlClient;
+using MySqlConnector;
 using MHServerEmu.Core.Helpers;
 using MHServerEmu.DatabaseAccess.SQLite;
 using System.Data.SQLite;
@@ -69,7 +68,7 @@ namespace MHServerEmu.DatabaseAccess.MySQL
                     if (InitializeDatabaseFile() == false)
                         return false;
                 }
-
+                Logger.Info($"Connected to Database");
                 return true;
             }
         }
@@ -159,33 +158,92 @@ namespace MHServerEmu.DatabaseAccess.MySQL
 
             using MySqlConnection connection = GetConnection();
 
-            var @params = new { DbGuid = account.Id };
-
-            var players = connection.Query<DBPlayer>("SELECT * FROM Player WHERE DbGuid = @DbGuid", @params);
-            account.Player = players.FirstOrDefault();
-
+            account.Player = connection.QueryFirstOrDefault<DBPlayer>("SELECT * FROM Player WHERE DbGuid = @DbGuid", new { DbGuid = account.Id });
             if (account.Player == null)
             {
                 account.Player = new(account.Id);
                 Logger.Info($"Initialized player data for account 0x{account.Id:X}");
             }
 
-            account.Avatars.AddRange(LoadEntitiesFromTable(connection, DBEntityCategory.Avatar, account.Id));
-            account.TeamUps.AddRange(LoadEntitiesFromTable(connection, DBEntityCategory.TeamUp, account.Id));
-            account.Items.AddRange(LoadEntitiesFromTable(connection, DBEntityCategory.Item, account.Id));
+            // Use MySQLEntityTable helpers for loading ONLY (mimic SQLiteDBManager)
+            var avatarTable = MySQLEntityTable.GetTable(DBEntityCategory.Avatar);
+            var teamUpTable = MySQLEntityTable.GetTable(DBEntityCategory.TeamUp);
+            var itemTable = MySQLEntityTable.GetTable(DBEntityCategory.Item);
+            var controlledEntityTable = MySQLEntityTable.GetTable(DBEntityCategory.ControlledEntity);
+
+            avatarTable.LoadEntities(connection, account.Id, account.Avatars);
+            teamUpTable.LoadEntities(connection, account.Id, account.TeamUps);
+            itemTable.LoadEntities(connection, account.Id, account.Items);
 
             foreach (DBEntity avatar in account.Avatars)
             {
-                account.Items.AddRange(LoadEntitiesFromTable(connection, DBEntityCategory.Item, avatar.DbGuid));
-                account.ControlledEntities.AddRange(LoadEntitiesFromTable(connection, DBEntityCategory.ControlledEntity, avatar.DbGuid));
+                itemTable.LoadEntities(connection, avatar.DbGuid, account.Items);
+                controlledEntityTable.LoadEntities(connection, avatar.DbGuid, account.ControlledEntities);
             }
 
             foreach (DBEntity teamUp in account.TeamUps)
             {
-                account.Items.AddRange(LoadEntitiesFromTable(connection, DBEntityCategory.Item, teamUp.DbGuid));
+                itemTable.LoadEntities(connection, teamUp.DbGuid, account.Items);
             }
 
             return true;
+        }
+
+        private bool DoSavePlayerData(DBAccount account)
+        {
+            lock (_writeLock)
+            {
+                using MySqlConnection connection = GetConnection();
+                using MySqlTransaction transaction = connection.BeginTransaction();
+                try
+                {
+                    connection.Execute("SET FOREIGN_KEY_CHECKS=0;", transaction: transaction);
+                    if (account.Player != null)
+                    {
+                        connection.Execute(@$"INSERT IGNORE INTO Player (DbGuid) VALUES (@DbGuid)", account.Player, transaction);
+                        connection.Execute(@$"UPDATE Player SET ArchiveData=@ArchiveData, StartTarget=@StartTarget,
+                                            AOIVolume=@AOIVolume, GazillioniteBalance=@GazillioniteBalance WHERE DbGuid = @DbGuid",
+                                            account.Player, transaction);
+                    }
+                    else
+                    {
+                        Logger.Warn($"DoSavePlayerData(): Attempted to save null player entity data for account {account}");
+                    }
+
+                    // Use only MySQLEntityTable helpers for saving, no legacy helpers
+                    var avatarTable = MySQLEntityTable.GetTable(DBEntityCategory.Avatar);
+                    var teamUpTable = MySQLEntityTable.GetTable(DBEntityCategory.TeamUp);
+                    var itemTable = MySQLEntityTable.GetTable(DBEntityCategory.Item);
+                    var controlledEntityTable = MySQLEntityTable.GetTable(DBEntityCategory.ControlledEntity);
+
+                    avatarTable.UpdateEntities(connection, transaction, account.Id, account.Avatars);
+                    teamUpTable.UpdateEntities(connection, transaction, account.Id, account.TeamUps);
+                    itemTable.UpdateEntities(connection, transaction, account.Id, account.Items);
+
+                    foreach (DBEntity avatar in account.Avatars)
+                    {
+                        itemTable.UpdateEntities(connection, transaction, avatar.DbGuid, account.Items);
+                        controlledEntityTable.UpdateEntities(connection, transaction, avatar.DbGuid, account.ControlledEntities);
+                    }
+
+                    foreach (DBEntity teamUp in account.TeamUps)
+                    {
+                        itemTable.UpdateEntities(connection, transaction, teamUp.DbGuid, account.Items);
+                    }
+
+                    connection.Execute("SET FOREIGN_KEY_CHECKS=1;", transaction: transaction);
+                    transaction.Commit();
+                    Logger.Info($"Successfully written player data for account [{account}]");
+                    return true;
+                }
+                catch (Exception e)
+                {
+                    try { connection.Execute("SET FOREIGN_KEY_CHECKS=1;", transaction: transaction); } catch { }
+                    Logger.Warn($"DoSavePlayerData(): MySQL error for account [{account}]: {e.Message}");
+                    transaction.Rollback();
+                    return false;
+                }
+            }
         }
 
         public bool SavePlayerData(DBAccount account)
@@ -199,14 +257,13 @@ namespace MHServerEmu.DatabaseAccess.MySQL
             return Logger.WarnReturn(false, $"SavePlayerData(): Failed to write player data for account [{account}]");
         }
 
-
         /// Creates and opens a new <see cref="MySQLConnection"/>.
 
         private static MySqlConnection GetConnection()
         {
             var config = ConfigManager.Instance.GetConfig<MySqlDBManagerConfig>();
             var connectionStringVars = string.Join(";", "server="+config.MySqlIP, "port="+config.MySqlPort, "Database="+config.MySqlDBName, "Uid="+config.MySqlUsername, "Pwd="+config.MySqlPw, "SslMode=Required;AllowPublicKeyRetrieval=True;");
-            string connectionString = new MySql.Data.MySqlClient.MySqlConnectionStringBuilder(connectionStringVars).ToString();
+            string connectionString = new MySqlConnectionStringBuilder(connectionStringVars).ToString();
             MySqlConnection connection = new(connectionString);
             connection.Open();
             return connection;
@@ -223,7 +280,7 @@ namespace MHServerEmu.DatabaseAccess.MySQL
                 return Logger.ErrorReturn(false, "InitializeDatabaseFile(): Failed to get database initialization script");
 
             var connectionStringVars = string.Join(";", "server=" + config.MySqlIP, "port=" + config.MySqlPort, "Uid=" + config.MySqlUsername, "Pwd=" + config.MySqlPw, "SslMode=Required;AllowPublicKeyRetrieval=True;");
-            string connectionString = new MySql.Data.MySqlClient.MySqlConnectionStringBuilder(connectionStringVars).ToString();
+            string connectionString = new MySqlConnectionStringBuilder(connectionStringVars).ToString();
             MySqlConnection connectionInit = new(connectionString);
             connectionInit.Open();
             connectionInit.Execute("CREATE SCHEMA IF NOT EXISTS " + config.MySqlDBName);
@@ -267,8 +324,8 @@ namespace MHServerEmu.DatabaseAccess.MySQL
                     File.WriteAllText($"{_dbFilePath}.Migrate.sql", DumpSQLiteDatabase(_dbFilePath, true));
                     string filePath = $"{_dbFilePath}.Migrate.sql";
                     Logger.Info("Importing SQLite Database into MySQL... This may take a while.");
-                    MySqlScript importScript = new(connection, File.ReadAllText(filePath));
-                    importScript.Execute();
+                    string script = File.ReadAllText(filePath);
+                    ExecuteSqlScript(connection, script);
                     connection.Close();
                     File.Move($"{_dbFilePath}", $"{_dbFilePath}.Migrated");
                     Logger.Info($"Old SQLite Database saved to {_dbFilePath}.Migrated");
@@ -286,8 +343,8 @@ namespace MHServerEmu.DatabaseAccess.MySQL
                     File.WriteAllText($"{_dbFilePath}.Migrate.sql", DumpSQLiteDatabase(_dbFilePath, true));
                     string filePath = $"{_dbFilePath}.Migrate.sql";
                     Logger.Info("Importing SQLite Database into MySQL... This may take a while.");
-                    MySqlScript importScript = new(connection, File.ReadAllText(filePath));
-                    importScript.Execute();
+                    string script = File.ReadAllText(filePath);
+                    ExecuteSqlScript(connection, script);
                     connection.Close();
                     File.Move($"{_dbFilePath}", $"{_dbFilePath}.Migrated");
                     Logger.Info($"Old SQLite Database saved to {_dbFilePath}.Migrated");
@@ -347,53 +404,6 @@ namespace MHServerEmu.DatabaseAccess.MySQL
             return true;
         }
 
-        private bool DoSavePlayerData(DBAccount account)
-        {
-            lock (_writeLock)
-            {
-                using MySqlConnection connection = GetConnection();
-                using MySqlTransaction transaction = connection.BeginTransaction();
-                try
-                {
-                    connection.Execute("SET FOREIGN_KEY_CHECKS=0;", transaction: transaction);
-                    if (account.Player != null)
-                    {
-                        connection.Execute(@$"INSERT IGNORE INTO Player (DbGuid) VALUES (@DbGuid)", account.Player, transaction);
-                        connection.Execute(@$"UPDATE Player SET ArchiveData=@ArchiveData, StartTarget=@StartTarget,
-                                            AOIVolume=@AOIVolume, GazillioniteBalance=@GazillioniteBalance WHERE DbGuid = @DbGuid",
-                                            account.Player, transaction);
-                    }
-                    else
-                    {
-                        Logger.Warn($"DoSavePlayerData(): Attempted to save null player entity data for account {account}");
-                    }
-                    // Update inventory entities
-                    UpdateEntityTable(connection, transaction, DBEntityCategory.Avatar, account.Id, account.Avatars);
-                    UpdateEntityTable(connection, transaction, DBEntityCategory.TeamUp, account.Id, account.TeamUps);
-                    UpdateEntityTable(connection, transaction, DBEntityCategory.Item, account.Id, account.Items);
-
-                    foreach (DBEntity avatar in account.Avatars)
-                    {
-                        UpdateEntityTable(connection, transaction, DBEntityCategory.Item, avatar.DbGuid, account.Items);
-                        UpdateEntityTable(connection, transaction, DBEntityCategory.ControlledEntity, avatar.DbGuid, account.ControlledEntities);
-                    }
-
-                    foreach (DBEntity teamUp in account.TeamUps)
-                    {
-                        UpdateEntityTable(connection, transaction, DBEntityCategory.Item, teamUp.DbGuid, account.Items);
-                    }
-                    transaction.Commit();
-                    return true;
-                }
-                catch (Exception e)
-                {
-                    Logger.Warn($"DoSavePlayerData(): MySQL error for account [{account}]: {e.Message}");
-                    transaction.Rollback();
-                    return false;
-                }
-            }
-        }
-
         /// Returns the user_version value of the current database.
         private static int GetSchemaVersion(MySqlConnection connection)
         {
@@ -413,68 +423,6 @@ namespace MHServerEmu.DatabaseAccess.MySQL
             connection.Execute($"UPDATE "+ ConfigManager.Instance.GetConfig<MySqlDBManagerConfig>().MySqlDBName + ".schemaversion SET schema_version="+CurrentSchemaVersion);
         }
 
-
-        /// Loads <see cref="DBEntity"/> instances belonging to the specified container from the specified table.
-
-        private static IEnumerable<DBEntity> LoadEntitiesFromTable(MySqlConnection connection, DBEntityCategory category, long containerDbGuid)
-        {
-            EntityQueryCache queries = EntityQueryCache.GetQueries(category);
-            var @params = new { ContainerDbGuid = containerDbGuid };
-            return connection.Query<DBEntity>(queries.SelectAll, @params);
-        }
-
-
-        /// Updates <see cref="DBEntity"/> instances belonging to the specified container in the specified table using the provided <see cref="DBEntityCollection"/>.
-
-        private static void UpdateEntityTable(MySqlConnection connection, MySqlTransaction transaction, DBEntityCategory category,
-    long containerDbGuid, DBEntityCollection dbEntityCollection)
-{
-    EntityQueryCache queries = EntityQueryCache.GetQueries(category);
-
-    // 1. Find and delete entities that are in the DB but not in the in-memory collection
-    var storedEntities = connection.Query<long>(queries.SelectIds, new { ContainerDbGuid = containerDbGuid }).ToList();
-    var currentGuids = dbEntityCollection.GetEntriesForContainer(containerDbGuid).Select(e => e.DbGuid).ToHashSet();
-    var entitiesToDelete = storedEntities.Except(currentGuids).ToList();
-    if (entitiesToDelete.Count > 0)
-    {
-        connection.Execute(
-            $"DELETE FROM {category} WHERE DbGuid IN @EntitiesToDelete",
-            new { EntitiesToDelete = entitiesToDelete },
-            transaction
-        );
-    }
-
-    // 2. Upsert only dirty entities
-    var dirtyEntities = dbEntityCollection.GetEntriesForContainer(containerDbGuid)
-        .Where(e => e.IsDirty)
-        .ToList();
-    if (dirtyEntities.Count > 0)
-    {
-        var sql = new StringBuilder();
-        sql.Append($"INSERT INTO {category} (DbGuid, ContainerDbGuid, InventoryProtoGuid, Slot, EntityProtoGuid, ArchiveData) VALUES ");
-        var parameters = new DynamicParameters();
-        for (int i = 0; i < dirtyEntities.Count; i++)
-        {
-            var e = dirtyEntities[i];
-            if (i > 0) sql.Append(",");
-            sql.Append($"(@DbGuid{i}, @ContainerDbGuid{i}, @InventoryProtoGuid{i}, @Slot{i}, @EntityProtoGuid{i}, @ArchiveData{i})");
-            parameters.Add($"DbGuid{i}", e.DbGuid);
-            parameters.Add($"ContainerDbGuid{i}", e.ContainerDbGuid);
-            parameters.Add($"InventoryProtoGuid{i}", e.InventoryProtoGuid);
-            parameters.Add($"Slot{i}", e.Slot);
-            parameters.Add($"EntityProtoGuid{i}", e.EntityProtoGuid);
-            parameters.Add($"ArchiveData{i}", e.ArchiveData);
-        }
-        sql.Append(" ON DUPLICATE KEY UPDATE ");
-        sql.Append("ContainerDbGuid=VALUES(ContainerDbGuid), InventoryProtoGuid=VALUES(InventoryProtoGuid), ");
-        sql.Append("Slot=VALUES(Slot), EntityProtoGuid=VALUES(EntityProtoGuid), ArchiveData=VALUES(ArchiveData);");
-
-        connection.Execute(sql.ToString(), parameters, transaction);
-
-        foreach (var entity in dirtyEntities)
-            entity.IsDirty = false;
-    }
-}
 
         /// Query cache for entity operations
         private class EntityQueryCache
@@ -622,6 +570,19 @@ namespace MHServerEmu.DatabaseAccess.MySQL
             finalDump.Replace("TEXT", "VARCHAR(50)");
             finalDump.Replace("BLOB", "BLOB(1000)");
             return finalDump.ToString();
+        }
+        public static void ExecuteSqlScript(MySqlConnection connection, string script)
+        {
+            // Split on semicolons, remove empty statements, and trim whitespace
+            var statements = script.Split(';')
+                .Select(s => s.Trim())
+                .Where(s => !string.IsNullOrWhiteSpace(s));
+
+            foreach (var statement in statements)
+            {
+                using var cmd = new MySqlCommand(statement, connection);
+                cmd.ExecuteNonQuery();
+            }
         }
     }
 }

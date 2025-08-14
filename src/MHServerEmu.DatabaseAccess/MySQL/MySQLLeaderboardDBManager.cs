@@ -2,7 +2,7 @@
 using MHServerEmu.Core.Config;
 using MHServerEmu.Core.Logging;
 using MHServerEmu.DatabaseAccess.MySqlDB;
-using MySql.Data.MySqlClient;
+using MySqlConnector;
 using MHServerEmu.Core.Helpers;
 using MHServerEmu.DatabaseAccess.Models.Leaderboards;
 using MHServerEmu.DatabaseAccess.MySQL;
@@ -50,7 +50,7 @@ namespace MHServerEmu.DatabaseAccess.MySQL
                 return Logger.ErrorReturn(false, "InitializeDatabaseFile(): Failed to get database initialization script");
 
             var connectionStringVars = string.Join(";", "server=" + config.MySqlIP, "port=" + config.MySqlPort, "Uid=" + config.MySqlUsername, "Pwd=" + config.MySqlPw, "SslMode=Required;AllowPublicKeyRetrieval=True;");
-            string connectionString = new MySql.Data.MySqlClient.MySqlConnectionStringBuilder(connectionStringVars).ToString();
+            string connectionString = new MySqlConnectionStringBuilder(connectionStringVars).ToString();
             MySqlConnection connectionInit = new(connectionString);
             connectionInit.Open();
             connectionInit.Execute("CREATE SCHEMA IF NOT EXISTS " + config.MySqlDBName);
@@ -69,7 +69,7 @@ namespace MHServerEmu.DatabaseAccess.MySQL
         {
             var config = ConfigManager.Instance.GetConfig<MySqlDBManagerConfig>();
             var connectionStringVars = string.Join(";", "server=" + config.MySqlIP, "port=" + config.MySqlPort, "Database=" + config.MySqlDBName, "Uid=" + config.MySqlUsername, "Pwd=" + config.MySqlPw, "SslMode=Required;AllowPublicKeyRetrieval=True;");
-            string connectionString = new MySql.Data.MySqlClient.MySqlConnectionStringBuilder(connectionStringVars).ToString();
+            string connectionString = new MySqlConnectionStringBuilder(connectionStringVars).ToString();
             MySqlConnection connection = new(connectionString);
             connection.Open();
             return connection;
