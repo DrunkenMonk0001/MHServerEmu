@@ -72,6 +72,26 @@ namespace MHServerEmu.DatabaseAccess.MySQL
                 return true;
             }
         }
+        public bool TryGetPlayerDbIdByName(string playerName, out ulong playerDbId, out string playerNameOut)
+        {
+            using MySqlConnection connection = GetConnection();
+
+            // This check is case insensitive (COLLATE NOCASE)
+            var account = connection.QueryFirstOrDefault<DBAccount>(
+                "SELECT Id, PlayerName FROM Account WHERE PlayerName = @PlayerName COLLATE utf8_general_ci",
+                new { PlayerName = playerName });
+
+            if (account == null)
+            {
+                playerDbId = 0;
+                playerNameOut = null;
+                return false;
+            }
+
+            playerDbId = (ulong)account.Id;
+            playerNameOut = account.PlayerName;
+            return true;
+        }
 
 
         public bool TryQueryAccountByEmail(string email, out DBAccount account)
@@ -102,15 +122,6 @@ namespace MHServerEmu.DatabaseAccess.MySQL
                 playerNames[(ulong)account.Id] = account.PlayerName;
 
             return playerNames.Count > 0;
-        }
-
-        public bool QueryIsPlayerNameTaken(string playerName)
-        {
-            using MySqlConnection connection = GetConnection();
-
-            // This check is now explicitly case insensitive using collation
-            var results = connection.Query<string>("SELECT PlayerName FROM Account WHERE PlayerName = @PlayerName COLLATE utf8mb4_general_ci", new { PlayerName = playerName });
-            return results.Any();
         }
 
         public bool InsertAccount(DBAccount account)
