@@ -3,6 +3,7 @@ using Gazillion;
 using Google.ProtocolBuffers;
 using MHServerEmu.Core.Config;
 using MHServerEmu.Core.Extensions;
+using MHServerEmu.Core.Helpers;
 using MHServerEmu.Core.Logging;
 using MHServerEmu.Core.Memory;
 using MHServerEmu.Core.Network;
@@ -29,6 +30,7 @@ using MHServerEmu.Games.MTXStore;
 using MHServerEmu.Games.Powers;
 using MHServerEmu.Games.Properties;
 using MHServerEmu.Games.Regions;
+using MHServerEmu.Games.Social.Communities;
 
 namespace MHServerEmu.Games.Network
 {
@@ -483,6 +485,8 @@ namespace MHServerEmu.Games.Network
                 case ClientToGameServerMessage.NetMessageAbilitySwapInAbilityBar:           OnAbilitySwapInAbilityBar(message); break;          // 48
                 case ClientToGameServerMessage.NetMessagePowerRecentlyUnlocked:             OnPowerRecentlyUnlocked(message); break;            // 51
                 case ClientToGameServerMessage.NetMessageRequestDeathRelease:               OnRequestDeathRelease(message); break;              // 52
+                case ClientToGameServerMessage.NetMessageRequestResurrectDecline:           OnRequestResurrectDecline(message); break;          // 53
+                case ClientToGameServerMessage.NetMessageRequestResurrectAvatar:            OnRequestResurrectAvatar(message); break;           // 54
                 case ClientToGameServerMessage.NetMessageReturnToHub:                       OnReturnToHub(message); break;                      // 55
                 case ClientToGameServerMessage.NetMessageRequestMissionRewards:             OnRequestMissionRewards(message); break;            // 57
                 case ClientToGameServerMessage.NetMessageRequestRemoveAndKillControlledAgent:   OnRequestRemoveAndKillControlledAgent(message); break;   // 58
@@ -663,6 +667,11 @@ namespace MHServerEmu.Games.Network
 
             if (canMove || canRotate)
             {
+                const float PositionDesyncDistanceSqThreshold = 512f * 512f;
+                float desyncDistanceSq = Vector3.DistanceSquared2D(position, syncPosition);
+                if (desyncDistanceSq > PositionDesyncDistanceSqThreshold)
+                    Logger.Warn($"OnUpdateAvatarState(): Position desync for player [{Player}] - {MathHelper.SquareRoot(desyncDistanceSq)}");
+
                 position = syncPosition;
                 orientation = syncOrientation;
 
@@ -692,6 +701,10 @@ namespace MHServerEmu.Games.Network
                 {
                     if (LocomotionState.SerializeFrom(archive, newSyncState, fieldFlags) == false)
                         return Logger.WarnReturn(false, "OnUpdateAvatarState(): Failed to transfer newSyncState");
+
+                    const float MoveSpeedDesyncThreshold = 3000f;
+                    if (newSyncState.BaseMoveSpeed > MoveSpeedDesyncThreshold)
+                        Logger.Warn($"OnUpdateAvatarState(): Movement speed desync for player [{Player}] - {newSyncState.BaseMoveSpeed}");
                 }
                 catch (Exception e)
                 {
@@ -1323,6 +1336,33 @@ namespace MHServerEmu.Games.Network
             return avatar.DoDeathRelease(requestType);
         }
 
+        private bool OnRequestResurrectDecline(in MailboxMessage message)   // 53
+        {
+            var requestResurrectDecline = message.As<NetMessageRequestResurrectDecline>();
+            if (requestResurrectDecline == null) return Logger.WarnReturn(false, $"OnRequestResurrectDecline(): Failed to retrieve message");
+
+            Avatar avatar = Player?.GetActiveAvatarByIndex((int)requestResurrectDecline.AvatarIndex);
+            if (avatar == null) return Logger.WarnReturn(false, "OnRequestResurrectDecline(): avatar == null");
+
+            avatar.ResurrectDecline();
+            return true;
+        }
+
+        private bool OnRequestResurrectAvatar(in MailboxMessage message)   // 54
+        {
+            var requestResurrectAvatar = message.As<NetMessageRequestResurrectAvatar>();
+            if (requestResurrectAvatar == null) return Logger.WarnReturn(false, $"OnRequestResurrectAvatar(): Failed to retrieve message");
+
+            Avatar resurrectorAvatar = Player?.GetActiveAvatarByIndex((int)requestResurrectAvatar.AvatarIndex);
+            if (resurrectorAvatar == null) return Logger.WarnReturn(false, "OnRequestResurrectAvatar(): resurrectorAvatar == null");
+
+            Avatar targetAvatar = Game.EntityManager.GetEntity<Avatar>(requestResurrectAvatar.TargetId);
+            if (targetAvatar == null) return Logger.WarnReturn(false, "OnRequestResurrectAvatar(): targetAvatar == null");
+
+            resurrectorAvatar.ResurrectOtherAvatar(targetAvatar);
+            return true;
+        }
+
         private bool OnReturnToHub(MailboxMessage message)  // 55
         {
             var returnToHub = message.As<NetMessageReturnToHub>();
@@ -1573,9 +1613,18 @@ namespace MHServerEmu.Games.Network
             var tryModifyCommunityMemberCircle = message.As<NetMessageTryModifyCommunityMemberCircle>();
             if (tryModifyCommunityMemberCircle == null) return Logger.WarnReturn(false, $"OnTryModifyCommunityMemberCircle(): Failed to retrieve message");
 
-            // TODO, send a Service Unavailable message for now
-            Game.ChatManager.SendChatFromGameSystem((LocaleStringId)5066146868144571696, Player);
-            return true;
+            Community community = Player?.Community;
+            if (community == null) return Logger.WarnReturn(false, "OnTryModifyCommunityMemberCircle(): community == null");
+
+            CircleId circleId = (CircleId)tryModifyCommunityMemberCircle.CircleId;
+            string playerName = tryModifyCommunityMemberCircle.PlayerName;
+            ModifyCircleOperation operation = tryModifyCommunityMemberCircle.Operation;
+
+            // Do not allow players to arbitrarily modify nearby / party / guild circles
+            if (circleId != CircleId.__Friends && circleId != CircleId.__Ignore)
+                return Logger.WarnReturn(false, $"OnTryModifyCommunityMemberCircle(): Player [{Player}] is attempting to modify circle {circleId}");
+
+            return community.TryModifyCommunityMemberCircle(circleId, playerName, operation);
         }
 
         private bool OnPullCommunityStatus(MailboxMessage message)  // 107

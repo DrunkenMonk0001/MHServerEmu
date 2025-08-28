@@ -75,7 +75,7 @@ namespace MHServerEmu.Games
 
         public GRandom Random { get; } = new();
         public PlayerConnectionManager NetworkManager { get; }
-        public ServiceMailbox ServiceMailbox { get; }
+        public GameServiceMailbox ServiceMailbox { get; }
         public EventScheduler GameEventScheduler { get; private set; }
         public EntityManager EntityManager { get; }
         public RegionManager RegionManager { get; }
@@ -108,7 +108,7 @@ namespace MHServerEmu.Games
             GameManager = gameManager;
 
             // Small lags are fine, and logging all of them creates too much noise
-            _fixedTimeUpdateProcessTimeLogThreshold = FixedTimeBetweenUpdates * 2;
+            _fixedTimeUpdateProcessTimeLogThreshold = FixedTimeBetweenUpdates * 5;
 
             // Initialize game options
             var config = ConfigManager.Instance.GetConfig<GameOptionsConfig>();
