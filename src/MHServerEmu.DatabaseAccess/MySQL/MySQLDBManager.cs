@@ -78,7 +78,7 @@ namespace MHServerEmu.DatabaseAccess.MySQL
 
             // This check is case insensitive (COLLATE NOCASE)
             var account = connection.QueryFirstOrDefault<DBAccount>(
-                "SELECT Id, PlayerName FROM Account WHERE PlayerName = @PlayerName COLLATE utf8_general_ci",
+                "SELECT Id, PlayerName FROM Account WHERE LOWER(PlayerName) = LOWER(@PlayerName)",
                 new { PlayerName = playerName });
 
             if (account == null)
