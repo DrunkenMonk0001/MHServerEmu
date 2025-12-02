@@ -23,6 +23,7 @@ using MHServerEmu.Games.Powers;
 using MHServerEmu.Games.Powers.Conditions;
 using MHServerEmu.Games.Regions;
 using MHServerEmu.Games.Social;
+using MHServerEmu.Games.Social.Parties;
 using MHServerEmu.Games.UI;
 
 namespace MHServerEmu.Games
@@ -83,6 +84,7 @@ namespace MHServerEmu.Games
         public LootManager LootManager { get; }
         public GameDialogManager GameDialogManager { get; }
         public ChatManager ChatManager { get; }
+        public PartyManager PartyManager { get; }
         public LiveTuningData LiveTuningData { get => LiveTuningData.Current; }
 
         public ConditionPool ConditionPool { get; } = new();
@@ -95,9 +97,11 @@ namespace MHServerEmu.Games
 
         public ulong CurrentRepId { get => ++_currentRepId; }
         public Dictionary<ulong, IArchiveMessageHandler> MessageHandlerDict { get; } = new();
-        public bool OmegaMissionsEnabled { get; set; }
-        public bool AchievementsEnabled { get; set; }
-        public bool LeaderboardsEnabled { get; set; }
+
+        public bool AchievementsEnabled { get => GameOptions.AchievementsEnabled; }
+        public bool OmegaMissionsEnabled { get => GameOptions.OmegaMissionsEnabled; }
+        public bool LeaderboardsEnabled { get => GameOptions.LeaderboardsEnabled; }
+        public bool GiftingEnabled { get => GameOptions.GiftingEnabled; }
         public bool InfinitySystemEnabled { get => GameOptions.InfinitySystemEnabled; }
 
         public override string ToString() => $"serverGameId=0x{Id:X}";
@@ -112,8 +116,6 @@ namespace MHServerEmu.Games
 
             // Initialize game options
             var config = ConfigManager.Instance.GetConfig<GameOptionsConfig>();
-            AchievementsEnabled = config.AchievementsEnabled;
-            LeaderboardsEnabled = config.LeaderboardsEnabled;
             GameOptions = config.ToProtobuf();
 
             CustomGameOptions = ConfigManager.Instance.GetConfig<CustomGameOptionsConfig>();
@@ -129,6 +131,7 @@ namespace MHServerEmu.Games
             LootManager = new(this);
             GameDialogManager = new(this);
             ChatManager = new(this);
+            PartyManager = new(this);
             Random = new();
 
             Initialize();
@@ -148,8 +151,6 @@ namespace MHServerEmu.Games
 
             success &= RegionManager.Initialize(this);
             success &= EntityManager.Initialize();
-
-            OmegaMissionsEnabled = true;
 
             State = GameState.Running;
             Logger.Info($"Game 0x{Id:X} started, initial replication id: {_currentRepId}");

@@ -1,6 +1,11 @@
-﻿using Gazillion;
+﻿using System.Net;
+using Gazillion;
 using MHServerEmu.Core.Logging;
+using MHServerEmu.Core.Memory;
 using MHServerEmu.Core.Network;
+using MHServerEmu.Core.RateLimiting;
+using MHServerEmu.Games.GameData;
+using MHServerEmu.PlayerManagement.Auth;
 using MHServerEmu.PlayerManagement.Players;
 using MHServerEmu.PlayerManagement.Regions;
 using MHServerEmu.PlayerManagement.Social;
@@ -10,6 +15,8 @@ namespace MHServerEmu.PlayerManagement.Network
     internal sealed class PlayerManagerServiceMailbox : ServiceMailbox
     {
         private static readonly Logger Logger = LogManager.CreateLogger();
+
+        private readonly TimeLeakyBucketCollection<ulong> _playerLookupByNameRateLimiter = new(TimeSpan.FromSeconds(60), 20);
 
         private readonly PlayerManagerService _playerManager;
 
@@ -58,6 +65,10 @@ namespace MHServerEmu.PlayerManagement.Network
                     OnClearPrivateStoryRegions(clearPrivateStoryRegions);
                     break;
 
+                case ServiceMessage.SetDifficultyTierPreference setDifficultyTierPreference:
+                    OnSetDifficultyTierPreference(setDifficultyTierPreference);
+                    break;
+
                 case ServiceMessage.PlayerLookupByNameRequest playerLookupByNameRequest:
                     OnPlayerLookupByNameRequest(playerLookupByNameRequest);
                     break;
@@ -72,6 +83,38 @@ namespace MHServerEmu.PlayerManagement.Network
 
                 case ServiceMessage.CommunityStatusRequest communityStatusRequest:
                     OnCommunityStatusRequest(communityStatusRequest);
+                    break;
+
+                case ServiceMessage.PartyOperationRequest partyOperationRequest:
+                    OnPartyOperationRequest(partyOperationRequest);
+                    break;
+
+                case ServiceMessage.PartyBoostUpdate partyBoostUpdate:
+                    OnPartyBoostUpdate(partyBoostUpdate);
+                    break;
+
+                case ServiceMessage.AuthRequest authRequest:
+                    OnAuthRequest(authRequest);
+                    break;
+
+                case ServiceMessage.SessionVerificationRequest sessionVerificationRequest:
+                    OnSessionVerificationRequest(sessionVerificationRequest);
+                    break;
+
+                case ServiceMessage.MTXStoreESBalanceRequest mtxStoreESBalanceRequest:
+                    OnMTXStoreESBalanceRequest(mtxStoreESBalanceRequest);
+                    break;
+
+                case ServiceMessage.MTXStoreESBalanceGameResponse mtxStoreESBalanceGameResponse:
+                    OnMTXStoreESBalanceGameResponse(mtxStoreESBalanceGameResponse);
+                    break;
+
+                case ServiceMessage.MTXStoreESConvertRequest mtxStoreESConvertRequest:
+                    OnMTXStoreESConvertRequest(mtxStoreESConvertRequest);
+                    break;
+
+                case ServiceMessage.MTXStoreESConvertGameResponse mtxStoreESConvertGameResponse:
+                    OnMTXStoreESConvertGameResponse(mtxStoreESConvertGameResponse);
                     break;
 
                 default:
@@ -122,7 +165,8 @@ namespace MHServerEmu.PlayerManagement.Network
             IFrontendClient client = gameInstanceClientOp.Client;
             ulong gameId = gameInstanceClientOp.GameId;
 
-            if (_playerManager.ClientManager.TryGetPlayerHandle(client.DbId, out PlayerHandle player) == false)
+            PlayerHandle player = _playerManager.ClientManager.GetPlayer(client.DbId);
+            if (player == null)
                 return Logger.WarnReturn(false, $"OnGameInstanceClientOp(): No handle found for client [{client}]");
 
             switch (gameInstanceClientOp.Type)
@@ -168,7 +212,8 @@ namespace MHServerEmu.PlayerManagement.Network
             ulong playerDbId = changeRegionRequest.Header.RequestingPlayerGuid;
             TeleportContextEnum context = changeRegionRequest.Header.Type;
 
-            if (_playerManager.ClientManager.TryGetPlayerHandle(playerDbId, out PlayerHandle player) == false)
+            PlayerHandle player = _playerManager.ClientManager.GetPlayer(playerDbId);
+            if (player == null)
                 return Logger.WarnReturn(false, $"OnChangeRegionRequest(): No player handle for dbid 0x{playerDbId:X}");
 
             if (changeRegionRequest.DestTarget != null)
@@ -187,18 +232,38 @@ namespace MHServerEmu.PlayerManagement.Network
 
         private bool OnRegionTransferFinished(in ServiceMessage.RegionTransferFinished regionTransferFinished)
         {
-            if (_playerManager.ClientManager.TryGetPlayerHandle(regionTransferFinished.PlayerDbId, out PlayerHandle player) == false)
-                return Logger.WarnReturn(false, $"OnRegionTransferFinished(): No handle found for playerDbId 0x{regionTransferFinished.PlayerDbId}");
+            ulong playerDbId = regionTransferFinished.PlayerDbId;
+            ulong transferId = regionTransferFinished.TransferId;
+
+            PlayerHandle player = _playerManager.ClientManager.GetPlayer(playerDbId);
+            if (player == null)
+                return Logger.WarnReturn(false, $"OnRegionTransferFinished(): No handle found for playerDbId 0x{playerDbId:X}");
 
             return player.FinishRegionTransfer(regionTransferFinished.TransferId);
         }
 
         private bool OnClearPrivateStoryRegions(in ServiceMessage.ClearPrivateStoryRegions clearPrivateStoryRegions)
         {
-            if (_playerManager.ClientManager.TryGetPlayerHandle(clearPrivateStoryRegions.PlayerDbId, out PlayerHandle player) == false)
-                return Logger.WarnReturn(false, $"OnClearPrivateStoryRegions(): No handle found for playerDbId 0x{clearPrivateStoryRegions.PlayerDbId}");
+            ulong playerDbId = clearPrivateStoryRegions.PlayerDbId;
+
+            PlayerHandle player = _playerManager.ClientManager.GetPlayer(playerDbId);
+            if (player == null)
+                return Logger.WarnReturn(false, $"OnClearPrivateStoryRegions(): No handle found for playerDbId 0x{playerDbId:X}");
 
             player.WorldView.ClearPrivateStoryRegions();
+            return true;
+        }
+
+        private bool OnSetDifficultyTierPreference(in ServiceMessage.SetDifficultyTierPreference setDifficultyTierPreference)
+        {
+            ulong playerDbId = setDifficultyTierPreference.PlayerDbId;
+            PrototypeId difficultyTierProtoRef = (PrototypeId)setDifficultyTierPreference.DifficultyTierProtoId;
+
+            PlayerHandle player = _playerManager.ClientManager.GetPlayer(playerDbId);
+            if (player == null)
+                return Logger.WarnReturn(false, $"OnSetDifficultyTierPreference(): No handle found for playerDbId 0x{playerDbId:X}");
+
+            player.SetDifficultyTierPreference(difficultyTierProtoRef);
             return true;
         }
 
@@ -209,8 +274,20 @@ namespace MHServerEmu.PlayerManagement.Network
             ulong remoteJobId = playerLookupByNameRequest.RemoteJobId;
             string requestPlayerName = playerLookupByNameRequest.RequestPlayerName;
 
-            // It's okay for this query to fail because it's based on client input.
-            PlayerNameCache.Instance.TryGetPlayerDbId(requestPlayerName, out ulong resultPlayerDbId, out string resultPlayerName);
+            ulong resultPlayerDbId;
+            string resultPlayerName;
+
+            // Rate limit this because it's based on client input, and we may be querying the database. It's okay for this query to fail.
+            if (_playerLookupByNameRateLimiter.AddTime(playerDbId))
+            {
+                PlayerNameCache.Instance.TryGetPlayerDbId(requestPlayerName, out resultPlayerDbId, out resultPlayerName);
+            }
+            else
+            {
+                Logger.Warn($"OnPlayerLookupByNameRequest(): Rate limit exceeded for player 0x{playerDbId:X}");
+                resultPlayerDbId = 0;
+                resultPlayerName = string.Empty;
+            }
 
             ServiceMessage.PlayerLookupByNameResult response = new(gameId, playerDbId, remoteJobId, resultPlayerDbId, resultPlayerName);
             ServerManager.Instance.SendMessageToService(GameServiceType.GameInstance, response);
@@ -221,18 +298,12 @@ namespace MHServerEmu.PlayerManagement.Network
         private bool OnPlayerNameChanged(in ServiceMessage.PlayerNameChanged playerNameChanged)
         {
             ulong playerDbId = playerNameChanged.PlayerDbId;
+            string oldPlayerName = playerNameChanged.OldPlayerName;
             string newPlayerName = playerNameChanged.NewPlayerName;
 
+            _playerManager.ClientManager.OnPlayerNameChanged(playerDbId, oldPlayerName, newPlayerName);
             PlayerNameCache.Instance.OnPlayerNameChanged(playerDbId);
             _playerManager.CommunityRegistry.OnPlayerNameChanged(playerDbId, newPlayerName);
-
-            // Update the logged in player
-            if (_playerManager.ClientManager.TryGetPlayerHandle(playerDbId, out PlayerHandle player))
-            {
-                lock (player.Account)
-                    player.Account.PlayerName = newPlayerName;
-                // TODO: Send player name change to the player entity in a game instance
-            }
 
             return true;
         }
@@ -252,6 +323,159 @@ namespace MHServerEmu.PlayerManagement.Network
             List<ulong> members = communityStatusRequest.Members;
 
             _playerManager.CommunityRegistry.RequestMemberBroadcast(gameId, playerDbId, members);
+            return true;
+        }
+
+        private bool OnPartyOperationRequest(in ServiceMessage.PartyOperationRequest partyOperationRequest)
+        {
+            PartyOperationPayload request = partyOperationRequest.Request;
+
+            HashSet<PlayerHandle> playersToNotify = HashSetPool<PlayerHandle>.Instance.Get();
+
+            GroupingOperationResult result = _playerManager.PartyManager.DoPartyOperation(ref request, playersToNotify);
+
+            if (playersToNotify.Count == 0)
+                return Logger.WarnReturn(false, "OnPartyOperationRequest(): playersToNotify.Count == 0");
+
+            foreach (PlayerHandle player in playersToNotify)
+            {
+                if (player.CurrentGame == null)
+                    continue;
+
+                ulong gameId = player.CurrentGame.Id;
+                ulong playerDbId = player.PlayerDbId;
+
+                ServiceMessage.PartyOperationRequestServerResult message = new(gameId, playerDbId, request, result);
+                ServerManager.Instance.SendMessageToService(GameServiceType.GameInstance, message);
+            }
+
+            HashSetPool<PlayerHandle>.Instance.Return(playersToNotify);
+            return true;
+        }
+
+        private bool OnPartyBoostUpdate(in ServiceMessage.PartyBoostUpdate partyBoostUpdate)
+        {
+            ulong playerDbId = partyBoostUpdate.PlayerDbId;
+            List<ulong> boosts = partyBoostUpdate.Boosts;
+
+            PlayerHandle player = _playerManager.ClientManager.GetPlayer(playerDbId);
+            if (player == null)
+                return Logger.WarnReturn(false, $"OnPartyBoostUpdate(): No handle found for playerDbId 0x{playerDbId:X}");
+
+            player.SetPartyBoosts(boosts);
+            player.CurrentParty?.UpdateMember(player);
+
+            return true;
+        }
+
+        private bool OnAuthRequest(in ServiceMessage.AuthRequest authRequest)
+        {
+            AuthStatusCode statusCode = _playerManager.SessionManager.TryCreateSession(authRequest.LoginDataPB, out AuthTicket authTicket);
+
+            ServiceMessage.AuthResponse response = new(authRequest.RequestId, (int)statusCode, authTicket);
+            ServerManager.Instance.SendMessageToService(GameServiceType.WebFrontend, response);
+
+            return true;
+        }
+
+        private bool OnSessionVerificationRequest(in ServiceMessage.SessionVerificationRequest sessionVerificationRequest)
+        {
+            IFrontendClient client = sessionVerificationRequest.Client;
+            ClientCredentials clientCredentials = sessionVerificationRequest.ClientCredentials;
+
+            if (_playerManager.SessionManager.VerifyClientCredentials(client, clientCredentials) == false)
+            {
+                Logger.Warn($"OnClientCredentials(): Failed to verify client credentials, disconnecting client [{client}]");
+                client.Disconnect();
+                return false;
+            }
+
+            _playerManager.LoginQueueManager.EnqueueNewClient(client);
+            return true;
+        }
+
+        private bool OnMTXStoreESBalanceRequest(in ServiceMessage.MTXStoreESBalanceRequest mtxStoreESBalanceRequest)
+        {
+            ulong requestId = mtxStoreESBalanceRequest.RequestId;
+            string email = mtxStoreESBalanceRequest.Email;
+            string token = mtxStoreESBalanceRequest.Token;
+
+            PlayerHandle player = null;
+
+            if (_playerManager.SessionManager.VerifyPlatformTicket(email, token, out ulong playerDbId))
+                player = _playerManager.ClientManager.GetPlayer(playerDbId);
+
+            if (player == null || player.State != PlayerHandleState.InGame)
+            {
+                ServiceMessage.MTXStoreESBalanceResponse response = new(requestId, (int)HttpStatusCode.Forbidden);
+                ServerManager.Instance.SendMessageToService(GameServiceType.WebFrontend, response);
+                return true;
+            }
+
+            Logger.Info($"Authenticated ES balance request from player [{player}]");
+
+            ulong gameId = player.CurrentGame.Id;
+
+            // Route the request to game instance to get up to date balance and conversion ratio
+            ServiceMessage.MTXStoreESBalanceGameRequest gameRequest = new(requestId, gameId, playerDbId);
+            ServerManager.Instance.SendMessageToService(GameServiceType.GameInstance, gameRequest);
+
+            return true;
+        }
+
+        private bool OnMTXStoreESBalanceGameResponse(in ServiceMessage.MTXStoreESBalanceGameResponse mtxStoreESBalanceGameResponse)
+        {
+            ulong requestId = mtxStoreESBalanceGameResponse.RequestId;
+            int currentBalance = mtxStoreESBalanceGameResponse.CurrentBalance;
+            float conversionRate = mtxStoreESBalanceGameResponse.ConversionRatio;
+            int conversionStep = mtxStoreESBalanceGameResponse.ConversionStep;
+
+            // We should have already handled authentication before routing the request to the game instance, so just route the result back.
+            ServiceMessage.MTXStoreESBalanceResponse response = new(requestId, (int)HttpStatusCode.OK, currentBalance, conversionRate, conversionStep);
+            ServerManager.Instance.SendMessageToService(GameServiceType.WebFrontend, response);
+
+            return true;
+        }
+
+        private bool OnMTXStoreESConvertRequest(in ServiceMessage.MTXStoreESConvertRequest mtxStoreESConvertRequest)
+        {
+            ulong requestId = mtxStoreESConvertRequest.RequestId;
+            string email = mtxStoreESConvertRequest.Email;
+            string token = mtxStoreESConvertRequest.Token;
+            int amount = mtxStoreESConvertRequest.Amount;
+
+            PlayerHandle player = null;
+
+            if (_playerManager.SessionManager.VerifyPlatformTicket(email, token, out ulong playerDbId))
+                player = _playerManager.ClientManager.GetPlayer(playerDbId);
+
+            if (player == null || player.State != PlayerHandleState.InGame)
+            {
+                ServiceMessage.MTXStoreESConvertResponse response = new(requestId, (int)HttpStatusCode.Forbidden);
+                ServerManager.Instance.SendMessageToService(GameServiceType.WebFrontend, response);
+                return true;
+            }
+
+            Logger.Info($"Authenticated ES conversion request from player [{player}]");
+
+            ulong gameId = player.CurrentGame.Id;
+
+            // Route the conversion request to the game instance the player is currently in to do the conversion.
+            ServiceMessage.MTXStoreESConvertGameRequest gameRequest = new(requestId, gameId, playerDbId, amount);
+            ServerManager.Instance.SendMessageToService(GameServiceType.GameInstance, gameRequest);
+
+            return true;
+        }
+
+        private bool OnMTXStoreESConvertGameResponse(in ServiceMessage.MTXStoreESConvertGameResponse mtxStoreESConvertGameResponse)
+        {
+            ulong requestId = mtxStoreESConvertGameResponse.RequestId;
+            bool result = mtxStoreESConvertGameResponse.Result;
+
+            // We should have already handled authentication before routing the request to the game instance, so just route the result back.
+            ServiceMessage.MTXStoreESConvertResponse response = new(requestId, result ? (int)HttpStatusCode.OK : (int)HttpStatusCode.InternalServerError);
+            ServerManager.Instance.SendMessageToService(GameServiceType.WebFrontend, response);
+
             return true;
         }
 

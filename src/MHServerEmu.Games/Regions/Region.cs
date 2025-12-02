@@ -79,6 +79,9 @@ namespace MHServerEmu.Games.Regions
         private int _playerDeaths;
         private PrototypeId _avatarOnKilledInfo = PrototypeId.Invalid;
 
+        // REMOVEME
+        private int _currentTeamIndex = 0;
+
         public Game Game { get; private set; }
         public ulong Id { get; private set; } // InstanceAddress
         public RegionSettings Settings { get; private set; }
@@ -95,6 +98,7 @@ namespace MHServerEmu.Games.Regions
         public bool IsPrivate { get => Prototype != null && Prototype.IsPrivate; }
         public RegionBehavior Behavior { get => Prototype != null ? Prototype.Behavior : RegionBehavior.Invalid; }
         public bool CanBeLastTown { get => Behavior == RegionBehavior.Town || PrototypeDataRef == GameDatabase.GlobalsPrototype.PrestigeRegionProtoRef; }
+        public bool AllowsPartyFormation { get => Prototype != null && Prototype.PartyFormationAllowed; }
 
         public Aabb Aabb { get; private set; }
         public Aabb2 Aabb2 { get => new(Aabb); }
@@ -191,6 +195,7 @@ namespace MHServerEmu.Games.Regions
         public Event<PlayerEnteredAreaGameEvent> PlayerEnteredAreaEvent = new();
         public Event<PlayerLeftAreaGameEvent> PlayerLeftAreaEvent = new();
         public Event<PartySizeChangedGameEvent> PartySizeChangedEvent = new();
+        public Event<PlayerLeavePartyGameEvent> PlayerLeavePartyEvent = new();
         public Event<PlayerSwitchedToAvatarGameEvent> PlayerSwitchedToAvatarEvent = new();
         public Event<PlayerFactionChangedGameEvent> PlayerFactionChangedEvent = new();
         public Event<PlayerCollectedItemGameEvent> PlayerCollectedItemEvent = new();
@@ -869,8 +874,8 @@ namespace MHServerEmu.Games.Regions
                 }
             }
         }
-        
-        public bool ContainsPvPMatch()
+
+        public PvP GetPvPMatch()
         {
             EntityManager entityManager = Game.EntityManager;
 
@@ -884,10 +889,15 @@ namespace MHServerEmu.Games.Regions
                     continue;
 
                 if (pvpProto.IsPvP)
-                    return true;
+                    return pvp;
             }
 
-            return false;
+            return null;
+        }
+
+        public bool ContainsPvPMatch()
+        {
+            return GetPvPMatch() != null;
         }
 
         private void SetRegionLevel()
@@ -1675,6 +1685,14 @@ namespace MHServerEmu.Games.Regions
             return regionProto.PausesBoostConditions || boostTimersRunning == false;
         }
 
+        public int GetTeamIndex()
+        {
+            // REMOVEME
+            int index = _currentTeamIndex;
+            _currentTeamIndex = ++_currentTeamIndex % 2;
+            return index;
+        }
+
         private bool InitDividedStartLocations(DividedStartLocationPrototype[] dividedStartLocations)
         {
             ClearDividedStartLocations();
@@ -1851,11 +1869,14 @@ namespace MHServerEmu.Games.Regions
                         {
                             killerAvatar.Properties.AdjustProperty(1, PropertyEnum.PvPKills);
 
+                            // not used in PvP.UpdatePlayerCollection
+                            /* 
                             int killerMatchIndex = killerAvatar.Properties[PropertyEnum.PvPLastMatchIndex];
                             killerAvatar.Properties.AdjustProperty(1, new(PropertyEnum.PvPKillsDuringMatch, (PropertyParam)killerMatchIndex));
 
                             int victimMatchIndex = avatar.Properties[PropertyEnum.PvPLastMatchIndex];
                             avatar.Properties.AdjustProperty(1, new(PropertyEnum.PvPDeathsDuringMatch, (PropertyParam)victimMatchIndex));
+                            */
                         }
                     }
 
@@ -1925,16 +1946,6 @@ namespace MHServerEmu.Games.Regions
                 startTargetRef = pickLocation.Location.Target;
                 return true;
             }
-
-            return false;
-        }
-
-        public bool InOwnerParty(Player player)
-        {
-            ulong playerGuid = player.DatabaseUniqueId;
-            if (Settings.OwnerPlayerDbId == playerGuid) return true;    // FIXME: This doesn't look right
-
-            // TODO check owner is in party
 
             return false;
         }

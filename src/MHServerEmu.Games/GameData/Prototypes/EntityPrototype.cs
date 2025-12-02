@@ -2,6 +2,7 @@
 using MHServerEmu.Core.Collections;
 using MHServerEmu.Core.Extensions;
 using MHServerEmu.Core.Logging;
+using MHServerEmu.Core.Memory;
 using MHServerEmu.Core.System.Random;
 using MHServerEmu.Core.VectorMath;
 using MHServerEmu.Games.Dialog;
@@ -379,6 +380,11 @@ namespace MHServerEmu.Games.GameData.Prototypes
         public bool HasKeyword(KeywordPrototype keywordProto)
         {
             return keywordProto != null && KeywordPrototype.TestKeywordBit(_keywordsMask, keywordProto);
+        }
+
+        public bool HasKeyword(PrototypeId keyword)
+        {
+            return HasKeyword(GameDatabase.GetPrototype<KeywordPrototype>(keyword));
         }
 
         public bool GetCurrency(out PrototypeId currencyRef, out int amount)
@@ -879,10 +885,11 @@ namespace MHServerEmu.Games.GameData.Prototypes
         {
             AlliancePrototype resultProto = null;
 
-            if (SpawnSequence.HasValue())
-            {
-                HashSet<PrototypeId> entities = new ();
+            if (SpawnSequence.IsNullOrEmpty()) return null;
 
+            HashSet<PrototypeId> entities = HashSetPool<PrototypeId>.Instance.Get();
+            try
+            {
                 foreach (var sequenceProto in SpawnSequence)
                 {
                     if (sequenceProto == null) continue;
@@ -892,7 +899,7 @@ namespace MHServerEmu.Games.GameData.Prototypes
 
                 foreach (var entityRef in entities)
                 {
-                    if (entityRef == PrototypeId.Invalid) continue;                    
+                    if (entityRef == PrototypeId.Invalid) continue;
                     var proto = GameDatabase.GetPrototype<Prototype>(entityRef);
                     if (proto is AgentPrototype agentProto && agentProto.Alliance != PrototypeId.Invalid)
                     {
@@ -906,11 +913,14 @@ namespace MHServerEmu.Games.GameData.Prototypes
                     {
                         return null;
                     }
-                   
                 }
-            }
 
-            return resultProto;
+                return resultProto;
+            }
+            finally
+            {
+                HashSetPool<PrototypeId>.Instance.Return(entities);
+            }
         }
 
     }

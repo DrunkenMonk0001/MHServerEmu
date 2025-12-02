@@ -1,8 +1,11 @@
 ﻿using Gazillion;
+using MHServerEmu.Core.Config;
 using MHServerEmu.Core.Logging;
 using MHServerEmu.Core.Network;
 using MHServerEmu.Games.Entities;
 using MHServerEmu.Games.GameData;
+using MHServerEmu.Games.MTXStore;
+using MHServerEmu.Games.Properties;
 using MHServerEmu.Games.Regions;
 using MHServerEmu.Games.Social.Communities;
 
@@ -58,12 +61,32 @@ namespace MHServerEmu.Games.Network
                     OnCommunityBroadcastBatch(communityBroadcastBatch);
                     break;
 
+                case ServiceMessage.PartyOperationRequestServerResult partyOperationRequestServerResult:
+                    OnPartyOperationRequestServerResult(partyOperationRequestServerResult);
+                    break;
+
+                case ServiceMessage.PartyInfoServerUpdate partyInfoServerUpdate:
+                    OnPartyInfoServerUpdate(partyInfoServerUpdate);
+                    break;
+
+                case ServiceMessage.PartyMemberInfoServerUpdate partyMemberInfoServerUpdate:
+                    OnPartyMemberInfoServerUpdate(partyMemberInfoServerUpdate);
+                    break;
+
                 case ServiceMessage.LeaderboardStateChange leaderboardStateChange:
                     OnLeaderboardStateChange(leaderboardStateChange);
                     break;
 
                 case ServiceMessage.LeaderboardRewardRequestResponse leaderboardRewardRequestResponse:
                     OnLeaderboardRewardRequestResponse(leaderboardRewardRequestResponse);
+                    break;
+
+                case ServiceMessage.MTXStoreESBalanceGameRequest mtxStoreESBalanceGameRequest:
+                    OnMTXStoreESBalanceGameRequest(mtxStoreESBalanceGameRequest);
+                    break;
+
+                case ServiceMessage.MTXStoreESConvertGameRequest mtxStoreESConvertGameRequest:
+                    OnMTXStoreESConvertGameRequest(mtxStoreESConvertGameRequest);
                     break;
 
                 default:
@@ -173,6 +196,35 @@ namespace MHServerEmu.Games.Network
             return true;
         }
 
+        private void OnPartyOperationRequestServerResult(in ServiceMessage.PartyOperationRequestServerResult partyOperationRequestServerResult)
+        {
+            ulong playerDbId = partyOperationRequestServerResult.PlayerDbId;
+            PartyOperationPayload request = partyOperationRequestServerResult.Request;
+            GroupingOperationResult result = partyOperationRequestServerResult.Result;
+
+            Game.PartyManager.OnPartyOperationRequestServerResult(playerDbId, request, result);
+        }
+
+        private void OnPartyInfoServerUpdate(in ServiceMessage.PartyInfoServerUpdate partyInfoServerUpdate)
+        {
+            ulong playerDbId = partyInfoServerUpdate.PlayerDbId;
+            ulong groupId = partyInfoServerUpdate.GroupId;
+            PartyInfo partyInfo = partyInfoServerUpdate.PartyInfo;
+
+            Game.PartyManager.OnPartyInfoServerUpdate(playerDbId, groupId, partyInfo);
+        }
+
+        private void OnPartyMemberInfoServerUpdate(in ServiceMessage.PartyMemberInfoServerUpdate partyMemberInfoServerUpdate)
+        {
+            ulong playerDbId = partyMemberInfoServerUpdate.PlayerDbId;
+            ulong groupId = partyMemberInfoServerUpdate.GroupId;
+            ulong memberDbId = partyMemberInfoServerUpdate.MemberDbId;
+            PartyMemberEvent memberEvent = partyMemberInfoServerUpdate.MemberEvent;
+            PartyMemberInfo memberInfo = partyMemberInfoServerUpdate.MemberInfo;
+
+            Game.PartyManager.OnPartyMemberInfoServerUpdate(playerDbId, groupId, memberDbId, memberEvent, memberInfo);
+        }
+
         private void OnLeaderboardStateChange(in ServiceMessage.LeaderboardStateChange leaderboardStateChange)
         {
             LeaderboardState state = leaderboardStateChange.State;
@@ -209,6 +261,36 @@ namespace MHServerEmu.Games.Network
                 return Logger.WarnReturn(false, $"OnLeaderboardRewardRequestResponse(): Player 0x{playerId:X} not found in game [{Game}]");
 
             player.LeaderboardManager.AddPendingRewards(leaderboardRewardRequestResponse.Entries);
+            return true;
+        }
+
+        private bool OnMTXStoreESBalanceGameRequest(in ServiceMessage.MTXStoreESBalanceGameRequest mtxStoreESBalanceGameRequest)
+        {
+            Player player = Game.EntityManager.GetEntityByDbGuid<Player>(mtxStoreESBalanceGameRequest.PlayerDbId);
+            if (player == null) return Logger.WarnReturn(false, "OnMTXStoreESBalanceGameRequest(): player == null");
+
+            int currentBalance = player.Properties[PropertyEnum.Currency, GameDatabase.CurrencyGlobalsPrototype.EternitySplinters];
+
+            var config = ConfigManager.Instance.GetConfig<MTXStoreConfig>();
+            float conversionRatio = config.ESToGazillioniteConversionRatio;
+            int conversionStep = config.ESToGazillioniteConversionStep;
+
+            ServiceMessage.MTXStoreESBalanceGameResponse response = new(mtxStoreESBalanceGameRequest.RequestId, currentBalance, conversionRatio, conversionStep);
+            ServerManager.Instance.SendMessageToService(GameServiceType.PlayerManager, response);
+
+            return true;
+        }
+
+        private bool OnMTXStoreESConvertGameRequest(in ServiceMessage.MTXStoreESConvertGameRequest mtxStoreESConvertGameRequest)
+        {
+            Player player = Game.EntityManager.GetEntityByDbGuid<Player>(mtxStoreESConvertGameRequest.PlayerDbId);
+            if (player == null) return Logger.WarnReturn(false, "OnMTXStoreESConvertGameRequest(): player == null");
+
+            int gAmount = player.ConvertEternitySplintersToGazillionite(mtxStoreESConvertGameRequest.Amount);
+
+            ServiceMessage.MTXStoreESConvertGameResponse response = new(mtxStoreESConvertGameRequest.RequestId, gAmount > 0);
+            ServerManager.Instance.SendMessageToService(GameServiceType.PlayerManager, response);
+
             return true;
         }
 

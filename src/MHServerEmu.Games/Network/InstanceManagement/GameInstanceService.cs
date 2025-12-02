@@ -45,6 +45,8 @@ namespace MHServerEmu.Games.Network.InstanceManagement
 
         public void ReceiveServiceMessage<T>(in T message) where T : struct, IGameServiceMessage
         {
+            // TODO?: Add common interface for routable messages if we switch to class-based service messages.
+
             switch (message)
             {
                 case ServiceMessage.RouteMessageBuffer routeMessageBuffer:
@@ -94,6 +96,18 @@ namespace MHServerEmu.Games.Network.InstanceManagement
                         GameManager.BroadcastServiceMessageToGames(communityBroadcastBatch);
                     break;
 
+                case ServiceMessage.PartyOperationRequestServerResult partyOperationRequestServerResult:
+                    RouteMessageToGame(partyOperationRequestServerResult.GameId, partyOperationRequestServerResult);
+                    break;
+
+                case ServiceMessage.PartyInfoServerUpdate partyInfoServerUpdate:
+                    RouteMessageToGame(partyInfoServerUpdate.GameId, partyInfoServerUpdate);
+                    break;
+
+                case ServiceMessage.PartyMemberInfoServerUpdate partyMemberInfoServerUpdate:
+                    RouteMessageToGame(partyMemberInfoServerUpdate.GameId, partyMemberInfoServerUpdate);
+                    break;
+
                 case ServiceMessage.LeaderboardStateChange leaderboardStateChange:
                     OnLeaderboardStateChange(leaderboardStateChange);
                     break;
@@ -106,15 +120,24 @@ namespace MHServerEmu.Games.Network.InstanceManagement
                     OnLeaderboardRewardRequestResponse(leaderboardRewardRequestResponse);
                     break;
 
+                case ServiceMessage.MTXStoreESBalanceGameRequest mtxStoreESBalanceGameRequest:
+                    RouteMessageToGame(mtxStoreESBalanceGameRequest.GameId, mtxStoreESBalanceGameRequest);
+                    break;
+
+                case ServiceMessage.MTXStoreESConvertGameRequest mtxStoreESConvertGameRequest:
+                    RouteMessageToGame(mtxStoreESConvertGameRequest.GameId, mtxStoreESConvertGameRequest);
+                    break;
+
                 default:
                     Logger.Warn($"ReceiveServiceMessage(): Unhandled service message type {typeof(T).Name}");
                     break;
             }
         }
 
-        public string GetStatus()
+        public void GetStatus(Dictionary<string, long> statusDict)
         {
-            return $"Games: {GameManager.GameCount} | Players: {GameManager.PlayerCount}";
+            statusDict["GisGames"] = GameManager.GameCount;
+            statusDict["GisPlayers"] = GameManager.PlayerCount;
         }
 
         private bool RouteMessageToGame<T>(ulong gameId, T message) where T: struct, IGameServiceMessage

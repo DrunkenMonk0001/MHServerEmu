@@ -31,6 +31,7 @@ using MHServerEmu.Games.Powers;
 using MHServerEmu.Games.Properties;
 using MHServerEmu.Games.Regions;
 using MHServerEmu.Games.Social.Communities;
+using MHServerEmu.Games.Social.Parties;
 
 namespace MHServerEmu.Games.Network
 {
@@ -95,7 +96,7 @@ namespace MHServerEmu.Games.Network
 
             // Send the achievement database if this is not a transfer from another game.
             if (_dbAccount.MigrationData.IsFirstLoad)
-                SendMessage(AchievementDatabase.Instance.GetDump());
+                SendMessage(AchievementDatabase.Instance.GetDump(_frontendClient.Session.Locale));
 
             return true;
         }
@@ -130,7 +131,7 @@ namespace MHServerEmu.Games.Network
             // Set G balance for new accounts if needed
             if (_dbAccount.Player.GazillioniteBalance == -1)
             {
-                long defaultBalance = ConfigManager.Instance.GetConfig<BillingConfig>().GazillioniteBalanceForNewAccounts;
+                long defaultBalance = ConfigManager.Instance.GetConfig<MTXStoreConfig>().GazillioniteBalanceForNewAccounts;
                 Logger.Trace($"LoadFromDBAccount(): Setting Gazillionite balance for account [{_dbAccount}] to the default value for new accounts ({defaultBalance})", LogCategory.MTXStore);
                 _dbAccount.Player.GazillioniteBalance = defaultBalance;
             }
@@ -161,6 +162,7 @@ namespace MHServerEmu.Games.Network
             // Restore migrated data
             MigrationUtility.RestoreProperties(migrationData.PlayerProperties, Player.Properties);
             MigrationUtility.RestoreWorldView(migrationData, WorldView);
+            MigrationUtility.RestoreCommunity(migrationData, Player.Community);
 
             // Add all badges to admin accounts
             if (_dbAccount.UserLevel == AccountUserLevel.Admin)
@@ -255,6 +257,7 @@ namespace MHServerEmu.Games.Network
                     {
                         MigrationUtility.StoreProperties(migrationData.PlayerProperties, Player.Properties);
                         MigrationUtility.StoreWorldView(migrationData, WorldView);
+                        MigrationUtility.StoreCommunity(migrationData, Player.Community);
                     }
                 }
                 else
@@ -381,6 +384,8 @@ namespace MHServerEmu.Games.Network
 
             if (_dbAccount.MigrationData.IsFirstLoad)
             {
+                Player.SendDifficultyTierPreferenceToPlayerManager();
+
                 // Recount and update achievements
                 Player.AchievementManager.RecountAchievements();
                 Player.AchievementManager.UpdateScore();
@@ -408,6 +413,10 @@ namespace MHServerEmu.Games.Network
                 return;
             }
 
+            // REMOVEME: Temp team selection logic until we have proper matchmaking.
+            if (region.ContainsPvPMatch())
+                TransferParams.DestTeamIndex = region.GetTeamIndex();
+
             if (TransferParams.FindStartLocation(out Vector3 startPosition, out Orientation startOrientation) == false)
             {
                 Logger.Error($"EnterGame(): Failed to find start location");
@@ -417,6 +426,7 @@ namespace MHServerEmu.Games.Network
 
             AOI.SetRegion(region.Id, false, startPosition, startOrientation);
             region.PlayerEnteredRegionEvent.Invoke(new(Player, region.PrototypeDataRef));
+            Game.PartyManager.OnPlayerEnteredRegion(Player);
 
             // Load discovered map and entities
             Player.GetMapDiscoveryData(region.Id)?.LoadPlayerDiscovered(Player);
@@ -499,6 +509,7 @@ namespace MHServerEmu.Games.Network
                 case ClientToGameServerMessage.NetMessageGetCatalog:                        OnGetCatalog(message); break;                       // 68
                 case ClientToGameServerMessage.NetMessageGetCurrencyBalance:                OnGetCurrencyBalance(message); break;               // 69
                 case ClientToGameServerMessage.NetMessageBuyItemFromCatalog:                OnBuyItemFromCatalog(message); break;               // 70
+                case ClientToGameServerMessage.NetMessageBuyGiftForOtherPlayer:             OnBuyGiftForOtherPlayer(message); break;            // 71
                 case ClientToGameServerMessage.NetMessagePurchaseUnlock:                    OnPurchaseUnlock(message); break;                   // 72
                 case ClientToGameServerMessage.NetMessageNotifyFullscreenMovieStarted:      OnNotifyFullscreenMovieStarted(message); break;     // 84
                 case ClientToGameServerMessage.NetMessageNotifyFullscreenMovieFinished:     OnNotifyFullscreenMovieFinished(message); break;    // 85
@@ -518,8 +529,10 @@ namespace MHServerEmu.Games.Network
                 case ClientToGameServerMessage.NetMessageHUDTutorialDismissed:              OnHUDTutorialDismissed(message); break;             // 111
                 case ClientToGameServerMessage.NetMessageTryMoveInventoryContentsToGeneral: OnTryMoveInventoryContentsToGeneral(message); break;// 112
                 case ClientToGameServerMessage.NetMessageSetPlayerGameplayOptions:          OnSetPlayerGameplayOptions(message); break;         // 113
+                case ClientToGameServerMessage.NetMessageTeleportToPartyMember:             OnTeleportToPartyMember(message); break;            // 114
                 case ClientToGameServerMessage.NetMessageSelectAvatarSynergies:             OnSelectAvatarSynergies(message); break;            // 116
                 case ClientToGameServerMessage.NetMessageRequestLegendaryMissionReroll:     OnRequestLegendaryMissionReroll(message); break;    // 117
+                case ClientToGameServerMessage.NetMessageRequestPlayerOwnsItemStatus:       OnRequestPlayerOwnsItemStatus(message); break;      // 120
                 case ClientToGameServerMessage.NetMessageRequestInterestInInventory:        OnRequestInterestInInventory(message); break;       // 121
                 case ClientToGameServerMessage.NetMessageRequestInterestInAvatarEquipment:  OnRequestInterestInAvatarEquipment(message); break; // 123
                 case ClientToGameServerMessage.NetMessageRequestInterestInTeamUpEquipment:  OnRequestInterestInTeamUpEquipment(message); break; // 124
@@ -548,6 +561,7 @@ namespace MHServerEmu.Games.Network
                 case ClientToGameServerMessage.NetMessageStashTabOptions:                   OnStashTabOptions(message); break;                  // 156
                 case ClientToGameServerMessage.NetMessageLeaderboardRequest:                OnLeaderboardRequest(message); break;               // 157
                 case ClientToGameServerMessage.NetMessageLeaderboardInitializeRequest:      OnLeaderboardInitializeRequest(message); break;     // 159
+                case ClientToGameServerMessage.NetMessagePartyOperationRequest:             OnPartyOperationRequest(message); break;            // 162
                 case ClientToGameServerMessage.NetMessageMissionTrackerFiltersUpdate:           OnMissionTrackerFiltersUpdate(message); break;              // 166
                 case ClientToGameServerMessage.NetMessageAchievementMissionTrackerFilterChange: OnAchievementMissionTrackerFilterChange(message); break;    // 167
 
@@ -665,13 +679,10 @@ namespace MHServerEmu.Games.Network
             Vector3 position = avatar.RegionLocation.Position;
             Orientation orientation = avatar.RegionLocation.Orientation;
 
+            float desyncDistanceSq = Vector3.DistanceSquared2D(position, syncPosition);
+
             if (canMove || canRotate)
             {
-                const float PositionDesyncDistanceSqThreshold = 512f * 512f;
-                float desyncDistanceSq = Vector3.DistanceSquared2D(position, syncPosition);
-                if (desyncDistanceSq > PositionDesyncDistanceSqThreshold)
-                    Logger.Warn($"OnUpdateAvatarState(): Position desync for player [{Player}] - {MathHelper.SquareRoot(desyncDistanceSq)}");
-
                 position = syncPosition;
                 orientation = syncOrientation;
 
@@ -701,10 +712,6 @@ namespace MHServerEmu.Games.Network
                 {
                     if (LocomotionState.SerializeFrom(archive, newSyncState, fieldFlags) == false)
                         return Logger.WarnReturn(false, "OnUpdateAvatarState(): Failed to transfer newSyncState");
-
-                    const float MoveSpeedDesyncThreshold = 3000f;
-                    if (newSyncState.BaseMoveSpeed > MoveSpeedDesyncThreshold)
-                        Logger.Warn($"OnUpdateAvatarState(): Movement speed desync for player [{Player}] - {newSyncState.BaseMoveSpeed}");
                 }
                 catch (Exception e)
                 {
@@ -713,6 +720,10 @@ namespace MHServerEmu.Games.Network
 
                 avatar.Locomotor.SetSyncState(newSyncState, position, orientation);
             }
+
+            const float PositionDesyncDistanceSqThreshold = 512f * 512f;
+            if (desyncDistanceSq > PositionDesyncDistanceSqThreshold)
+                Logger.Warn($"OnUpdateAvatarState(): Position desync for player [{Player}] - offset={MathHelper.SquareRoot(desyncDistanceSq)}, moveSpeed={avatar.Locomotor.LastSyncState.BaseMoveSpeed}, power={avatar.ActivePowerRef.GetName()}");
 
             return true;
         }
@@ -1494,6 +1505,14 @@ namespace MHServerEmu.Games.Network
             return CatalogManager.Instance.OnBuyItemFromCatalog(Player, buyItemFromCatalog);
         }
 
+        private bool OnBuyGiftForOtherPlayer(in MailboxMessage message) // 71
+        {
+            var buyGiftForOtherPlayer = message.As<NetMessageBuyGiftForOtherPlayer>();
+            if (buyGiftForOtherPlayer == null) return Logger.WarnReturn(false, $"OnBuyGiftForOtherPlayer(): Failed to retrieve message");
+
+            return CatalogManager.Instance.OnBuyGiftForOtherPlayer(Player, buyGiftForOtherPlayer);
+        }
+
         private bool OnPurchaseUnlock(MailboxMessage message)   // 72
         {
             var purchaseUnlock = message.As<NetMessagePurchaseUnlock>();
@@ -1739,6 +1758,24 @@ namespace MHServerEmu.Games.Network
             return true;
         }
 
+        private bool OnTeleportToPartyMember(in MailboxMessage message) // 114
+        {
+            var teleportToPartyMember = message.As<NetMessageTeleportToPartyMember>();
+            if (teleportToPartyMember == null) return Logger.WarnReturn(false, $"OnTeleportToPartyMember(): Failed to retrieve message");
+
+            Party party = Player.GetParty();
+            if (party == null) return Logger.WarnReturn(false, "OnTeleportToPartyMember(): party == null");
+
+            Avatar avatar = Player.CurrentAvatar;
+            if (avatar == null) return Logger.WarnReturn(false, "OnTeleportToPartyMember(): avatar == null");
+
+            ulong memberId = party.GetMemberIdByName(teleportToPartyMember.PlayerName);
+            if (memberId == 0) return Logger.WarnReturn(false, "OnTeleportToPartyMember(): memberId == 0");
+
+            Player.BeginTeleportToPartyMember(memberId);
+            return true;
+        }
+
         private bool OnSelectAvatarSynergies(MailboxMessage message)    // 116
         {
             var selectAvatarSynergies = message.As<NetMessageSelectAvatarSynergies>();
@@ -1798,6 +1835,22 @@ namespace MHServerEmu.Games.Network
             var requestLegendaryMissionRerol = message.As<NetMessageRequestLegendaryMissionReroll>();
             if (requestLegendaryMissionRerol == null) return Logger.WarnReturn(false, $"OnRequestLegendaryMissionReroll(): Failed to retrieve message");
             Player.RequestLegendaryMissionReroll();
+            return true;
+        }
+
+        private bool OnRequestPlayerOwnsItemStatus(in MailboxMessage message)   // 120
+        {
+            var requestPlayerOwnsItemStatus = message.As<NetMessageRequestPlayerOwnsItemStatus>();
+            if (requestPlayerOwnsItemStatus == null) return Logger.WarnReturn(false, "OnRequestPlayerOwnsItemStatus(): Failed to retrieve message");
+
+            PrototypeId itemProtoRef = (PrototypeId)requestPlayerOwnsItemStatus.ItemProtoId;
+            bool ownsItem = Player.OwnsItem((PrototypeId)requestPlayerOwnsItemStatus.ItemProtoId);
+
+            Player.SendMessage(NetMessagePlayerOwnsItemResponse.CreateBuilder()
+                .SetItemProtoId((ulong)itemProtoRef)
+                .SetOwns(ownsItem)
+                .Build());
+
             return true;
         }
 
@@ -2231,6 +2284,20 @@ namespace MHServerEmu.Games.Network
             // All the data with need to handle initialize requests is cached in games, so no need to use the leaderboard service here.
             var response = LeaderboardInfoCache.Instance.BuildInitializeRequestResponse(initializeRequest);
             SendMessage(response);
+
+            return true;
+        }
+
+        private bool OnPartyOperationRequest(in MailboxMessage message) // 162
+        {
+            var partyOperationRequest = message.As<NetMessagePartyOperationRequest>();
+            if (partyOperationRequest == null) return Logger.WarnReturn(false, $"OnPartyOperationRequest(): Failed to retrieve message");
+
+            ulong requestingPlayerDbId = partyOperationRequest.Payload.RequestingPlayerDbId;
+            if (requestingPlayerDbId != Player.DatabaseUniqueId)
+                return Logger.WarnReturn(false, $"OnPartyOperationRequest(): requestingPlayerDbId != Player.DatabaseUniqueId");
+
+            Game.PartyManager.OnClientPartyOperationRequest(Player, partyOperationRequest.Payload);
 
             return true;
         }

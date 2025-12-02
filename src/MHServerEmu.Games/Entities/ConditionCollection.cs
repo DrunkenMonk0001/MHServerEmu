@@ -694,6 +694,11 @@ namespace MHServerEmu.Games.Entities
             RemoveConditionsFiltered(ConditionFilter.IsConditionWithPrototypeFunc, protoRef);
         }
 
+        public void RemoveConditionsOfPower(PrototypeId powerProtoRef)
+        {
+            RemoveConditionsFiltered(ConditionFilter.IsConditionOfPowerFunc, powerProtoRef);
+        }
+
         public void RemoveConditionsWithKeyword(PrototypeId keywordProtoRef)
         {
             KeywordPrototype keywordProto = keywordProtoRef.As<KeywordPrototype>();
@@ -1134,6 +1139,10 @@ namespace MHServerEmu.Games.Entities
             // Start the ticker if it wasn't disabled above
             if (condition.IsEnabled)
                 StartTicker(condition);
+
+            // Notify the owner avatar of a new party boost condition if needed
+            if (condition.IsPartyBoost() && _owner is Avatar avatar)
+                avatar.OnPartyBoostConditionAdded(condition);
         }
 
         private void UnaccrueCondition(Condition condition)
@@ -1163,6 +1172,10 @@ namespace MHServerEmu.Games.Entities
             RebuildConditionKeywordsMask(condition.Id);
             DecrementStackCountCache(condition);
             RemoveCachedCancelOnProcTriggers(condition);
+
+            // Notify the owner avatar of a removed party boost condition if needed
+            if (condition.IsPartyBoost() && _owner is Avatar avatar)
+                avatar.OnPartyBoostConditionRemoved(condition);
 
             // Remove proc powers
             Handle handle = new(this, condition);
