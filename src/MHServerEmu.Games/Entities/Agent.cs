@@ -1527,6 +1527,8 @@ namespace MHServerEmu.Games.Entities
                 return true;
             }
 
+            Region?.EntityEnteredCombatEvent.Invoke(new(this));
+
             // Enter combat if not currently in combat
             ScheduleEntityEvent(_exitCombatEvent, inCombatTime);
 
@@ -1541,6 +1543,8 @@ namespace MHServerEmu.Games.Entities
         {
             if (Properties[PropertyEnum.IsInCombat] == false)
                 return Logger.WarnReturn(false, $"ExitCombat(): Agent [{this}] is not in combat");
+
+            Region?.EntityExitedCombatEvent.Invoke(new(this));
 
             if (_exitCombatEvent.IsValid)
                 Game.GameEventScheduler.CancelEvent(_exitCombatEvent);
@@ -2095,7 +2099,20 @@ namespace MHServerEmu.Games.Entities
                     {
                         Property.FromParam(id, 0, out PrototypeId enemyBoost);
                         if (enemyBoost == PrototypeId.Invalid) break;
-                        if (newValue) AssignEnemyBoostActivePower(enemyBoost);
+
+                        if (newValue)
+                        {
+                            AssignEnemyBoostActivePower(enemyBoost);
+                        }
+                        else
+                        {
+                            var popGlobals = GameDatabase.PopulationGlobalsPrototype;
+                            if (enemyBoost == popGlobals.TwinEnemyBoost)
+                            {
+                                var condition = ConditionCollection.GetConditionByRef(popGlobals.TwinEnemyCondition);
+                                if (condition != null) ConditionCollection.RemoveCondition(condition.Id);
+                            }
+                        }
                     }
 
                     break;

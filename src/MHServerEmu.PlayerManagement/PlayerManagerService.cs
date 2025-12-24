@@ -6,6 +6,7 @@ using MHServerEmu.Core.Network;
 using MHServerEmu.Games;
 using MHServerEmu.PlayerManagement.Auth;
 using MHServerEmu.PlayerManagement.Games;
+using MHServerEmu.PlayerManagement.Matchmaking;
 using MHServerEmu.PlayerManagement.Network;
 using MHServerEmu.PlayerManagement.Players;
 using MHServerEmu.PlayerManagement.Regions;
@@ -34,6 +35,10 @@ namespace MHServerEmu.PlayerManagement
         internal ClientManager ClientManager { get; }
         internal CommunityRegistry CommunityRegistry { get; }
         internal MasterPartyManager PartyManager { get; }
+        internal MasterGuildManager GuildManager { get; }
+        internal RegionRequestQueueManager RegionRequestQueueManager { get; }
+
+        internal PlayerManagerEventScheduler EventScheduler { get; }
 
         public PlayerManagerConfig Config { get; }
 
@@ -53,6 +58,10 @@ namespace MHServerEmu.PlayerManagement
             ClientManager = new(this);
             CommunityRegistry = new(this);
             PartyManager = new(this);
+            GuildManager = new(this);
+            RegionRequestQueueManager = new(this);
+
+            EventScheduler = new();
 
             Config = ConfigManager.Instance.GetConfig<PlayerManagerConfig>();
         }
@@ -62,6 +71,10 @@ namespace MHServerEmu.PlayerManagement
         public void Run()
         {
             Instance = this;
+            State = GameServiceState.Starting;
+
+            GuildManager.Initialize();
+            RegionRequestQueueManager.Initialize();
 
             State = GameServiceState.Running;
             while (State == GameServiceState.Running)
@@ -74,6 +87,8 @@ namespace MHServerEmu.PlayerManagement
                 LoginQueueManager.Update();
                 ClientManager.Update();
                 CommunityRegistry.Update();
+
+                EventScheduler.TriggerEvents();
 
                 double tickTimeMS = (_stopwatch.Elapsed - referenceTime).TotalMilliseconds;
                 int sleepTimeMS = (int)Math.Max(TargetTickTimeMS - tickTimeMS, 0);

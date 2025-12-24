@@ -49,6 +49,10 @@ namespace MHServerEmu.PlayerManagement.Network
                     OnCreateRegionResult(createRegionResult);
                     break;
 
+                case ServiceMessage.SetRegionPlayerAccess setRegionPlayerAccess:
+                    OnSetRegionPlayerAccess(setRegionPlayerAccess);
+                    break;
+
                 case ServiceMessage.RequestRegionShutdown requestRegionShutdown:
                     OnRequestRegionShutdown(requestRegionShutdown);
                     break;
@@ -91,6 +95,14 @@ namespace MHServerEmu.PlayerManagement.Network
 
                 case ServiceMessage.PartyBoostUpdate partyBoostUpdate:
                     OnPartyBoostUpdate(partyBoostUpdate);
+                    break;
+
+                case ServiceMessage.GuildMessageToPlayerManager guildMessageFromGame:
+                    OnGuildMessageFromGame(guildMessageFromGame);
+                    break;
+
+                case ServiceMessage.MatchRegionRequestQueueCommand matchRegionRequestQueueCommand:
+                    OnMatchRegionRequestQueueCommand(matchRegionRequestQueueCommand);
                     break;
 
                 case ServiceMessage.AuthRequest authRequest:
@@ -193,6 +205,13 @@ namespace MHServerEmu.PlayerManagement.Network
                 return Logger.WarnReturn(false, $"OnCreateRegionResponse(): Region 0x{createRegionResponse.RegionId:X} not found");
 
             region.OnInstanceCreateResponse(createRegionResponse.Success);
+            return true;
+        }
+
+        private bool OnSetRegionPlayerAccess(in ServiceMessage.SetRegionPlayerAccess setRegionPlayerAccess)
+        {
+            RegionHandle region = _playerManager.WorldManager.GetRegion(setRegionPlayerAccess.RegionId);
+            region?.SetPlayerAccess(setRegionPlayerAccess.PlayerAccess);
             return true;
         }
 
@@ -311,6 +330,7 @@ namespace MHServerEmu.PlayerManagement.Network
         private bool OnCommunityStatusUpdate(in ServiceMessage.CommunityStatusUpdate communityStatusUpdate)
         {
             CommunityMemberBroadcast broadcast = communityStatusUpdate.Broadcast;
+            if (broadcast == null) return Logger.WarnReturn(false, "OnCommunityStatusUpdate(): broadcast == null");
             
             _playerManager.CommunityRegistry.ReceiveMemberBroadcast(broadcast);
             return true;
@@ -365,6 +385,30 @@ namespace MHServerEmu.PlayerManagement.Network
             player.SetPartyBoosts(boosts);
             player.CurrentParty?.UpdateMember(player);
 
+            return true;
+        }
+
+        private bool OnGuildMessageFromGame(in ServiceMessage.GuildMessageToPlayerManager guildMessageFromGame)
+        {
+            GuildMessageSetToPlayerManager messages = guildMessageFromGame.Messages;
+            if (messages == null) return Logger.WarnReturn(false, "OnGuildMessageFromGame(): messages == null");
+
+            _playerManager.GuildManager.OnGuildMessage(messages);
+            return true;
+        }
+
+        private bool OnMatchRegionRequestQueueCommand(in ServiceMessage.MatchRegionRequestQueueCommand matchRegionRequestQueueCommand)
+        {
+            ulong playerDbId = matchRegionRequestQueueCommand.PlayerDbId;
+            PrototypeId regionRef = (PrototypeId)matchRegionRequestQueueCommand.RegionProtoId;
+            PrototypeId difficultyTierRef = (PrototypeId)matchRegionRequestQueueCommand.DifficultyTierProtoId;
+            PrototypeId metaStateRef = (PrototypeId)matchRegionRequestQueueCommand.MetaStateProtoId;
+            RegionRequestQueueCommandVar command = matchRegionRequestQueueCommand.Command;
+            ulong regionRequestGroupId = matchRegionRequestQueueCommand.RegionRequestGroupId;
+            ulong targetPlayerDbId = matchRegionRequestQueueCommand.TargetPlayerDbId;
+
+            PlayerHandle player = _playerManager.ClientManager.GetPlayer(playerDbId);
+            player?.ReceiveRegionRequestQueueCommand(regionRef, difficultyTierRef, metaStateRef, command, regionRequestGroupId, targetPlayerDbId);
             return true;
         }
 

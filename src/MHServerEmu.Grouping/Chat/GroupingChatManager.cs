@@ -2,19 +2,24 @@
 using Google.ProtocolBuffers;
 using MHServerEmu.Core.Config;
 using MHServerEmu.Core.Logging;
+using MHServerEmu.Core.Memory;
 using MHServerEmu.Core.Network;
 using MHServerEmu.DatabaseAccess;
 using MHServerEmu.DatabaseAccess.Models;
 
-namespace MHServerEmu.Grouping
+namespace MHServerEmu.Grouping.Chat
 {
     public class GroupingChatManager
     {
+        private const string PrivateChatPlaceholder = "***";
+
         private static readonly Logger Logger = LogManager.CreateLogger();
 
         private static readonly ChatErrorMessage NoSuchUserErrorMessage = ChatErrorMessage.CreateBuilder()
             .SetErrorMessage(ChatErrorMessages.CHAT_ERROR_NO_SUCH_USER)
             .Build();
+
+        private readonly ChatRoomManager[] _chatRoomManager = new ChatRoomManager[(int)ChatRoomTypes.CHAT_ROOM_TYPE_NUM_TYPES];
 
         private readonly GroupingManagerService _groupingManager;
 
@@ -22,7 +27,7 @@ namespace MHServerEmu.Grouping
         private readonly int _serverPrestigeLevel;
 
         private readonly ChatBroadcastMessage _motd;
-        private readonly bool _logTells;
+        private readonly bool _logPrivateChatRooms;
 
         public GroupingChatManager(GroupingManagerService groupingManager)
         {
@@ -39,7 +44,29 @@ namespace MHServerEmu.Grouping
                 .SetPrestigeLevel(_serverPrestigeLevel)
                 .Build();
 
-            _logTells = config.LogTells;
+            _logPrivateChatRooms = config.LogPrivateChatRooms;
+
+            // Initialize chat room types
+            for (ChatRoomTypes chatRoomType = 0; chatRoomType < ChatRoomTypes.CHAT_ROOM_TYPE_NUM_TYPES; chatRoomType++)
+                _chatRoomManager[(int)chatRoomType] = new(chatRoomType);
+        }
+
+        public bool AddPlayerToRoom(ChatRoomTypes roomType, ulong roomId, ulong playerDbId)
+        {
+            ChatRoomManager chatRoomManager = GetChatRoomManager(roomType);
+            if (chatRoomManager == null)
+                return false;
+
+            return chatRoomManager.AddPlayer(roomId, playerDbId);
+        }
+
+        public bool RemovePlayerFromRoom(ChatRoomTypes roomType, ulong roomId, ulong playerDbId)
+        {
+            ChatRoomManager chatRoomManager = GetChatRoomManager(roomType);
+            if (chatRoomManager == null)
+                return false;
+
+            return chatRoomManager.RemovePlayer(roomId, playerDbId);
         }
 
         public void OnClientAdded(IFrontendClient client)
@@ -51,20 +78,41 @@ namespace MHServerEmu.Grouping
         {
             DBAccount account = ((IDBAccountOwner)client).Account;
 
-            if (string.IsNullOrEmpty(chat.TheMessage.Body) == false)
-                Logger.Info($"[{GetRoomName(chat.RoomType)}] [{account})]: {chat.TheMessage.Body}", LogCategory.Chat);
+            ChatRoomTypes roomType = chat.RoomType;
+            ChatMessage theMessage = chat.TheMessage;
+            ulong roomId = 0;
 
             ChatNormalMessage message = ChatNormalMessage.CreateBuilder()
-                .SetRoomType(chat.RoomType)
+                .SetRoomType(roomType)
                 .SetFromPlayerName(account.PlayerName)
-                .SetTheMessage(chat.TheMessage)
+                .SetTheMessage(theMessage)
                 .SetPrestigeLevel(prestigeLevel)
                 .Build();
 
-            if (playerFilter != null)
-                SendMessageFiltered(message, playerFilter);
+            if (roomType.IsGlobalChatRoom())
+            {
+                // Global chat rooms
+                if (playerFilter != null)
+                    SendMessageFiltered(message, playerFilter);
+                else
+                    SendMessageToAll(message);
+            }
             else
-                SendMessageToAll(message);
+            {
+                // Chat rooms with multiple instances
+                if (SendMessageToChatRoom(message, roomType, (ulong)account.Id, out roomId) == false)
+                    Logger.Warn($"OnChat(): Player [{account}] failed to send message to chat room {roomType}");
+            }
+
+            string messageBody = chat.TheMessage.Body;
+            if (string.IsNullOrEmpty(messageBody) == false)
+            {
+                // Hide the contents of messages in private rooms (party / guild) if needed.
+                if (_logPrivateChatRooms == false && roomType.IsPrivateChatRoom())
+                    messageBody = PrivateChatPlaceholder;
+
+                Logger.Info($"[{roomType.GetRoomName()} (0x{roomId:X})] [{account})]: {messageBody}", LogCategory.Chat);
+            }
         }
 
         public void OnTell(IFrontendClient senderClient, NetMessageTell tell, int prestigeLevel)
@@ -78,8 +126,6 @@ namespace MHServerEmu.Grouping
                 return;
             }
 
-            Logger.Info($"[Tell] [{fromPlayerName} => {tell.TargetPlayerName}]: {(_logTells ? tell.TheMessage.Body : "***")}", LogCategory.Chat);
-
             ChatTellMessage message = ChatTellMessage.CreateBuilder()
                 .SetFromPlayerName(fromPlayerName)
                 .SetTheMessage(tell.TheMessage)
@@ -87,6 +133,9 @@ namespace MHServerEmu.Grouping
                 .Build();
 
             SendMessage(message, targetClient);
+
+            string messageBody = _logPrivateChatRooms ? tell.TheMessage.Body : PrivateChatPlaceholder;
+            Logger.Info($"[Tell] [{fromPlayerName} => {tell.TargetPlayerName}]: {messageBody}", LogCategory.Chat);
         }
 
         public void OnMetagameMessage(IFrontendClient client, string text, bool showSender)
@@ -112,6 +161,14 @@ namespace MHServerEmu.Grouping
             SendMessageToAll(message);
         }
 
+        private ChatRoomManager GetChatRoomManager(ChatRoomTypes roomType)
+        {
+            if (roomType < 0 || roomType >= ChatRoomTypes.CHAT_ROOM_TYPE_NUM_TYPES)
+                return Logger.WarnReturn<ChatRoomManager>(null, $"Invalid room type {roomType}");
+
+            return _chatRoomManager[(int)roomType];
+        }
+
         private void SendMessage(IMessage message, IFrontendClient client)
         {
             _groupingManager.ClientManager.SendMessage(message, client);
@@ -122,43 +179,31 @@ namespace MHServerEmu.Grouping
             _groupingManager.ClientManager.SendMessageFiltered(message, playerFilter);
         }
 
+        private bool SendMessageToChatRoom(IMessage message, ChatRoomTypes roomType, ulong playerDbId, out ulong roomId)
+        {
+            roomId = 0;
+
+            ChatRoomManager chatRoomManager = GetChatRoomManager(roomType);
+            if (chatRoomManager == null) return Logger.WarnReturn(false, "SendMessageToChatRoom(): chatRoomManager == null");
+
+            ChatRoom chatRoom = chatRoomManager.GetRoomForPlayer(playerDbId);
+            if (chatRoom == null)
+                return Logger.WarnReturn(false, $"SendMessageToChatRoom(): Player 0x{playerDbId:X} is not in a chat room of type {roomType}");
+
+            roomId = chatRoom.Id;
+
+            List<ulong> playerFilter = ListPool<ulong>.Instance.Get();
+            chatRoom.GetPlayers(playerFilter);
+
+            SendMessageFiltered(message, playerFilter);
+
+            ListPool<ulong>.Instance.Return(playerFilter);
+            return true;
+        }
+
         private void SendMessageToAll(IMessage message)
         {
             _groupingManager.ClientManager.SendMessageToAll(message);
-        }
-
-        /// <summary>
-        /// Returns the <see cref="string"/> name of the specified chat room type.
-        /// </summary>
-        private static string GetRoomName(ChatRoomTypes type)
-        {
-            return type switch
-            {
-                ChatRoomTypes.CHAT_ROOM_TYPE_LOCAL                  => "Local",
-                ChatRoomTypes.CHAT_ROOM_TYPE_SAY                    => "Say",
-                ChatRoomTypes.CHAT_ROOM_TYPE_PARTY                  => "Party",
-                ChatRoomTypes.CHAT_ROOM_TYPE_TELL                   => "Tell",
-                ChatRoomTypes.CHAT_ROOM_TYPE_BROADCAST_ALL_SERVERS  => "Broadcast",
-                ChatRoomTypes.CHAT_ROOM_TYPE_SOCIAL_ZH              => "Social-CH",
-                ChatRoomTypes.CHAT_ROOM_TYPE_SOCIAL_EN              => "Social-EN",
-                ChatRoomTypes.CHAT_ROOM_TYPE_SOCIAL_FR              => "Social-FR",
-                ChatRoomTypes.CHAT_ROOM_TYPE_SOCIAL_DE              => "Social-DE",
-                ChatRoomTypes.CHAT_ROOM_TYPE_SOCIAL_EL              => "Social-EL",
-                ChatRoomTypes.CHAT_ROOM_TYPE_SOCIAL_JP              => "Social-JP",
-                ChatRoomTypes.CHAT_ROOM_TYPE_SOCIAL_KO              => "Social-KO",
-                ChatRoomTypes.CHAT_ROOM_TYPE_SOCIAL_PT              => "Social-PT",
-                ChatRoomTypes.CHAT_ROOM_TYPE_SOCIAL_RU              => "Social-RU",
-                ChatRoomTypes.CHAT_ROOM_TYPE_SOCIAL_ES              => "Social-ES",
-                ChatRoomTypes.CHAT_ROOM_TYPE_TRADE                  => "Trade",
-                ChatRoomTypes.CHAT_ROOM_TYPE_LFG                    => "LFG",
-                ChatRoomTypes.CHAT_ROOM_TYPE_GUILD                  => "Supergroup",
-                ChatRoomTypes.CHAT_ROOM_TYPE_FACTION                => "Team",
-                ChatRoomTypes.CHAT_ROOM_TYPE_EMOTE                  => "Emote",
-                ChatRoomTypes.CHAT_ROOM_TYPE_ENDGAME                => "Endgame",
-                ChatRoomTypes.CHAT_ROOM_TYPE_METAGAME               => "Match",
-                ChatRoomTypes.CHAT_ROOM_TYPE_GUILD_OFFICER          => "Officer",
-                _                                                   => type.ToString(),
-            };
         }
     }
 }
