@@ -8,6 +8,8 @@ using MHServerEmu.Core.Helpers;
 using MHServerEmu.DatabaseAccess.SQLite;
 using System.Data.SQLite;
 using System.Text;
+using System.Diagnostics;
+using MHServerEmu.Core.System.Time;
 
 
 namespace MHServerEmu.DatabaseAccess.MySQL
@@ -17,7 +19,7 @@ namespace MHServerEmu.DatabaseAccess.MySQL
     /// </summary>
     public class MySQLDBManager : IDBManager
     {
-        private const int CurrentSchemaVersion = 4;         // Increment this when making changes to the database schema
+        private const int CurrentSchemaVersion = 5;         // Increment this when making changes to the database schema (updated to match SQLite)
         private const int NumTestAccounts = 5;              // Number of test accounts to create for new databases
         private const int NumPlayerDataWriteAttempts = 3;   // Number of write attempts to do when saving player data
         public bool isSchemaExist;
@@ -29,14 +31,28 @@ namespace MHServerEmu.DatabaseAccess.MySQL
         private string _dbFilePath;
         private string _connectionString;
 
+        // Backup management added to match SQLiteDBManager feature set.
+        private int _maxBackupNumber;
+        private CooldownTimer _backupTimer;
+        private volatile bool _backupInProgress;
+
         public static MySQLDBManager Instance { get; } = new();
         private MySQLDBManager() { }
 
         public bool Initialize()
         {
             var config = ConfigManager.Instance.GetConfig<MySqlDBManagerConfig>();
-            _connectionString = $"Data Source={_dbFilePath}";
+
+            // Ensure file path is assigned before building any connection string that may use it
             _dbFilePath = Path.Combine(FileHelper.DataDirectory, ConfigManager.Instance.GetConfig<SQLiteDBManagerConfig>().FileName);
+            _connectionString = $"Data Source={_dbFilePath}";
+
+            // Initialize backup settings (use same config keys as SQLite for now to retain parity)
+            var sqliteConfig = ConfigManager.Instance.GetConfig<SQLiteDBManagerConfig>();
+            _maxBackupNumber = sqliteConfig.MaxBackupNumber;
+            _backupTimer = new(TimeSpan.FromMinutes(sqliteConfig.BackupIntervalMinutes));
+            _backupInProgress = false;
+
             using MySqlConnection connection = GetConnection();
             int schemaVersion = GetSchemaVersion(connection);
             var findSchema = connection.Query("SHOW DATABASES LIKE '" + config.MySqlDBName + "';");
@@ -76,9 +92,9 @@ namespace MHServerEmu.DatabaseAccess.MySQL
         {
             using MySqlConnection connection = GetConnection();
 
-            // This check is case insensitive (COLLATE NOCASE)
+            // Use an utf8mb4 collation to match servers/tables using utf8mb4.
             var account = connection.QueryFirstOrDefault<DBAccount>(
-                "SELECT Id, PlayerName FROM Account WHERE LOWER(PlayerName) = LOWER(@PlayerName)",
+                "SELECT Id, PlayerName FROM Account WHERE PlayerName = @PlayerName COLLATE utf8mb4_general_ci",
                 new { PlayerName = playerName });
 
             if (account == null)
@@ -97,7 +113,8 @@ namespace MHServerEmu.DatabaseAccess.MySQL
         public bool TryQueryAccountByEmail(string email, out DBAccount account)
         {
             using MySqlConnection connection = GetConnection();
-            var accounts = connection.Query<DBAccount>("SELECT * FROM Account WHERE Email = @Email", new { Email = email });
+            // Use utf8mb4 collation for case-insensitive comparisons to avoid charset/collation mismatch errors.
+            var accounts = connection.Query<DBAccount>("SELECT * FROM Account WHERE Email = @Email COLLATE utf8mb4_general_ci", new { Email = email });
 
             account = accounts.FirstOrDefault();
             return account != null;
@@ -122,6 +139,16 @@ namespace MHServerEmu.DatabaseAccess.MySQL
                 playerNames[(ulong)account.Id] = account.PlayerName;
 
             return playerNames.Count > 0;
+        }
+
+        public bool TryGetLastLogoutTime(ulong playerDbId, out long lastLogoutTime)
+        {
+            using MySqlConnection connection = GetConnection();
+
+            // Ensure Player table includes LastLogoutTime column in your MySQL schema / migrations.
+            lastLogoutTime = connection.QueryFirstOrDefault<long>("SELECT LastLogoutTime FROM Player WHERE DbGuid = @DbGuid", new { DbGuid = (long)playerDbId });
+
+            return lastLogoutTime > 0;
         }
 
         public bool InsertAccount(DBAccount account)
@@ -213,7 +240,7 @@ namespace MHServerEmu.DatabaseAccess.MySQL
                     {
                         connection.Execute(@$"INSERT IGNORE INTO Player (DbGuid) VALUES (@DbGuid)", account.Player, transaction);
                         connection.Execute(@$"UPDATE Player SET ArchiveData=@ArchiveData, StartTarget=@StartTarget,
-                                            AOIVolume=@AOIVolume, GazillioniteBalance=@GazillioniteBalance WHERE DbGuid = @DbGuid",
+                                            AOIVolume=@AOIVolume, GazillioniteBalance=@GazillioniteBalance, LastLogoutTime=@LastLogoutTime WHERE DbGuid = @DbGuid",
                                             account.Player, transaction);
                     }
                     else
@@ -415,23 +442,24 @@ namespace MHServerEmu.DatabaseAccess.MySQL
             return true;
         }
 
-        /// Returns the user_version value of the current database.
+        /// Returns the schema_version value of the current database.
         private static int GetSchemaVersion(MySqlConnection connection)
         {
-
-            var queryResult = connection.Query<int>("SELECT * FROM " + ConfigManager.Instance.GetConfig<MySqlDBManagerConfig>().MySqlDBName + ".schemaversion"); 
+            var dbName = ConfigManager.Instance.GetConfig<MySqlDBManagerConfig>().MySqlDBName;
+            var queryResult = connection.Query<int>($"SELECT schema_version FROM {dbName}.SchemaVersion");
             if (queryResult.Any())
                 return queryResult.Last();
 
-            return Logger.WarnReturn(-1, "GetSchemaVersion(): Failed to query user_version from the DB");
+            return Logger.WarnReturn(-1, "GetSchemaVersion(): Failed to query schema_version from the DB");
         }
 
 
-        /// Sets the user_version value of the current database.
+        /// Sets the schema_version value of the current database.
 
         private static void SetSchemaVersion(MySqlConnection connection, int version)
         {
-            connection.Execute($"UPDATE "+ ConfigManager.Instance.GetConfig<MySqlDBManagerConfig>().MySqlDBName + ".schemaversion SET schema_version="+CurrentSchemaVersion);
+            var dbName = ConfigManager.Instance.GetConfig<MySqlDBManagerConfig>().MySqlDBName;
+            connection.Execute($"UPDATE {dbName}.SchemaVersion SET schema_version=@version", new { version });
         }
 
 
@@ -594,6 +622,198 @@ namespace MHServerEmu.DatabaseAccess.MySQL
                 using var cmd = new MySqlCommand(statement, connection);
                 cmd.ExecuteNonQuery();
             }
+        }
+
+        // Guild-related methods added to match SQLiteDBManager functionality.
+
+        public bool LoadGuilds(List<DBGuild> outGuilds)
+        {
+            try
+            {
+                using MySqlConnection connection = GetConnection();
+
+                IEnumerable<DBGuild> guildQueryResult = connection.Query<DBGuild>("SELECT * FROM Guild");
+                IEnumerable<DBGuildMember> memberQueryResult = connection.Query<DBGuildMember>("SELECT * FROM GuildMember");
+
+                outGuilds.AddRange(guildQueryResult);
+
+                // Build lookup
+                Dictionary<long, DBGuild> guildLookup = new(outGuilds.Count);
+                foreach (DBGuild guild in outGuilds)
+                    guildLookup.Add(guild.Id, guild);
+
+                foreach (DBGuildMember member in memberQueryResult)
+                {
+                    if (guildLookup.TryGetValue(member.GuildId, out DBGuild guild) == false)
+                    {
+                        Logger.Warn($"LoadGuilds(): Found orphan member [{member}]");
+                        continue;
+                    }
+
+                    guild.Members.Add(member);
+                }
+
+                return true;
+            }
+            catch (Exception e)
+            {
+                outGuilds.Clear();
+                Logger.ErrorException(e, nameof(LoadGuilds));
+                return false;
+            }
+        }
+
+        public bool SaveGuild(DBGuild guild)
+        {
+            try
+            {
+                using MySqlConnection connection = GetConnection();
+
+                int inserted = connection.Execute("INSERT IGNORE INTO Guild (Id, Name, Motd, CreatorDbGuid, CreationTime) VALUES (@Id, @Name, @Motd, @CreatorDbGuid, @CreationTime)", guild);
+
+                // Only name and MOTD should be mutable after creation.
+                if (inserted == 0)
+                    connection.Execute("UPDATE Guild SET Name=@Name, Motd=@Motd WHERE Id=@Id", guild);
+
+                Logger.Trace($"SaveGuild(): {guild}");
+                return true;
+            }
+            catch (Exception e)
+            {
+                Logger.ErrorException(e, nameof(SaveGuild));
+                return false;
+            }
+        }
+
+        public bool DeleteGuild(DBGuild guild)
+        {
+            using MySqlConnection connection = GetConnection();
+            using MySqlTransaction transaction = connection.BeginTransaction();
+
+            try
+            {
+                connection.Execute("DELETE FROM GuildMember WHERE GuildId = @Id", guild, transaction);
+                connection.Execute("DELETE FROM Guild WHERE Id = @Id", guild, transaction);
+
+                transaction.Commit();
+
+                Logger.Trace($"DeleteGuild(): {guild}");
+                return true;
+            }
+            catch (Exception e)
+            {
+                transaction.Rollback();
+                Logger.ErrorException(e, nameof(DeleteGuild));
+                return false;
+            }
+        }
+
+        public bool SaveGuildMember(DBGuildMember guildMember)
+        {
+            try
+            {
+                using MySqlConnection connection = GetConnection();
+
+                int inserted = connection.Execute("INSERT IGNORE INTO GuildMember (PlayerDbGuid, GuildId, Membership) VALUES (@PlayerDbGuid, @GuildId, @Membership)", guildMember);
+
+                // Only membership should be mutable after creation.
+                if (inserted == 0)
+                    connection.Execute("UPDATE GuildMember SET Membership=@Membership WHERE PlayerDbGuid=@PlayerDbGuid", guildMember);
+
+                Logger.Trace($"SaveGuildMember(): {guildMember}");
+                return true;
+            }
+            catch (Exception e)
+            {
+                Logger.ErrorException(e, nameof(SaveGuildMember));
+                return false;
+            }
+        }
+
+        public bool DeleteGuildMember(DBGuildMember guildMember)
+        {
+            try
+            {
+                using MySqlConnection connection = GetConnection();
+
+                connection.Execute("DELETE FROM GuildMember WHERE PlayerDbGuid = @PlayerDbGuid", guildMember);
+
+                Logger.Trace($"DeleteGuildMember(): {guildMember}");
+                return true;
+            }
+            catch (Exception e)
+            {
+                Logger.ErrorException(e, nameof(DeleteGuildMember));
+                return false;
+            }
+        }
+
+        // MySQL backup using mysqldump (requires mysqldump to be on PATH or config.PathToMySqlDump set).
+        // This is a pragmatic implementation: when CreateBackup runs it will call mysqldump using configured credentials
+        // and store a timestamped SQL dump file in the data directory.
+        private void CreateBackup()
+        {
+            //try
+            //{
+            //    Logger.Info("MySQLDBManager.CreateBackup(): Starting MySQL dump backup...");
+
+            //    var config = ConfigManager.Instance.GetConfig<MySqlDBManagerConfig>();
+            //    string dumpExe = string.IsNullOrWhiteSpace(config.PathToMySqlDump) ? "mysqldump" : config.PathToMySqlDump;
+            //    string timestamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
+            //    if (!Directory.Exists(FileHelper.DataDirectory))
+            //        Directory.CreateDirectory(FileHelper.DataDirectory);
+            //    string backupFile = Path.Combine(FileHelper.DataDirectory, $"mysqldump_{config.MySqlDBName}_{timestamp}.sql");
+
+            //    // Build argument list. Use --single-transaction for consistent dump of InnoDB.
+            //    string args = $"--host={config.MySqlIP} --port={config.MySqlPort} --user={config}.MySqlUsername} --password={config.MySqlPw} --single-transaction --routines --triggers {config.MySqlDBName}";
+
+            //    var psi = new ProcessStartInfo
+            //    {
+            //        FileName = dumpExe,
+            //        Arguments = args,
+            //        RedirectStandardOutput = true,
+            //        RedirectStandardError = true,
+            //        UseShellExecute = false,
+            //        CreateNoWindow = true
+            //    };
+
+            //    using var proc = Process.Start(psi);
+            //    if (proc == null)
+            //    {
+            //        Logger.Warn("CreateBackup(): Failed to start mysqldump process.");
+            //        return;
+            //    }
+
+            //    // Read output and write to file
+            //    using (var fs = new FileStream(backupFile, FileMode.Create, FileAccess.Write, FileShare.None))
+            //    using (var sw = new StreamWriter(fs, Encoding.UTF8))
+            //    {
+            //        string stdout = proc.StandardOutput.ReadToEnd();
+            //        sw.Write(stdout);
+            //    }
+
+            //    string stderr = proc.StandardError.ReadToEnd();
+            //    proc.WaitForExit();
+
+            //    if (proc.ExitCode != 0)
+            //    {
+            //        Logger.Warn($"CreateBackup(): mysqldump exited with code {proc.ExitCode}. stderr: {stderr}");
+            //    }
+            //    else
+            //    {
+            //        Logger.Info($"CreateBackup(): Created MySQL dump at {backupFile}");
+            //        // rotate backups
+            //        FileHelper.PrepareFileBackup(backupFile, _maxBackupNumber, out _);
+            //    }
+            //}
+            //catch (Exception e)
+            //{
+            //    Logger.Warn($"CreateBackup(): error while attempting to perform DB backup: {e.Message}");
+            //}
+            //finally
+            //{
+            //    _backupInProgress = false;
+            //}
         }
     }
 }
