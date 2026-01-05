@@ -36,6 +36,7 @@
     <EmbeddedResource Include="MySQL\Scripts\Migrations\1.sql" />
     <EmbeddedResource Include="MySQL\Scripts\Migrations\2.sql" />
     <EmbeddedResource Include="MySQL\Scripts\Migrations\3.sql" />
+    <EmbeddedResource Include="MySQL\Scripts\Migrations\4.sql" />
     <EmbeddedResource Include="SQLite\Scripts\InitializeDatabase.sql" />
     <EmbeddedResource Include="SQLite\Scripts\InitializeLeaderboardsDatabase.sql" />
     <EmbeddedResource Include="SQLite\Scripts\Migrations\0.sql" />
