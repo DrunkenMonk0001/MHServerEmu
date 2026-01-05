@@ -20,6 +20,7 @@
     <None Remove="MySQL\Scripts\Migrations\1.sql" />
     <None Remove="MySQL\Scripts\Migrations\2.sql" />
     <None Remove="MySQL\Scripts\Migrations\3.sql" />
+    <None Remove="MySQL\Scripts\Migrations\4.sql" />
     <None Remove="SQLite\Scripts\InitializeDatabase.sql" />
     <None Remove="SQLite\Scripts\InitializeLeaderboardsDatabase.sql" />
     <None Remove="SQLite\Scripts\Migrations\0.sql" />
