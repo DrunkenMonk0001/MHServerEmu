@@ -49,6 +49,8 @@ namespace MHServerEmu.Games.Entities
         private int _activePowerTargetCount;
         private bool _killSelf;
 
+        private Picker<ulong> _targetPicker;    // Reusable picker for AppliesIntervalPowers hotspots, remove this if we implement picker pooling.
+
         public Hotspot(Game game) : base(game) 
         { 
             SetFlag(EntityFlags.IsHotspot, true); 
@@ -58,13 +60,17 @@ namespace MHServerEmu.Games.Entities
         {
             base.Initialize(settings);
 
-            // if (GetPowerCollectionAllocateIfNull() == null) return false;
+            GetPowerCollectionAllocateIfNull();
+
             var hotspotProto = HotspotPrototype;
             _skipCollide = settings.HotspotSkipCollide;
             HasApplyEffectsDelay = hotspotProto.ApplyEffectsDelayMS > 0;
 
             if (hotspotProto.DirectApplyToMissilesData?.EvalPropertiesToApply != null || hotspotProto.Negatable)
                 SetFlag(EntityFlags.IsCollidableHotspot, true);
+
+            if (hotspotProto.IntervalPowersRandomTarget)
+                _targetPicker = new(Game.Random);
 
             return true;
         }
@@ -82,7 +88,7 @@ namespace MHServerEmu.Games.Entities
             var manager = Game.EntityManager;
             if (manager == null) return;
 
-            List<ulong> overlappingEntities = ListPool<ulong>.Instance.Get();
+            using var overlappingEntitiesHandle = ListPool<ulong>.Instance.Get(out List<ulong> overlappingEntities);
             if (Physics.GetOverlappingEntities(overlappingEntities))
             {
                 var overlapPosition = RegionLocation.Position;
@@ -93,7 +99,6 @@ namespace MHServerEmu.Games.Entities
                     OnOverlapBegin(target, overlapPosition, target.RegionLocation.Position);
                 }
             }
-            ListPool<ulong>.Instance.Return(overlappingEntities);
         }
 
         public override void OnEnteredWorld(EntitySettings settings)
@@ -637,7 +642,7 @@ namespace MHServerEmu.Games.Entities
                 int index = Array.IndexOf(hotspotProto.AppliesPowers, powerRef);
                 if (index == -1 || index >= 32) return;
 
-                var changed = ListPool <(ulong, PowerTargetMap)>.Instance.Get();
+                using var changedHandle = ListPool<(ulong, PowerTargetMap)>.Instance.Get(out List<(ulong, PowerTargetMap)> changed);
 
                 foreach (var kvp in _overlapPowerTargets)
                 {
@@ -652,8 +657,6 @@ namespace MHServerEmu.Games.Entities
 
                 foreach(var kv in changed)
                     _overlapPowerTargets[kv.Item1] = kv.Item2;
-
-                ListPool<(ulong, PowerTargetMap)>.Instance.Return(changed);
             }
         }
 
@@ -798,7 +801,7 @@ namespace MHServerEmu.Games.Entities
 
             if (hotspotProto.IntervalPowersRandomTarget)
             {
-                Picker<ulong> picker = new(Game.Random);
+                Picker<ulong> picker = _targetPicker;
                 var hasLOS = TriBool.Undefined;
                 ulong prevTargetId = InvalidId;
 
@@ -898,7 +901,7 @@ namespace MHServerEmu.Games.Entities
 
             var manager = Game.EntityManager;
 
-            var changed = ListPool<(ulong, PowerTargetMap)>.Instance.Get();
+            using var changedHandle = ListPool<(ulong, PowerTargetMap)>.Instance.Get(out List<(ulong, PowerTargetMap)> changed);
 
             foreach (var entry in _overlapPowerTargets)
             {
@@ -912,8 +915,6 @@ namespace MHServerEmu.Games.Entities
 
             foreach (var kv in changed)
                 _overlapPowerTargets[kv.Item1] = kv.Item2;
-
-            ListPool<(ulong, PowerTargetMap)>.Instance.Return(changed);
 
             ScheduleActivePowersEvent();
         }

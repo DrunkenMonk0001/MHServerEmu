@@ -11,29 +11,30 @@ namespace MHServerEmu.Games.Navi
         Markup = 1 << 1,
     }
 
-    public class TriangleList : InvasiveList<NaviTriangle>
+    public sealed class TriangleList : InvasiveList<NaviTriangle>
     {
         public TriangleList(int maxIterators = 1) : base(maxIterators) { }
-        public override InvasiveListNode<NaviTriangle> GetInvasiveListNode(NaviTriangle element, int listId) => element.InvasiveListNode;
+        public override ref InvasiveListNode<NaviTriangle> GetInvasiveListNode(NaviTriangle element, int listId) => ref element.InvasiveListNode;
     }
 
     public class NaviTriangle
     {
-        public NaviEdge[] Edges { get; private set; }
+        private InlineArray3<NaviEdge> _edges;
+        private InvasiveListNode<NaviTriangle> _invasiveListNode;
+
+        public ref InlineArray3<NaviEdge> Edges { get => ref _edges; }
         public byte EdgeSideFlags { get; private set; }
         public NaviTriangleFlags Flags { get; private set; }
         public PathFlags PathingFlags { get; set; }
-        public InvasiveListNode<NaviTriangle> InvasiveListNode { get; private set; }
+        public ref InvasiveListNode<NaviTriangle> InvasiveListNode { get => ref _invasiveListNode; }
 
         public ContentFlagCounts ContentFlagCounts;     // ContentFlagCounts needs to be a field for Clear() calls
 
         public NaviTriangle(NaviEdge e0, NaviEdge e1, NaviEdge e2)
         {
-            Edges = new NaviEdge[3];
             Edges[0] = e0;
             Edges[1] = e1;
             Edges[2] = e2;
-            InvasiveListNode = new();
             UpdateEdgeSideFlags();
             Attach();
         }
@@ -336,14 +337,13 @@ namespace MHServerEmu.Games.Navi
             NaviEdge edge = OpposedEdge(point);
             return SearchWidth(point, this, edge, float.MaxValue);
         }
-
     }
 
-    public class NaviTriangleState
+    public readonly struct NaviTriangleState
     {
-        public NaviTriangleFlags Flags { get; private set; }
-        public PathFlags PathingFlags { get; private set; }
-        public ContentFlagCounts ContentFlagCounts { get; private set; }    
+        public readonly NaviTriangleFlags Flags;
+        public readonly PathFlags PathingFlags;
+        public readonly ContentFlagCounts ContentFlagCounts;
         
         public NaviTriangleState(NaviTriangle triangle)
         {

@@ -93,6 +93,8 @@ namespace MHServerEmu.Games.Entities
         private readonly EventPointer<CommunityPartyCircleChangedEvent> _communityPartyCircleChangedEvent = new();
         private readonly EventPointer<WorldViewUpdateEvent> _worldViewUpdateEvent = new();
         private readonly EventPointer<TeleportToPartyMemberEvent> _teleportToPartyMemberEvent = new();
+        private readonly EventPointer<AutosaveEvent> _autosaveEvent = new();
+
         private readonly EventGroup _pendingEvents = new();
 
         private readonly PropertyCollection _permaBuffProperties = new();
@@ -100,7 +102,7 @@ namespace MHServerEmu.Games.Entities
         private ReplicatedPropertyCollection _avatarProperties = new();
         private ulong _shardId;     // This was probably used for database sharding, we don't need this
         private RepVar_string _playerName = new();
-        private ulong[] _consoleAccountIds = new ulong[(int)PlayerAvatarIndex.Count];
+        private InlineArray2<ulong> _consoleAccountIds;
         private RepVar_string _secondaryPlayerName = new();
 
         // NOTE: EmailVerified and AccountCreationTimestamp are set in NetMessageGiftingRestrictionsUpdate that
@@ -336,7 +338,7 @@ namespace MHServerEmu.Games.Entities
             // Restore persistent cooldowns
             if (archive.IsPersistent)
             {
-                Dictionary<PropertyId, PropertyValue> setDict = DictionaryPool<PropertyId, PropertyValue>.Instance.Get();
+                using var setDictHandle = DictionaryPool<PropertyId, PropertyValue>.Instance.Get(out Dictionary<PropertyId, PropertyValue> setDict);
 
                 foreach (var kvp in Properties.IteratePropertyRange(PropertyEnum.PowerCooldownDurationPersistent))
                 {
@@ -374,8 +376,6 @@ namespace MHServerEmu.Games.Entities
 
                 foreach (var kvp in setDict)
                     Properties[kvp.Key] = kvp.Value;
-
-                DictionaryPool<PropertyId, PropertyValue>.Instance.Return(setDict);
             }
         }
 
@@ -403,8 +403,7 @@ namespace MHServerEmu.Games.Entities
 
             bool success = base.Serialize(archive);
 
-            if (archive.Version >= ArchiveVersion.AddedMissions)
-                success &= Serializer.Transfer(archive, MissionManager);
+            success &= Serializer.Transfer(archive, MissionManager);
 
             success &= Serializer.Transfer(archive, ref _avatarProperties);
 
@@ -455,39 +454,34 @@ namespace MHServerEmu.Games.Entities
 
             if (archive.InvolvesClient == false)
             {
-                if (archive.Version >= ArchiveVersion.ImplementedMapDiscoveryDataPersistence)
-                    success &= Serializer.Transfer(archive, ref _mapDiscoveryDict);
+                success &= Serializer.Transfer(archive, ref _mapDiscoveryDict);
 
-                if (archive.Version >= ArchiveVersion.AddedVendorPurchaseData)
+                // Vendor purchase data
+                uint numVendorPurchaseData = (uint)_vendorPurchaseDataDict.Count;
+                success &= Serializer.Transfer(archive, ref numVendorPurchaseData);
+
+                if (archive.IsPacking)
                 {
-                    uint numVendorPurchaseData = (uint)_vendorPurchaseDataDict.Count;
-                    success &= Serializer.Transfer(archive, ref numVendorPurchaseData);
+                    foreach (VendorPurchaseData purchaseData in _vendorPurchaseDataDict.Values)
+                        success &= Serializer.Transfer(archive, purchaseData);
+                }
+                else
+                {
+                    _vendorPurchaseDataDict.Clear();
 
-                    if (archive.IsPacking)
+                    for (uint i = 0; i < numVendorPurchaseData; i++)
                     {
-                        foreach (VendorPurchaseData purchaseData in _vendorPurchaseDataDict.Values)
-                            success &= Serializer.Transfer(archive, purchaseData);
-                    }
-                    else
-                    {
-                        _vendorPurchaseDataDict.Clear();
+                        VendorPurchaseData purchaseData = new(PrototypeId.Invalid);
+                        success &= Serializer.Transfer(archive, ref purchaseData);
 
-                        for (uint i = 0; i < numVendorPurchaseData; i++)
-                        {
-                            VendorPurchaseData purchaseData = new(PrototypeId.Invalid);
-                            success &= Serializer.Transfer(archive, ref purchaseData);
-
-                            if (_vendorPurchaseDataDict.TryAdd(purchaseData.InventoryProtoRef, purchaseData) == false)
-                                Logger.Warn($"Serialize(): Failed to add deserialized vendor purchase data {purchaseData}");
-                        }
+                        if (_vendorPurchaseDataDict.TryAdd(purchaseData.InventoryProtoRef, purchaseData) == false)
+                            Logger.Warn($"Serialize(): Failed to add deserialized vendor purchase data {purchaseData}");
                     }
                 }
 
-                if (archive.Version >= ArchiveVersion.ImplementedLoginRewards)
-                {
-                    success &= Serializer.Transfer(archive, ref _loginCount);
-                    success &= Serializer.Transfer(archive, ref _loginRewardCooldownTimeStart);
-                }
+                // Login count
+                success &= Serializer.Transfer(archive, ref _loginCount);
+                success &= Serializer.Transfer(archive, ref _loginRewardCooldownTimeStart);
             }
 
             return success;
@@ -523,6 +517,7 @@ namespace MHServerEmu.Games.Entities
             ClearPlayerTradeInventory();
 
             InitializeVendors();
+            ScheduleAutosave();
             ScheduleCheckHoursPlayedEvent();
             UpdateUISystemLocks();
 
@@ -531,6 +526,9 @@ namespace MHServerEmu.Games.Entities
 
         public override void ExitGame()
         {
+            if (_autosaveEvent.IsValid)
+                Game.GameEventScheduler.CancelEvent(_autosaveEvent);
+
             CancelPlayerTrade();
 
             SendMessage(NetMessageBeginExitGame.DefaultInstance);
@@ -1021,9 +1019,9 @@ namespace MHServerEmu.Games.Entities
             return true;
         }
 
-        public override void OnOtherEntityAddedToMyInventory(Entity entity, InventoryLocation invLoc, bool unpackedArchivedEntity)
+        public override void OnOtherEntityAddedToMyInventory(Entity entity, ref InventoryLocation invLoc, bool unpackedArchivedEntity)
         {
-            base.OnOtherEntityAddedToMyInventory(entity, invLoc, unpackedArchivedEntity);
+            base.OnOtherEntityAddedToMyInventory(entity, ref invLoc, unpackedArchivedEntity);
 
             if (entity is Avatar avatar)
             {
@@ -1074,7 +1072,7 @@ namespace MHServerEmu.Games.Entities
             // Update vendor inventories if we are adding a recipe
             if (invLoc.InventoryConvenienceLabel == InventoryConvenienceLabel.CraftingRecipesLearned)
             {
-                List<VendorTypePrototype> vendorsToUpdate = ListPool<VendorTypePrototype>.Instance.Get();
+                using var vendorsToUpdateHandle = ListPool<VendorTypePrototype>.Instance.Get(out List<VendorTypePrototype> vendorsToUpdate);
 
                 foreach (var kvp in Properties.IteratePropertyRange(PropertyEnum.VendorLevel))
                 {
@@ -1094,8 +1092,6 @@ namespace MHServerEmu.Games.Entities
 
                 foreach (VendorTypePrototype vendorTypeProto in vendorsToUpdate)
                     RollVendorInventory(vendorTypeProto, false);
-
-                ListPool<VendorTypePrototype>.Instance.Return(vendorsToUpdate);
             }
 
             // Adjust available ingredients for auto populated inputs
@@ -1119,9 +1115,9 @@ namespace MHServerEmu.Games.Entities
             }
         }
 
-        public override void OnOtherEntityRemovedFromMyInventory(Entity entity, InventoryLocation invLoc)
+        public override void OnOtherEntityRemovedFromMyInventory(Entity entity, ref InventoryLocation invLoc)
         {
-            base.OnOtherEntityRemovedFromMyInventory(entity, invLoc);
+            base.OnOtherEntityRemovedFromMyInventory(entity, ref invLoc);
 
             if (IsInGame == false || entity is not Item item)
                 return;
@@ -1207,8 +1203,8 @@ namespace MHServerEmu.Games.Entities
             }
 
             // Repeat PlayerCanMove validation done by the client
-            InventoryLocation invLoc = new(containerId, inventoryProtoRef, slot);   // <-- This is heap allocated, which is not great. TODO: pooling?
-            if (item.PlayerCanMove(this, invLoc, out InventoryResult canMoveResult, out PropertyEnum canMoveResultProperty, out _) == false)
+            InventoryLocation invLoc = new(containerId, inventoryProtoRef, slot);
+            if (item.PlayerCanMove(this, ref invLoc, out InventoryResult canMoveResult, out PropertyEnum canMoveResultProperty, out _) == false)
                 return Logger.WarnReturn(false, $"TryInventoryMove(): PlayerCanMove check failed, player=[{this}], item={item}, canMoveResult={canMoveResult}, canMoveResultProperty=[{canMoveResultProperty}]");
 
             // Move
@@ -1252,8 +1248,8 @@ namespace MHServerEmu.Games.Entities
             if (inventory == null) return Logger.WarnReturn(false, "TryInventoryStackSplit(): inventory == null");
 
             // Do the split
-            InventoryLocation invLoc = new(containerId, inventoryProtoRef, slot);   // <-- This is heap allocated, which is not great. TODO: pooling?
-            InventoryResult result = item.SplitStack(invLoc, 1);
+            InventoryLocation invLoc = new(containerId, inventoryProtoRef, slot);
+            InventoryResult result = item.SplitStack(ref invLoc, 1);
 
             if (result == InventoryResult.InventoryFull)
             {
@@ -1291,7 +1287,7 @@ namespace MHServerEmu.Games.Entities
             Region region = avatar.Region;
 
             // Find a position to drop
-            if (region.ChooseRandomPositionNearPoint(avatar.Bounds, PathFlags.Walk, PositionCheckFlags.CanBeBlockedEntity,
+            if (region.ChooseRandomPositionNearPoint(ref avatar.Bounds, PathFlags.Walk, PositionCheckFlags.CanBeBlockedEntity,
                 BlockingCheckFlags.CheckSpawns, 50f, 100f, out Vector3 dropPosition) == false)
             {
                 // Fall back to avatar position if didn't find a free spot
@@ -1539,16 +1535,16 @@ namespace MHServerEmu.Games.Entities
             return true;
         }
 
-        public InventoryResult ValidatePlayerInventoryMoveConstraints(InventoryLocation fromInvLoc, InventoryLocation toInvLoc)
+        public InventoryResult ValidatePlayerInventoryMoveConstraints(ref InventoryLocation fromInvLoc, ref InventoryLocation toInvLoc)
         {
-            InventoryResult result = ValidatePlayerCanMoveDirectlyOutOfInventory(fromInvLoc);
+            InventoryResult result = ValidatePlayerCanMoveDirectlyOutOfInventory(ref fromInvLoc);
             if (result != InventoryResult.Success)
                 return result;
 
             return ValidatePlayerCanMoveDirectlyIntoInventory(toInvLoc);
         }
 
-        public InventoryResult ValidatePlayerCanMoveDirectlyOutOfInventory(InventoryLocation fromInvLoc)
+        public InventoryResult ValidatePlayerCanMoveDirectlyOutOfInventory(ref InventoryLocation fromInvLoc)
         {
             if (fromInvLoc.InventoryConvenienceLabel == InventoryConvenienceLabel.CraftingResults)
             {
@@ -1680,7 +1676,7 @@ namespace MHServerEmu.Games.Entities
         /// </summary>
         private void OnEnterGameInitStashTabOptions()
         {
-            List<PrototypeId> stashInvRefs = ListPool<PrototypeId>.Instance.Get();
+            using var stashInvRefsHandle = ListPool<PrototypeId>.Instance.Get(out List<PrototypeId> stashInvRefs);
             if (GetStashInventoryProtoRefs(stashInvRefs, false, true))
             {
                 foreach (PrototypeId stashRef in stashInvRefs)
@@ -1691,10 +1687,8 @@ namespace MHServerEmu.Games.Entities
             }
             else
             {
-                Logger.Warn("OnEnterGameInitStashTabOptions()(): GetStashInventoryProtoRefs(stashInvRefs, false, true) == false");
+                Logger.Warn("OnEnterGameInitStashTabOptions(): GetStashInventoryProtoRefs(stashInvRefs, false, true) == false");
             }
-
-            ListPool<PrototypeId>.Instance.Return(stashInvRefs);
         }
 
         #endregion
@@ -2984,7 +2978,7 @@ namespace MHServerEmu.Games.Entities
             return GetMapDiscoveryData(region.Id);
         }
 
-        public bool DiscoverEntity(WorldEntity worldEntity, bool updateInterest)
+        public bool DiscoverEntity(WorldEntity worldEntity, bool updateInterest, bool syncWithParty = true)
         {
             MapDiscoveryData mapDiscoveryData = GetMapDiscoveryDataForEntity(worldEntity);
             if (mapDiscoveryData == null) return Logger.WarnReturn(false, "DiscoverEntity(): mapDiscoveryData == null");
@@ -2994,6 +2988,21 @@ namespace MHServerEmu.Games.Entities
 
             if (updateInterest)
                 AOI.ConsiderEntity(worldEntity);
+
+            if (syncWithParty)
+            {
+                Party party = GetParty();
+                if (party != null)
+                {
+                    EntityManager entityManager = Game.EntityManager;
+                    foreach (var kvp in party)
+                    {
+                        Player partyMember = entityManager.GetEntityByDbGuid<Player>(kvp.Key);
+                        if (ShouldSyncMapDiscoveryData(partyMember))
+                            partyMember.DiscoverEntity(worldEntity, true, false);
+                    }
+                }
+            }
 
             return true;
         }
@@ -3018,17 +3027,31 @@ namespace MHServerEmu.Games.Entities
             return mapDiscoveryData != null && mapDiscoveryData.IsEntityDiscovered(worldEntity);
         }
 
-        public bool RevealDiscoveryMap(Vector3 position)
+        public bool DiscoverMapPosition(Vector3 position, bool syncWithParty = true)
         {
-            var region = CurrentAvatar?.Region;
-            if (region == null) return Logger.WarnReturn(false, "UpdateMapDiscovery(): region == null");
+            Region region = CurrentAvatar?.Region;
+            if (region == null)
+                return false;
 
             MapDiscoveryData mapDiscoveryData = GetMapDiscoveryDataForEntity(CurrentAvatar);
-            if (mapDiscoveryData == null) return Logger.WarnReturn(false, "UpdateDiscoveryMap(): mapDiscoveryData == null");
+            if (mapDiscoveryData == null) return Logger.WarnReturn(false, "DiscoverMapPosition(): mapDiscoveryData == null");
 
             bool reveal = mapDiscoveryData.RevealPosition(this, position);
 
-            // TODO party reveal
+            if (syncWithParty)
+            {
+                Party party = GetParty();
+                if (party != null)
+                {
+                    EntityManager entityManager = Game.EntityManager;
+                    foreach (var kvp in party)
+                    {
+                        Player partyMember = entityManager.GetEntityByDbGuid<Player>(kvp.Key);
+                        if (ShouldSyncMapDiscoveryData(partyMember))
+                            partyMember.DiscoverMapPosition(position, false);
+                    }
+                }
+            }
 
             return reveal;
         }
@@ -3338,17 +3361,14 @@ namespace MHServerEmu.Games.Entities
             if (playerB.GetInventoriesForPlayerTrade(out Inventory tradeInvB, out Inventory generalInvB, out Inventory fallbackInvB) == false)
                 return Logger.WarnReturn(false, $"ExchangePlayerTradeInventories(): Failed to get one or more trade inventories for target player [{playerA}]");
 
-            List<Entity> itemsA = ListPool<Entity>.Instance.Get();
-            List<Entity> itemsB = ListPool<Entity>.Instance.Get();
+            using var itemsAHandle = ListPool<Entity>.Instance.Get(out List<Entity> itemsA);
+            using var itemsBHandle = ListPool<Entity>.Instance.Get(out List<Entity> itemsB);
 
             GatherItemsForPlayerTrade(tradeInvA, itemsA);
             GatherItemsForPlayerTrade(tradeInvB, itemsB);
 
             ReceiveItemsFromPlayerTrade(playerA, itemsA, generalInvB, fallbackInvB);
             ReceiveItemsFromPlayerTrade(playerB, itemsB, generalInvA, fallbackInvA);
-
-            ListPool<Entity>.Instance.Return(itemsA);
-            ListPool<Entity>.Instance.Return(itemsB);
 
             return true;
         }
@@ -3950,7 +3970,7 @@ namespace MHServerEmu.Games.Entities
             Party party = GetParty();
             if (party != null && party.Type == GroupType.GroupType_Party && avatars.Count > 0)
             {
-                List<PrototypeId> newFilters = ListPool<PrototypeId>.Instance.Get();
+                using var newFiltersHandle = ListPool<PrototypeId>.Instance.Get(out List<PrototypeId> newFilters);
 
                 foreach (PrototypeId partyFilterProtoRef in DataDirectory.Instance.IteratePrototypesInHierarchy<PartyFilterPrototype>(PrototypeIterateFlags.NoAbstractApprovedOnly))
                 {
@@ -3966,8 +3986,6 @@ namespace MHServerEmu.Games.Entities
                     PartyFilters.Set(newFilters);
                     updateContext = true;
                 }
-
-                ListPool<PrototypeId>.Instance.Return(newFilters);
             }
             else if (PartyFilters.Count > 0)
             {
@@ -4346,8 +4364,8 @@ namespace MHServerEmu.Games.Entities
             CommunityCircle partyCircle = Community?.GetCircle(CircleId.__Party);
             if (partyCircle == null) return Logger.WarnReturn(false, "OnPartyCircleChanged(): partyCircle == null");
 
-            List<AvatarPrototype> avatars = ListPool<AvatarPrototype>.Instance.Get();
-            List<CostumePrototype> costumes = ListPool<CostumePrototype>.Instance.Get();
+            using var avatarsHandle = ListPool<AvatarPrototype>.Instance.Get(out List<AvatarPrototype> avatars);
+            using var costumesHandle = ListPool<CostumePrototype>.Instance.Get(out List<CostumePrototype> costumes);
 
             ulong playerDbId = DatabaseUniqueId;
             int playerIndex = -1;
@@ -4383,9 +4401,6 @@ namespace MHServerEmu.Games.Entities
             }
 
             UpdatePartyFilters(avatars, costumes, playerIndex);
-
-            ListPool<AvatarPrototype>.Instance.Return(avatars);
-            ListPool<CostumePrototype>.Instance.Return(costumes);
 
             return true;
         }
@@ -4487,7 +4502,7 @@ namespace MHServerEmu.Games.Entities
                 avatar.SyncPartyBoostConditions();
             }
 
-            // TODO: sync discovery data
+            SyncMapDiscoveryDataWithParty();
 
             // we should receive a OnPartySizeChanged callback after this
         }
@@ -4538,6 +4553,7 @@ namespace MHServerEmu.Games.Entities
             _partyId.Set(party.PartyId);
             UpdatePartyAOI(party);
             Community.UpdateParty(party);
+            SyncMapDiscoveryDataWithParty();
         }
 
         private void UpdatePartyAOI(Party party)
@@ -4563,6 +4579,50 @@ namespace MHServerEmu.Games.Entities
                 AOI.ConsiderEntity(partyMember);
                 partyMember.AOI.ConsiderEntity(this);
             }
+        }
+
+        private void SyncMapDiscoveryDataWithParty()
+        {
+            Party party = GetParty();
+            if (party == null)
+                return;
+
+            Region region = GetRegion();
+            if (region == null)
+                return;
+
+            MapDiscoveryData mapDiscoveryData = GetMapDiscoveryData(region.Id);
+            if (mapDiscoveryData == null)
+                return;
+
+            using var partyMembersHandle = ListPool<Player>.Instance.Get(out List<Player> partyMembers);
+
+            EntityManager entityManager = Game.EntityManager;
+            foreach (var kvp in party)
+            {
+                Player partyMember = entityManager.GetEntityByDbGuid<Player>(kvp.Key);
+                if (ShouldSyncMapDiscoveryData(partyMember))
+                    partyMembers.Add(partyMember);
+            }
+
+            mapDiscoveryData.Sync(this, partyMembers);
+        }
+
+        private bool ShouldSyncMapDiscoveryData(Player other)
+        {
+            if (other == null || other.Id == Id)
+                return false;
+
+            Region region = GetRegion();
+            Region otherRegion = other.GetRegion();
+
+            if (region == null || otherRegion == null)
+                return false;
+
+            if (region.Id != otherRegion.Id)
+                return false;
+
+            return true;
         }
 
         private bool TeleportToPartyMember(ulong targetPlayerDbId)
@@ -4801,6 +4861,35 @@ namespace MHServerEmu.Games.Entities
 
         #endregion
 
+        #region Autosave
+
+        private void ScheduleAutosave()
+        {
+            if (_autosaveEvent.IsValid)
+                return;
+
+            TimeSpan autoSaveInterval = TimeSpan.FromMinutes(Game.CustomGameOptions.AutosaveIntervalMinutes);
+            if (autoSaveInterval <= TimeSpan.Zero)
+                return;
+
+            ScheduleEntityEvent(_autosaveEvent, autoSaveInterval);
+        }
+
+        private void Autosave()
+        {
+            if (PlayerConnection == null)
+                return;
+
+            if (IsInGame == false)
+                return;
+
+            Logger.Info($"Autosaving {this}...");
+            PlayerConnection.SaveWithNotification();
+            ScheduleAutosave();
+        }
+
+        #endregion
+
         #region Scheduled Events
 
         private class ScheduledHUDTutorialResetEvent : CallMethodEvent<Entity>
@@ -4836,6 +4925,11 @@ namespace MHServerEmu.Games.Entities
         private class TeleportToPartyMemberEvent : CallMethodEventParam1<Entity, ulong>
         {
             protected override CallbackDelegate GetCallback() => (t, p1) => ((Player)t).TeleportToPartyMember(p1);
+        }
+
+        private class AutosaveEvent : CallMethodEvent<Entity>
+        {
+            protected override CallbackDelegate GetCallback() => (t) => ((Player)t).Autosave();
         }
 
         #endregion

@@ -1,6 +1,5 @@
 ﻿using Gazillion;
 using Google.ProtocolBuffers;
-using MHServerEmu.Core.Config;
 using MHServerEmu.Core.Logging;
 using MHServerEmu.Core.Memory;
 using MHServerEmu.Core.Network;
@@ -33,7 +32,7 @@ namespace MHServerEmu.Grouping.Chat
         {
             _groupingManager = groupingManager;
 
-            GroupingManagerConfig config = ConfigManager.Instance.GetConfig<GroupingManagerConfig>();
+            GroupingManagerConfig config = _groupingManager.Config;
             _serverName = config.ServerName;
             _serverPrestigeLevel = config.ServerPrestigeLevel;
 
@@ -192,12 +191,11 @@ namespace MHServerEmu.Grouping.Chat
 
             roomId = chatRoom.Id;
 
-            List<ulong> playerFilter = ListPool<ulong>.Instance.Get();
+            using var playerFilterHandle = ListPool<ulong>.Instance.Get(out List<ulong> playerFilter);
             chatRoom.GetPlayers(playerFilter);
 
             SendMessageFiltered(message, playerFilter);
 
-            ListPool<ulong>.Instance.Return(playerFilter);
             return true;
         }
 

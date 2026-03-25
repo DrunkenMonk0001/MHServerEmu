@@ -35,6 +35,16 @@ namespace MHServerEmu.Core.Network
         Remove,
     }
 
+    public enum AccountOperation
+    {
+        Create,
+        SetPlayerName,
+        SetPassword,
+        SetUserLevel,
+        SetFlag,
+        ClearFlag,
+    }
+
     #endregion
 
     public static class ServiceMessage
@@ -247,6 +257,15 @@ namespace MHServerEmu.Core.Network
         }
 
         /// <summary>
+        /// [Game -> PlayerManager] Notifies the Player Manager that a save happened and player data needs to be written to the database.
+        /// </summary>
+        public readonly struct PlayerDataUpdated(ulong playerDbId)
+            : IGameServiceMessage
+        {
+            public readonly ulong PlayerDbId = playerDbId;
+        }
+
+        /// <summary>
         /// [Game -> PlayerManager] Requests player dbid and properly cased name from the player manager.
         /// </summary>
         public readonly struct PlayerLookupByNameRequest(ulong gameId, ulong playerDbId, ulong remoteJobId, string requestPlayerName)
@@ -344,6 +363,9 @@ namespace MHServerEmu.Core.Network
             public readonly PartyOperationPayload Request = request;
         }
 
+        /// <summary>
+        /// [Game -> PlayerManager] Notifies the Player Manager of a player's current party boosts. 
+        /// </summary>
         public readonly struct PartyBoostUpdate(ulong playerDbId, List<ulong> boosts)
             : IGameServiceMessage
         {
@@ -389,6 +411,18 @@ namespace MHServerEmu.Core.Network
             public readonly ulong MemberDbId = memberDbId;
             public readonly PartyMemberEvent MemberEvent = memberEvent;
             public readonly PartyMemberInfo MemberInfo = memberInfo;
+        }
+
+        /// <summary>
+        /// [PlayerManager -> Game] Notifies a player of a party kick grace period before they are removed from the current region.
+        /// </summary>
+        public readonly struct PartyKickGracePeriod(ulong gameId, ulong playerDbId, ulong expireTimeMicroseconds, GroupLeaveReason leaveReason)
+            : IGameServiceMessage
+        {
+            public readonly ulong GameId = gameId;
+            public readonly ulong PlayerDbId = playerDbId;
+            public readonly ulong ExpireTimeMicroseconds = expireTimeMicroseconds;
+            public readonly GroupLeaveReason LeaveReason = leaveReason;
         }
 
         /// <summary>
@@ -764,6 +798,36 @@ namespace MHServerEmu.Core.Network
         {
             public readonly ulong RequestId = requestId;
             public readonly bool Result = result;
+        }
+
+        #endregion
+
+        #region Account
+
+        /// <summary>
+        /// [WebFrontend -> PlayerManager] Routes an account operation request to the Player Manager service.
+        /// </summary>
+        public readonly struct AccountOperationRequest(ulong requestId, AccountOperation operation, string email,
+            string playerName, string password, byte userLevel, int flags)
+            : IGameServiceMessage
+        {
+            public readonly ulong RequestId = requestId;
+            public readonly AccountOperation Operation = operation;
+            public readonly string Email = email;
+            public readonly string PlayerName = playerName;
+            public readonly string Password = password;
+            public readonly byte UserLevel = userLevel;
+            public readonly int Flags = flags;
+        }
+
+        /// <summary>
+        /// [PlayerManager -> WebFrontend] Routes a response to an account operation request back to the Web Frontend.
+        /// </summary>
+        public readonly struct AccountOperationResponse(ulong requestId, int resultCode)
+            : IGameServiceMessage
+        {
+            public readonly ulong RequestId = requestId;
+            public readonly int ResultCode = resultCode;
         }
 
         #endregion

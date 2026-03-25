@@ -1,6 +1,7 @@
 ﻿using System.Text;
 using Gazillion;
 using Google.ProtocolBuffers;
+using MHServerEmu.Core.Collections;
 using MHServerEmu.Core.Collisions;
 using MHServerEmu.Core.Extensions;
 using MHServerEmu.Core.Helpers;
@@ -270,7 +271,7 @@ namespace MHServerEmu.Games.Network
             Region = newRegion;
             _lastUpdatePosition = null;
 
-            List<ulong> removedEntities = ListPool<ulong>.Instance.Get();
+            using var removedEntitiesHandle = ListPool<ulong>.Instance.Get(out List<ulong> removedEntities);
             RemoveEntitiesOnRegionChange(removedEntities, clearingAllInterest);
 
             // Fill in required region change message fields
@@ -302,7 +303,6 @@ namespace MHServerEmu.Games.Network
             }
 
             SendMessage(regionChangeBuilder.Build());
-            ListPool<ulong>.Instance.Return(removedEntities);
 
             // TODO?: Prefetch other regions
 
@@ -443,7 +443,7 @@ namespace MHServerEmu.Games.Network
             Region region = Region;
 
             RegionManager manager = _game.RegionManager;
-            Stack<Cell> invisibleCells = new();
+            using var invisibleCellsHandle = StackPool<Cell>.Instance.Get(out PoolableStack<Cell> invisibleCells);
             bool regenNavi = false;
 
             // search invisible cells
@@ -522,7 +522,7 @@ namespace MHServerEmu.Games.Network
             Region region = Region;
 
             // Update proximity
-            foreach (var worldEntity in region.IterateEntitiesInVolume(_entitiesVolume, new()))
+            foreach (var worldEntity in region.IterateEntitiesInVolume(_entitiesVolume, new(_playerConnection.PlayerDbId)))
             {
                 AOINetworkPolicyValues newInterestPolicies = GetNewInterestPolicies(worldEntity);
                 bool wasInterested = _trackedEntities.TryGetValue(worldEntity.Id, out EntityInterestStatus interestStatus);

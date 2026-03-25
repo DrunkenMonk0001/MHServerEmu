@@ -7,7 +7,6 @@ using MHServerEmu.DatabaseAccess;
 using MHServerEmu.DatabaseAccess.Models;
 using MHServerEmu.Games.GameData;
 using MHServerEmu.Games.GameData.Prototypes;
-using MHServerEmu.Games.Regions;
 using MHServerEmu.PlayerManagement.Auth;
 using MHServerEmu.PlayerManagement.Games;
 using MHServerEmu.PlayerManagement.Matchmaking;
@@ -33,12 +32,14 @@ namespace MHServerEmu.PlayerManagement.Players
         private const ushort MuxChannel = 1;
 
         private static readonly Logger Logger = LogManager.CreateLogger();
+        private static readonly TimeSpan RegionGracePeriodDuration = TimeSpan.FromMinutes(3);
 
         private static ulong _nextHandleId = 1;     // this is needed primarily for debugging, can potentially be removed later
         private static ulong _nextTransferId = 1;
 
         private readonly HashSet<PrototypeGuid> _partyBoosts = new();
         private readonly RegionRequestQueueCommandHandler _regionRequestQueueCommandHandler;
+        private readonly Action<ulong> _gracePeriodRegionExpiredCallback;
 
         private bool _saveNeeded = false;   // Dirty flag for player data
 
@@ -63,6 +64,7 @@ namespace MHServerEmu.PlayerManagement.Players
 
         public RegionHandle TargetRegion { get; private set; }      // The region this player needs to be in
         public RegionHandle ActualRegion { get; private set; }      // The region this player is actually in
+        public RegionHandle GracePeriodRegion { get; private set; } // The region this player is temporarily allowed to stay in after leaving a party
         public bool HasVisitedTown { get; private set; }            // This is used to disable party for players who haven't finished the tutorial.
 
         public PrototypeId DifficultyTierPreference { get; private set; }
@@ -92,6 +94,7 @@ namespace MHServerEmu.PlayerManagement.Players
             DifficultyTierPreference = GameDatabase.GlobalsPrototype.DifficultyTierDefault;
 
             _regionRequestQueueCommandHandler = new(this);
+            _gracePeriodRegionExpiredCallback = OnGracePeriodRegionExpired;
         }
 
         public override string ToString()
@@ -107,22 +110,26 @@ namespace MHServerEmu.PlayerManagement.Players
             if (State != PlayerHandleState.InGame && State != PlayerHandleState.Idle)
                 return Logger.WarnReturn(false, $"MigrateSession(): Unable to migrate handle [{this}] while in state {State}");
 
-            Logger.Info($"Migrating handle [{this}] to session [{newClient.Session}]");
+            DBAccount account = (DBAccount)Client.Session.Account;
+            if (account.MigrationData.IsInErrorState)
+                return false;
+
+            ClientSession newSession = (ClientSession)newClient.Session;
+
+            Logger.Info($"Migrating handle [{this}] to session [{newSession}]");
 
             RemoveFromCurrentGame();
             Client.Disconnect();
+            SetActualRegion(null);  // this fixes the edge case where duplicate login happens while in a hub region
 
-            ClientSession oldSession = (ClientSession)Client.Session;
-            ClientSession newSession = (ClientSession)newClient.Session;
-            newSession.Account = oldSession.Account;
+            newSession.Account = account;
 
             _transferParams = null;
 
             // Reset migration data to prevent abuse.
             // At this stage the player is still in a game and will try to update MigrationDate on exit. We set the SkipNextUpdate flag here to avoid this.
-            MigrationData migrationData = ((DBAccount)newSession.Account).MigrationData;
-            migrationData.Reset();
-            migrationData.SkipNextUpdate = true;
+            account.MigrationData.Reset();
+            account.MigrationData.SkipNextUpdate = true;
 
             Client = newClient;
 
@@ -158,18 +165,16 @@ namespace MHServerEmu.PlayerManagement.Players
             Client.SendMessage(MuxChannel, message);
         }
 
-        // NOTE: We are locking on the account instance to prevent account data from being modified while
-        // it is being written to the database. This could potentially cause deadlocks if not used correctly.
-
         public bool LoadPlayerData()
         {
             DBAccount account = Account;
 
-            lock (account)
-            {
-                if (AccountManager.LoadPlayerDataForAccount(account) == false)
-                    return Logger.WarnReturn(false, $"LoadPlayerData(): Failed to load player data for account [{account}] from the database");
-            }
+            using var lockScope = account.Lock();
+            if (lockScope.LockTaken == false)
+                return Logger.ErrorReturn(false, $"LoadPlayerData(): Timed out acquiring lock for [{account}]");
+
+            if (AccountManager.LoadPlayerDataForAccount(account) == false)
+                return Logger.WarnReturn(false, $"LoadPlayerData(): Failed to load player data for account [{account}] from the database");
 
             Logger.Info($"Loaded player data for account [{account}] from the database");
 
@@ -191,14 +196,19 @@ namespace MHServerEmu.PlayerManagement.Players
 
             DBAccount account = Account;
 
-            lock (account)
-            {
-                if (IsConnected == false)
-                    account.Player.LastLogoutTime = (long)Clock.UnixTime.TotalMilliseconds;
+            // Do not save accounts in error state to avoid data corruption
+            if (account.MigrationData.IsInErrorState)
+                return true;
 
-                if (IDBManager.Instance.SavePlayerData(account) == false)
-                    return Logger.WarnReturn(false, $"SavePlayerData(): Failed to save player data for account [{account}] to the database");
-            }
+            using var lockScope = account.Lock();
+            if (lockScope.LockTaken == false)
+                return Logger.ErrorReturn(false, $"SavePlayerData(): Timed out acquiring lock for [{account}]");
+
+            if (IsConnected == false)
+                account.Player.LastLogoutTime = (long)Clock.UnixTime.TotalMilliseconds;
+
+            if (IDBManager.Instance.SavePlayerData(account) == false)
+                return Logger.WarnReturn(false, $"SavePlayerData(): Failed to save player data for account [{account}] to the database");
 
             Logger.Info($"Saved player data for account [{account}] to the database");
 
@@ -689,7 +699,7 @@ namespace MHServerEmu.PlayerManagement.Players
             SyncWorldView();
 
             // Do not remove from the current region we have it in any accessible WorldView or it's a match
-            if (TargetRegion == null || TargetRegion.IsMatch || HasRegionInAnyWorldView(TargetRegion.Id))
+            if (TargetRegion == null || TargetRegion.IsMatch || HasRegionInAnyWorldView(TargetRegion.Id) || TargetRegion == GracePeriodRegion)
                 return;
 
             // Return to start target if this region is no longer available.
@@ -723,6 +733,47 @@ namespace MHServerEmu.PlayerManagement.Players
                 return CurrentParty.WorldView;
 
             return WorldView;
+        }
+
+        public void SetGracePeriodRegion(RegionHandle region, GroupLeaveReason leaveReason)
+        {
+            if (region == null)
+            {
+                Logger.Warn("SetGracePeriodRegion(): region == null");
+                return;
+            }
+
+            GracePeriodRegion = region;
+
+            // Schedule grace period expiration
+            var eventScheduler = PlayerManagerService.Instance.EventScheduler.GracePeriodRegionExpired;
+            eventScheduler.ScheduleEvent(PlayerDbId, RegionGracePeriodDuration, _gracePeriodRegionExpiredCallback, region.Id);
+            
+            // Notify the player
+            if (CurrentGame != null)
+            {
+                ulong gameExpireTimeMicroseconds = (ulong)(Clock.GameTime + RegionGracePeriodDuration).TotalMicroseconds;
+                ServiceMessage.PartyKickGracePeriod message = new(CurrentGame.Id, PlayerDbId, gameExpireTimeMicroseconds, leaveReason);
+                ServerManager.Instance.SendMessageToService(GameServiceType.GameInstance, message);
+            }
+        }
+
+        public void OnGracePeriodRegionExpired(ulong regionId)
+        {
+            if (GracePeriodRegion != null)
+            {
+                if (GracePeriodRegion.Id != regionId)
+                    Logger.Warn("OnGracePeriodRegionExpired(): GracePeriodRegion.Id != regionId");
+
+                GracePeriodRegion = null;
+            }
+            else
+            {
+                Logger.Warn("OnRegionGracePeriodExpired(): GracePeriodRegion == null");
+            }
+
+            // This will kick us out of the grace period region if we are currently in it and there is no other reason to be allowed to stay in it.
+            CheckWorldViewRegionAvailability();
         }
 
         public void SetDifficultyTierPreference(PrototypeId difficultyTierProtoRef)
