@@ -19,7 +19,7 @@ namespace MHServerEmu.DatabaseAccess.MySQL
     /// </summary>
     public class MySQLDBManager : IDBManager
     {
-        private const int CurrentSchemaVersion = 5;         // Increment this when making changes to the database schema (updated to match SQLite)
+        private const int CurrentSchemaVersion = 6;         // Increment this when making changes to the database schema (updated to match SQLite)
         private const int NumTestAccounts = 5;              // Number of test accounts to create for new databases
         private const int NumPlayerDataWriteAttempts = 3;   // Number of write attempts to do when saving player data
         public bool isSchemaExist;
