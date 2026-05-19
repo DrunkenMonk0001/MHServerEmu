@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS Player (
     StartTarget BIGINT,
     StartTargetRegionOverride BIGINT,
     AOIVolume INT,
+    GazillioniteBalance BIGINT,
     LastLogoutTime BIGINT,
     FOREIGN KEY (DbGuid) REFERENCES Account(Id) ON DELETE CASCADE
 );
