@@ -461,7 +461,7 @@ namespace MHServerEmu.Core.Network
         /// <summary>
         /// [Game -> PlayerManager] Relays a match region request command from a client.
         /// </summary>
-        public readonly struct MatchRegionRequestQueueCommand(ulong playerDbId, ulong regionProtoId, ulong difficultyTierProtoId, ulong metaStateProtoId, RegionRequestQueueCommandVar command, ulong regionRequestGroupId, ulong targetPlayerDbId)
+        public readonly struct MatchRegionRequestQueueCommand(ulong playerDbId, ulong regionProtoId, ulong difficultyTierProtoId, ulong metaStateProtoId, RegionRequestQueueCommandVar command, ulong regionRequestGroupId, ulong targetPlayerDbId, int teamSizeOverride)
             : IGameServiceMessage
         {
             public readonly ulong PlayerDbId = playerDbId;
@@ -471,6 +471,7 @@ namespace MHServerEmu.Core.Network
             public readonly RegionRequestQueueCommandVar Command = command;
             public readonly ulong RegionRequestGroupId = regionRequestGroupId;
             public readonly ulong TargetPlayerDbId = targetPlayerDbId;
+            public readonly int TeamSizeOverride = teamSizeOverride;
         }
 
         // MatchQueueUpdate is based on PlayerMgrToGameServer.proto from 1.53
@@ -504,6 +505,28 @@ namespace MHServerEmu.Core.Network
         {
             public readonly ulong GameId = gameId;
             public readonly ulong PlayerDbId = playerDbId;
+        }
+
+        /// <summary>
+        /// [LiveTuningManager -> Game] Notifies game instances of changed live tuning settings.
+        /// </summary>
+        /// <remarks>
+        /// In the original Gazillion implementation this was sent from the Player Manager, but in our case it is sent from LiveTuningManager
+        /// when live tuning is reloaded from disk.
+        /// </remarks>
+        public readonly struct SetLiveTuningValues(List<NetStructLiveTuningSettingProtoEnumValue> settings)
+            : IGameServiceMessage
+        {
+            public readonly List<NetStructLiveTuningSettingProtoEnumValue> Settings = settings;
+        }
+
+        /// <summary>
+        /// [LiveTuningManager -> GroupingManager] Updates the notification message informing players of the currently active events.
+        /// </summary>
+        public readonly struct SetLiveTuningEventMessage(string messageText)
+            : IGameServiceMessage
+        {
+            public readonly string MessageText = messageText;
         }
 
         #endregion
@@ -828,6 +851,12 @@ namespace MHServerEmu.Core.Network
         {
             public readonly ulong RequestId = requestId;
             public readonly int ResultCode = resultCode;
+        }
+
+        public readonly struct SetWhitelistEnabled(bool enable)
+            : IGameServiceMessage
+        {
+            public readonly bool Enable = enable;
         }
 
         #endregion

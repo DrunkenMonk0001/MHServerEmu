@@ -3,6 +3,7 @@ using MHServerEmu.Commands.Attributes;
 using MHServerEmu.Core.Logging;
 using MHServerEmu.Core.Network;
 using MHServerEmu.DatabaseAccess.Models;
+using MHServerEmu.DatabaseAccess.SQLite;
 using MHServerEmu.Games.GameData.LiveTuning;
 using MHServerEmu.Games.MTXStore;
 using MHServerEmu.PlayerManagement.Players;
@@ -58,7 +59,7 @@ namespace MHServerEmu.Commands.Implementations
         [CommandInvokerType(CommandInvokerType.ServerConsole)]
         public string ReloadLiveTuning(string[] @params, NetClient client)
         {
-            LiveTuningManager.Instance.LoadLiveTuningDataFromDisk();
+            LiveTuningManager.Instance.LoadLiveTuningData(true);
             return string.Empty;
         }
 
@@ -105,6 +106,29 @@ namespace MHServerEmu.Commands.Implementations
             return string.Empty;
         }
 
+        [Command("whitelist")]
+        [CommandDescription("Enables or disables account whitelist for logins.")]
+        [CommandParamCount(1)]
+        [CommandUserLevel(AccountUserLevel.Admin)]
+        [CommandInvokerType(CommandInvokerType.ServerConsole)]
+        public string Whitelist(string[] @params, NetClient client)
+        {
+            bool enable;
+
+            if (bool.TryParse(@params[0], out enable) == false)
+            {
+                if (int.TryParse(@params[0], out int value) == false)
+                    return "Invalid parameter. Please use boolean or integer values.";
+
+                enable = value != 0;
+            }
+
+            ServiceMessage.SetWhitelistEnabled message = new(enable);
+            ServerManager.Instance.SendMessageToService(GameServiceType.PlayerManager, message);
+
+            return $"Sent a request to {(enable ? "enable" : "disable")} whitelist.";
+        }
+
         [Command("shutdown")]
         [CommandDescription("Shuts the server down.")]
         [CommandUsage("server shutdown")]
@@ -118,6 +142,34 @@ namespace MHServerEmu.Commands.Implementations
             // Otherwise, the game thread is going to break, and we are not going to be able to clean up.
             Task.Run(() => ServerApp.Instance.Shutdown());
             return string.Empty;
+        }
+
+        [Command("importdb")]
+        [CommandDescription("Imports data from the specified SQLite database file.")]
+        [CommandParamCount(2)]
+        [CommandUserLevel(AccountUserLevel.Admin)]
+        [CommandInvokerType(CommandInvokerType.ServerConsole)]
+        public string ImportDB(string[] @params, NetClient client)
+        {
+            try
+            {
+                string fileName = @params[0];
+                string emailSuffix = @params[1];
+
+                SQLiteImporter importer = new(fileName, emailSuffix);
+                SQLiteImportResult result = importer.Import();
+
+                // force shutdown to make sure guilds are reloaded
+                if (result == SQLiteImportResult.Success)
+                    Shutdown(@params, null);
+                
+                return string.Empty;
+            }
+            catch (Exception e)
+            {
+                Logger.Error(e.ToString());
+                return e.Message;
+            }
         }
     }
 }

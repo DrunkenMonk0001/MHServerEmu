@@ -137,6 +137,10 @@ namespace MHServerEmu.PlayerManagement.Network
                     OnAccountOperationRequest(accountOperationRequest);
                     break;
 
+                case ServiceMessage.SetWhitelistEnabled setWhitelistEnabled:
+                    OnSetWhitelistEnabled(setWhitelistEnabled);
+                    break;
+
                 default:
                     Logger.Warn($"ReceiveServiceMessage(): Unhandled service message type {message.GetType().Name}");
                     break;
@@ -425,9 +429,10 @@ namespace MHServerEmu.PlayerManagement.Network
             RegionRequestQueueCommandVar command = matchRegionRequestQueueCommand.Command;
             ulong regionRequestGroupId = matchRegionRequestQueueCommand.RegionRequestGroupId;
             ulong targetPlayerDbId = matchRegionRequestQueueCommand.TargetPlayerDbId;
+            int teamSizeOverride = matchRegionRequestQueueCommand.TeamSizeOverride;
 
             PlayerHandle player = _playerManager.ClientManager.GetPlayer(playerDbId);
-            player?.ReceiveRegionRequestQueueCommand(regionRef, difficultyTierRef, metaStateRef, command, regionRequestGroupId, targetPlayerDbId);
+            player?.ReceiveRegionRequestQueueCommand(regionRef, difficultyTierRef, metaStateRef, command, regionRequestGroupId, targetPlayerDbId, teamSizeOverride);
             return true;
         }
 
@@ -623,6 +628,13 @@ namespace MHServerEmu.PlayerManagement.Network
 
             ServiceMessage.AccountOperationResponse response = new(requestId, resultCode);
             ServerManager.Instance.SendMessageToService(GameServiceType.WebFrontend, response);
+
+            return true;
+        }
+
+        private bool OnSetWhitelistEnabled(in ServiceMessage.SetWhitelistEnabled setWhitelistEnabled)
+        {
+            _playerManager.SessionManager.SetWhitelistEnabled(setWhitelistEnabled.Enable);
 
             return true;
         }

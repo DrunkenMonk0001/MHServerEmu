@@ -235,6 +235,16 @@ namespace MHServerEmu.Games.Network
             if (PlayerVersioning.Apply(Player) == false)
                 return false;
 
+            // Clear friend/ignore lists for imported accounts
+            DBPlayerFlags playerFlags = (DBPlayerFlags)_dbAccount.Player.Flags;
+            if (playerFlags.HasFlag(DBPlayerFlags.Imported))
+            {
+                Player.Community.ClearCircle(CircleId.__Friends);
+                Player.Community.ClearCircle(CircleId.__Ignore);
+                Logger.Info($"Cleaned up community for imported player [{Player}]");
+                _dbAccount.Player.Flags &= (long)~DBPlayerFlags.Imported;
+            }
+
             Player.SetAvatarLibraryProperties();
             Player.SetTeamUpLibraryProperties();
 
@@ -470,10 +480,13 @@ namespace MHServerEmu.Games.Network
 
             AOI.SetRegion(region.Id, false, startPosition, startOrientation);
             region.PlayerEnteredRegionEvent.Invoke(new(Player, region.PrototypeDataRef));
-            Game.PartyManager.OnPlayerEnteredRegion(Player);
 
             // Load discovered map and entities
             Player.GetMapDiscoveryData(region.Id)?.LoadPlayerDiscovered(Player);
+
+            // PartyManager.OnPlayerEnteredRegion() will exchange discovery data with party members,
+            // so it needs to be done after we validate and clean up loaded data in LoadPlayerDiscovered().
+            Game.PartyManager.OnPlayerEnteredRegion(Player);
 
             Player.SendFullscreenMovieSync();
 
@@ -849,20 +862,11 @@ namespace MHServerEmu.Games.Network
 
         private bool OnAdminCommand(in MailboxMessage message)
         {
-            if (_dbAccount.UserLevel < AccountUserLevel.Admin)
-            {
-                // Naughty hacker here, TODO: handle this properly
-                Logger.Warn($"OnAdminCommand(): Unauthorized admin command received from {_dbAccount}");
-                AdminCommandManager.SendAdminCommandResponse(this,
-                    $"{_dbAccount.PlayerName} is not in the sudoers file. This incident will be reported.");
-                return true;
-            }
+            var adminCommand = message.As<NetMessageAdminCommand>();
+            if (adminCommand == null) return Logger.WarnReturn(false, $"OnAdminCommand(): Failed to retrieve message");
 
-            // Basic handling
-            var command = message.As<NetMessageAdminCommand>();
-            string output = $"Unhandled admin command: {command.Command.Split(' ')[0]}";
-            Logger.Warn(output);
-            AdminCommandManager.SendAdminCommandResponse(this, output);
+            Game.AdminCommandManager.OnAdminCommand(Player, adminCommand);
+
             return true;
         }
 
