@@ -289,10 +289,13 @@ namespace MHServerEmu.DatabaseAccess.MySQL
             for (int i = 0; i < NumPlayerDataWriteAttempts; i++)
             {
                 if (DoSavePlayerData(account))
-                    return Logger.InfoReturn(true, $"updated player data for account [{account}]");
+                    return true;
+
+                // Maybe we should add a delay here
             }
 
-            return Logger.WarnReturn(false, $"SavePlayerData(): Failed to write player data for account [{account}]");
+            Verify.IsTrue(false, $"Failed to write player data for account [{account}]");
+            return false;
         }
 
         /// Creates and opens a new <see cref="MySQLConnection"/>.
@@ -314,8 +317,8 @@ namespace MHServerEmu.DatabaseAccess.MySQL
         {
             string MySqlInitializationScript = MySqlScripts.GetInitializationScript();
             var config = ConfigManager.Instance.GetConfig<MySqlDBManagerConfig>();
-            if (MySqlInitializationScript == string.Empty)
-                return Logger.ErrorReturn(false, "InitializeDatabaseFile(): Failed to get database initialization script");
+            if (!Verify.IsTrue(string.IsNullOrWhiteSpace(MySqlInitializationScript) == false, LoggingLevel.Error, "Failed to get database initialization script"))
+                return false;
 
             var connectionStringVars = string.Join(";", "server=" + config.MySqlIP, "port=" + config.MySqlPort, "Uid=" + config.MySqlUsername, "Pwd=" + config.MySqlPw, "SslMode=Required;AllowPublicKeyRetrieval=True;");
             string connectionString = new MySqlConnectionStringBuilder(connectionStringVars).ToString();
@@ -394,51 +397,49 @@ namespace MHServerEmu.DatabaseAccess.MySQL
             }
                 
                 int schemaVersion = GetSchemaVersion(connection);
-                if (schemaVersion > CurrentSchemaVersion)
-                    return Logger.ErrorReturn(false, $"Initialize(): Existing database uses unsupported schema version {schemaVersion} (current = {CurrentSchemaVersion})");
+            Logger.Info($"Found existing database file with schema version {schemaVersion} (current = {CurrentSchemaVersion})");
 
-                Logger.Info($"Found existing database with schema version {schemaVersion} (current = {CurrentSchemaVersion})");
+            if (schemaVersion == CurrentSchemaVersion)
+                return true;
 
-                if (schemaVersion == CurrentSchemaVersion)
-                    return true;
-
-                // Create a backup to fall back to if something goes wrong
+            // Create a backup to fall back to if something goes wrong
 
 
-                bool success = true;
+            bool success = true;
 
-                while (schemaVersion < CurrentSchemaVersion)
+            while (schemaVersion < CurrentSchemaVersion)
+            {
+                Logger.Info($"Migrating version {schemaVersion} => {schemaVersion + 1}...");
+
+                string migrationScript = SQLiteScripts.GetMigrationScript(schemaVersion);
+                if (!Verify.IsTrue(string.IsNullOrWhiteSpace(migrationScript) == false, LoggingLevel.Error,
+                    $"Failed to get database migration script for version {schemaVersion}"))
                 {
-                    Logger.Info($"Migrating version {schemaVersion} => {schemaVersion + 1}...");
-
-                    string migrationScript = MySqlScripts.GetMigrationScript(schemaVersion);
-                    if (migrationScript == string.Empty)
-                    {
-                        Logger.Error($"MigrateDatabaseFileToCurrentSchema(): Failed to get database migration script for version {schemaVersion}");
-                        success = false;
-                        break;
-                    }
-
-                    connection.Execute(migrationScript);
-                    SetSchemaVersion(connection, ++schemaVersion);
+                    success = false;
+                    break;
                 }
 
-                success &= GetSchemaVersion(connection) == CurrentSchemaVersion;
+                connection.Execute(migrationScript);
+                SetSchemaVersion(connection, ++schemaVersion);
+            }
 
-                if (success == false)
-                {
-                    // Restore backup
+            success &= GetSchemaVersion(connection) == CurrentSchemaVersion;
 
-                    return Logger.ErrorReturn(false, "MigrateDatabaseFileToCurrentSchema(): Migration failed, backup restored");
-                }
-                else
-                {
-                    // Clean up backup
+            if (success == false)
+            {
+                // Restore backup
+               // File.Delete(_dbFilePath);
+               //File.Move(backupDbPath, _dbFilePath);
+                Logger.Error("MigrateDatabaseFileToCurrentSchema(): Migration failed");
+                return false;
+            }
+            else
+            {
+                // Clean up backup
+               // File.Delete(backupDbPath);
+            }
 
-                }
-
-                Logger.Info($"Successfully migrated to schema version {CurrentSchemaVersion}");
-            
+            Logger.Info($"Successfully migrated to schema version {CurrentSchemaVersion}");
             return true;
         }
 
@@ -450,7 +451,7 @@ namespace MHServerEmu.DatabaseAccess.MySQL
             if (queryResult.Any())
                 return queryResult.Last();
 
-            return Logger.WarnReturn(-1, "GetSchemaVersion(): Failed to query schema_version from the DB");
+            return 0;
         }
 
 

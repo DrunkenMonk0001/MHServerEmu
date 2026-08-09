@@ -1,7 +1,6 @@
 ﻿using Dapper;
 using MHServerEmu.Core.Memory;
 using MHServerEmu.DatabaseAccess.Models;
-using MHServerEmu.Core.Logging;
 using MySqlConnector;
 
 namespace MHServerEmu.DatabaseAccess.MySQL
@@ -27,9 +26,9 @@ namespace MHServerEmu.DatabaseAccess.MySQL
 
             _selectAllQuery = @$"SELECT * FROM {category} WHERE ContainerDbGuid = @ContainerDbGuid";
             _selectIdsQuery = @$"SELECT DbGuid FROM {category} WHERE ContainerDbGuid = @ContainerDbGuid";
-            _deleteQuery    = @$"DELETE FROM {category} WHERE DbGuid IN @EntitiesToDelete";
-            _insertQuery    = @$"INSERT IGNORE INTO {category} (DbGuid) VALUES (@DbGuid)";
-            _updateQuery    = @$"UPDATE {category} SET ContainerDbGuid=@ContainerDbGuid, InventoryProtoGuid=@InventoryProtoGuid,
+            _deleteQuery = @$"DELETE FROM {category} WHERE DbGuid IN @EntitiesToDelete";
+            _insertQuery = @$"INSERT OR IGNORE INTO {category} (DbGuid) VALUES (@DbGuid)";
+            _updateQuery = @$"UPDATE {category} SET ContainerDbGuid=@ContainerDbGuid, InventoryProtoGuid=@InventoryProtoGuid,
                                  Slot=@Slot, EntityProtoGuid=@EntityProtoGuid, ArchiveData=@ArchiveData WHERE DbGuid=@DbGuid";
         }
 
@@ -59,7 +58,7 @@ namespace MHServerEmu.DatabaseAccess.MySQL
         public void LoadEntities(MySqlConnection connection, long containerDbGuid, DBEntityCollection dbEntityCollection)
         {
             IEnumerable<DBEntity> entities = connection.Query<DBEntity>(_selectAllQuery, new { ContainerDbGuid = containerDbGuid });
-            dbEntityCollection.AddRange(entities);          
+            dbEntityCollection.AddRange(entities);
         }
 
         /// <summary>
@@ -67,41 +66,28 @@ namespace MHServerEmu.DatabaseAccess.MySQL
         /// </summary>
         public void UpdateEntities(MySqlConnection connection, MySqlTransaction transaction, long containerDbGuid, DBEntityCollection dbEntityCollection)
         {
-            List<long> entitiesToDelete = ListPool<long>.Instance.Get();
-            GetEntitiesToDelete(connection, containerDbGuid, dbEntityCollection, entitiesToDelete, transaction);
+            // Delete items that no longer belong to this account
+            using var entitiesToDeleteHandle = ListPool<long>.Get(out List<long> entitiesToDelete);
+            GetEntitiesToDelete(connection, containerDbGuid, dbEntityCollection, entitiesToDelete);
 
-            try
-            {
-                if (entitiesToDelete.Count > 0)
-                {
-                    var sql = $"DELETE FROM {Category} WHERE DbGuid IN ({string.Join(",", entitiesToDelete.Select((_, i) => "@id" + i))})";
-                    var parameters = new Dapper.DynamicParameters();
-                    for (int i = 0; i < entitiesToDelete.Count; i++)
-                        parameters.Add($"id{i}", entitiesToDelete[i]);
-                    connection.Execute(sql, parameters, transaction);
-                }
-            }
-            finally
-            {
-                ListPool<long>.Instance.Return(entitiesToDelete);
-            }
+            if (entitiesToDelete.Count > 0)
+                connection.Execute(_deleteQuery, new { EntitiesToDelete = entitiesToDelete });
 
-            var dirtyEntries = dbEntityCollection.GetEntriesForContainer(containerDbGuid).Where(e => e.IsDirty).ToList();
-            if (dirtyEntries.Count > 0)
+            // Insert and update
+            IReadOnlyList<DBEntity> entries = dbEntityCollection.GetEntriesForContainer(containerDbGuid);
+            if (entries.Count > 0)
             {
-                connection.Execute($"INSERT IGNORE INTO {Category} (DbGuid) VALUES (@DbGuid)", dirtyEntries, transaction);
-                connection.Execute($"UPDATE {Category} SET ContainerDbGuid=@ContainerDbGuid, InventoryProtoGuid=@InventoryProtoGuid, Slot=@Slot, EntityProtoGuid=@EntityProtoGuid, ArchiveData=@ArchiveData WHERE DbGuid=@DbGuid", dirtyEntries, transaction);
-                foreach (var entity in dirtyEntries)
-                    entity.IsDirty = false;
+                connection.Execute(_insertQuery, entries, transaction);
+                connection.Execute(_updateQuery, entries, transaction);
             }
         }
 
         /// <summary>
         /// Queries ids of entities that no longer belong to the specified container and adds them to the provided <see cref="List{T}"/>.
         /// </summary>
-        private void GetEntitiesToDelete(MySqlConnection connection, long containerDbGuid, DBEntityCollection dbEntityCollection, List<long> entitiesToDelete, MySqlTransaction transaction)
+        private void GetEntitiesToDelete(MySqlConnection connection, long containerDbGuid, DBEntityCollection dbEntityCollection, List<long> entitiesToDelete)
         {
-            IEnumerable<long> storedDbGuids = connection.Query<long>(_selectIdsQuery, new { ContainerDbGuid = containerDbGuid }, transaction);
+            IEnumerable<long> storedDbGuids = connection.Query<long>(_selectIdsQuery, new { ContainerDbGuid = containerDbGuid });
             if (storedDbGuids is IReadOnlyList<long> list)
             {
                 // Access elements by index in indexable collections to avoid allocating IEnumerator instances.

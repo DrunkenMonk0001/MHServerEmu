@@ -46,9 +46,8 @@ namespace MHServerEmu.DatabaseAccess.MySQL
 
             string MySqlInitializationScript = MySqlScripts.GetLeaderboardsScript();
             var config = ConfigManager.Instance.GetConfig<MySqlDBManagerConfig>();
-            if (MySqlInitializationScript == string.Empty)
-                return Logger.ErrorReturn(false, "InitializeDatabaseFile(): Failed to get database initialization script");
-
+            if (!Verify.IsTrue(string.IsNullOrWhiteSpace(MySqlInitializationScript) == false, LoggingLevel.Error, "Failed to get database initialization script"))
+                return false;
             var connectionStringVars = string.Join(";", "server=" + config.MySqlIP, "port=" + config.MySqlPort, "Uid=" + config.MySqlUsername, "Pwd=" + config.MySqlPw, "SslMode=Required;AllowPublicKeyRetrieval=True;");
             string connectionString = new MySqlConnectionStringBuilder(connectionStringVars).ToString();
             MySqlConnection connectionInit = new(connectionString);
